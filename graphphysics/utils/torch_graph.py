@@ -7,6 +7,7 @@ import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
 
+device = "cuda" if torch.cuda.is_available() else "cpu"
 
 def compute_k_hop_edge_index(
     edge_index: torch.Tensor,
@@ -26,7 +27,7 @@ def compute_k_hop_edge_index(
     # Build the sparse adjacency matrix
     adj = torch.sparse_coo_tensor(
         edge_index,
-        values=torch.ones(edge_index.size(1), dtype=torch.float32),
+        values=torch.ones(edge_index.size(1), dtype=torch.float32, device=device),
         size=(num_nodes, num_nodes),
     ).coalesce()
 
@@ -75,7 +76,7 @@ def compute_k_hop_graph(
     num_nodes = graph.num_nodes
 
     khop_edge_index = compute_k_hop_edge_index(
-        edge_index=edge_index, num_hops=num_hops, num_nodes=num_nodes
+        edge_index=edge_index, num_hops=num_hops, num_nodes=num_nodes,
     ).to(device)
 
     # Build k-hop graph
