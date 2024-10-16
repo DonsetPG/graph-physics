@@ -22,6 +22,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
     "graphphysics.utils.scheduler.CosineWarmupScheduler"
 ) as MockCosineWarmupScheduler:
 
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+
     class MockDataset(Dataset):
         def __len__(self):
             return 10
@@ -108,12 +110,12 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
         def test_forward(self):
             batch = next(iter(self.dataloader))
-            output = self.model.forward(batch)
+            output = self.model.forward(batch.to(device))
             self.assertIsNotNone(output)
 
         def test_training_step(self):
             batch = next(iter(self.dataloader))
-            loss = self.model.training_step(batch)
+            loss = self.model.training_step(batch.to(device))
             self.assertIsNotNone(loss)
             self.assertTrue(isinstance(loss, torch.Tensor))
 
@@ -134,7 +136,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Run validation step
             self.model.eval()
-            self.model.validation_step(batch, batch_idx=0)
+            self.model.validation_step(batch.to(device), batch_idx=0)
 
             # Check that val_step_outputs and val_step_targets have been updated
             self.assertEqual(len(self.model.val_step_outputs), 1)
@@ -209,7 +211,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.eval()
 
             # Run validation steps with batch_idx increasing
-            self.model.validation_step(batch, batch_idx=0)
+            self.model.validation_step(batch.to(device), batch_idx=0)
             first_prediction = self.model.last_val_prediction.clone()
             assert self.model.current_val_trajectory == 0
             batch.traj_index = 1

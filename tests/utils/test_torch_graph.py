@@ -1,3 +1,4 @@
+import torch
 import torch_geometric.transforms as T
 import numpy as np
 from graphphysics.utils.torch_graph import (
@@ -31,6 +32,8 @@ def test_mesh_to_graph():
 def test_khop_edges():
     mesh = get_meshs_from_vtu()[0]
     graph = mesh_to_graph(mesh=mesh)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    graph.to(device)
     graph = T.FaceToEdge()(graph)
     khoped_edge_index = compute_k_hop_edge_index(graph.edge_index, 2, graph.num_nodes)
     assert khoped_edge_index[0].shape > graph.edge_index[0].shape
@@ -40,6 +43,8 @@ def test_khop_graph():
     mesh = get_meshs_from_vtu()[0]
     graph = mesh_to_graph(mesh=mesh)
     print(graph)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    graph.to(device)
     graph = T.FaceToEdge()(graph)
     print(graph)
     khoped_graph_no_edge_attribute = compute_k_hop_graph(graph, 2, False)
