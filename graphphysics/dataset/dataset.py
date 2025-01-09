@@ -20,7 +20,7 @@ class BaseDataset(Dataset, ABC):
         masking_ratio: Optional[float] = None,
         khop: int = 1,
         add_edge_features: bool = True,
-        use_previous_data: bool = False,
+        use_previous_data: bool = False, # surement à enlever
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -29,11 +29,13 @@ class BaseDataset(Dataset, ABC):
 
         self.meta: Dict[str, Any] = meta
 
-        self.trajectory_length: int = self.meta["trajectory_length"]
-        self.num_trajectories: Optional[int] = None
+        self.trajectory_length: int = self.meta["trajectory_length"] # ????
+        self.num_trajectories: Optional[int] = None # ????
+        # Supprimer les deux lignes précédentes ?????
+
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
             {}
-        )  # Cache for k-hop edge indices per trajectory
+        )  # Cache for k-hop edge indices per trajectory 
         self.khop_edge_attr_cache: Dict[int, torch.Tensor] = (
             {}
         )  # Cache for edge attributes if possible
@@ -43,13 +45,15 @@ class BaseDataset(Dataset, ABC):
         self.khop = khop
         self.add_edge_features = add_edge_features
 
-        self.use_previous_data = use_previous_data
+        self.use_previous_data = use_previous_data # surement à enlever
 
     @property
     @abstractmethod
     def size_dataset(self) -> int:
         """Should return the number of trajectories in the dataset."""
 
+# Supprimer ?? ou alors modifier pour unqiuement récupérer la frame 0 ? 
+# Comment fonctionne les frames dans le dataset ?
     def get_traj_frame(self, index: int) -> Tuple[int, int]:
         """Calculate the trajectory and frame number based on the given index.
 
@@ -70,11 +74,14 @@ class BaseDataset(Dataset, ABC):
     def __len__(self) -> int:
         return self.size_dataset * (self.trajectory_length - 1)
 
+# A quoi sert cette méthode ?
+# Surement garder ça mais à encoder différemment ou sinon ne pas toucher et utiliser uniquement le get_item de H5Dataset
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
         """Abstract method to retrieve a data sample."""
         raise NotImplementedError
 
+#Sinon récupére le graphe ici qui correspond à la frame 0
     def _apply_preprocessing(self, graph: Data) -> Data:
         """Applies preprocessing transforms to the graph if provided.
 
@@ -88,6 +95,7 @@ class BaseDataset(Dataset, ABC):
             graph = self.preprocessing(graph)
         return graph
 
+# Tout modifier, plus besion des traj. Par contre on va garder du k-hop je pense
     def _apply_k_hop(self, graph: Data, traj_index: int) -> Data:
         """Applies k-hop expansion to the graph and caches the result.
 
@@ -99,6 +107,7 @@ class BaseDataset(Dataset, ABC):
             Data: The graph with k-hop edges.
         """
         if self.khop > 1:
+            # réadapter puisque plus de traj
             if traj_index in self.khop_edge_index_cache:
                 khop_edge_index = self.khop_edge_index_cache[traj_index]
                 graph.edge_index = khop_edge_index.to(graph.edge_index.device)

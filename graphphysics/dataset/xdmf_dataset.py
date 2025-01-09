@@ -9,7 +9,7 @@ from torch_geometric.data import Data
 from graphphysics.dataset.dataset import BaseDataset
 from graphphysics.utils.torch_graph import meshdata_to_graph
 
-
+#idem on va devoir gérer les targets
 class XDMFDataset(BaseDataset):
     def __init__(
         self,

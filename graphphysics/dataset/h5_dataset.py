@@ -22,6 +22,7 @@ class H5Dataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        #idem que dataset.py
     ):
         super().__init__(
             meta_path=meta_path,
@@ -66,6 +67,7 @@ class H5Dataset(BaseDataset):
             Union[Data, Tuple[Data, torch.Tensor]]: A graph representation of the specified frame in the trajectory,
             optionally along with selected indices if masking is applied.
         """
+        # Modifier ça pour avoir uniquement le graphe de base 
         traj_index, frame = self.get_traj_frame(index=index)
         traj_number = self.datasets_index[traj_index]
 
@@ -74,11 +76,12 @@ class H5Dataset(BaseDataset):
             file_handle=self.file_handle, traj_number=traj_number, meta=self.meta
         )
 
-        # Get the graph for the specified frame
+        # Get the graph for the specified frame : est ce que c'est ça ce qu'on veut ?
         graph = get_frame_as_graph(
             traj=traj, frame=frame, meta=self.meta, frame_target=frame + 1
         )
 
+        # A virer ???
         if self.use_previous_data:
             previous_graph = get_frame_as_graph(
                 traj=traj, frame=frame - 1, meta=self.meta, frame_target=None
@@ -87,11 +90,13 @@ class H5Dataset(BaseDataset):
 
         graph = graph.to(self.device)
 
+        # Je pense qu'il faut garder ça pour avoir le graphe de base
         graph = self._apply_preprocessing(graph)
         graph = self._apply_k_hop(graph, traj_index)
         graph = self._may_remove_edges_attr(graph)
         selected_indices = self._get_masked_indexes(graph)
 
+        # A virer ???
         del graph.previous_data
         graph.traj_index = traj_index
 

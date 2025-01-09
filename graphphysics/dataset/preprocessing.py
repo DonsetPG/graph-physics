@@ -46,6 +46,8 @@ def _3d_face_to_edge(graph: Data) -> Data:
     return graph
 
 
+
+#Comme ça marque le déplacement des obstacle jsp si on a besoin, après on peut juste ne pas l'utiliser
 def add_obstacles_next_pos(
     graph: Data,
     world_pos_index_start: int,
@@ -87,7 +89,7 @@ def add_obstacles_next_pos(
     graph.x = torch.cat([world_pos, obstacle_displacement, other_features], dim=1)
     return graph
 
-
+#Je sais pas vraiment si ça va nous être utile mais on sait jamais. Surement à garder 
 def add_world_edges(
     graph: Data,
     world_pos_index_start: int,
@@ -132,7 +134,7 @@ def add_world_edges(
     graph.edge_index = edge_index
     return graph
 
-
+#Idem
 def add_world_pos_features(
     graph: Data,
     world_pos_index_start: int,
@@ -166,7 +168,7 @@ def add_world_pos_features(
 
     return graph
 
-
+# On a besoin de bruit ? 
 def add_noise(
     graph: Data,
     noise_index_start: Union[int, List[int]],
@@ -353,7 +355,7 @@ class Random3DRotate(BaseTransform):
 
         return data
 
-
+# peut-être à modifier
 def build_preprocessing(
     noise_parameters: Optional[dict] = None,
     world_pos_parameters: Optional[dict] = None,

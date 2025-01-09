@@ -12,7 +12,7 @@ from torch_geometric.data import Data, Dataset
 from graphphysics.training.lightning_module import build_mask
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 
-
+# Beaucoup de mdoifications à faire ici
 class LogPyVistaPredictionsCallback(Callback):
     """
     PyTorch Lightning Callback to log model predictions as images using PyVista.
@@ -32,7 +32,7 @@ class LogPyVistaPredictionsCallback(Callback):
     ):
         super().__init__()
         self.dataset = dataset
-        self.indices = indices
+        self.indices = indices # est ce que je garde les indices ? 
         self.output_dir = output_dir
 
     def on_validation_epoch_end(
@@ -50,8 +50,9 @@ class LogPyVistaPredictionsCallback(Callback):
         device = model.device
 
         images = []
-        ground_truth = []
+        ground_truth = [] # est ce que on garde cette forme là ? 
 
+        # Peut-être pratique pour garder la frame
         with torch.no_grad():
             for idx in self.indices:
                 graph = self.dataset[idx].to(device)
@@ -83,10 +84,12 @@ class LogPyVistaPredictionsCallback(Callback):
         wandb_logger.experiment.log({"pyvista_predictions": images})
         wandb_logger.experiment.log({"pyvista_ground_truth": ground_truth})
 
+
         frames_predictions = []
         frames_ground_truth = []
         predicted_outputs = None
 
+        # je pense qu'il faut virer toute cette boucle (ou pas si ça correspond juste à plusieurs vaisseaux différents)
         if len(self.indices) > 1:
             with torch.no_grad():
                 for idx in range(self.indices[0], self.indices[-1]):
@@ -149,6 +152,7 @@ class LogPyVistaPredictionsCallback(Callback):
                 {"pyvista_ground_truth_video": video_ground_truth}
             )
 
+    # On garde
     def _convert_to_pyvista_mesh(self, graph: Data) -> pv.PolyData:
         """
         Converts model outputs to a PyVista mesh.
@@ -169,6 +173,7 @@ class LogPyVistaPredictionsCallback(Callback):
 
         return mesh
 
+    # On garde mais on modifie pour aboir la légdende, plus besoin de ground truth mesh 
     def _generate_pyvista_image(self, predicted_mesh: pv.PolyData):
         """
         Generates an image visualizing the predicted and ground truth meshes.

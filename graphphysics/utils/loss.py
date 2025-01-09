@@ -5,7 +5,7 @@ from graphphysics.utils.nodetype import NodeType
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-
+#Plus du tout la loss qu'on veut, faire complètement autre chose ? 
 class L2Loss(_Loss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
