@@ -15,7 +15,8 @@ MOCK_XDMF_FOLDER = "tests/mock_xdmf"
 os.makedirs(MOCK_XDMF_FOLDER, exist_ok=True)
 MOCK_XDMF_PATH = os.path.join(MOCK_XDMF_FOLDER, "mock.xdmf")
 MOCK_XDMF_H5_PATH = os.path.join(MOCK_XDMF_FOLDER, "mock.h5")
-
+MOCK_CLASSIFICATION_META_SAVE_PATH = "dataset_config/classification_meta.json"
+MOCK_CLASSIFICATION_SAVE_PATH = "tests/mock_dataset_classification"
 
 def get_meshs_from_vtu():
     file_list = [
