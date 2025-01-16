@@ -22,14 +22,14 @@ class ClassificationSimulator(nn.Module):
         output_index_end: int,
         node_type_index: int,
         batch_size: int,
-        model,
-        device,
+        model: nn.Module,
+        device: torch.device,
         model_dir="checkpoint/simulator.pth",
     ):
         super(ClassificationSimulator, self).__init__()
 
         self.node_input_size = node_input_size
-        self.edge_input_size = edge_input_size
+        self.edge_input_size = edge_input_size if edge_input_size > 0 else None
         self.output_size = output_size
 
         self.feature_index_start = feature_index_start
@@ -47,10 +47,12 @@ class ClassificationSimulator(nn.Module):
         self._node_normalizer = Normalizer(
             size=node_input_size, name="node_normalizer", device=device
         )
-        self._edge_normalizer = Normalizer(
-            size=edge_input_size, name="edge_normalizer", device=device
+        self._edge_normalizer =  (
+            Normalizer(size=edge_input_size, name="edge_normalizer", device=device)
+            if self.edge_input_size is not None
+            else None
         )
-
+           
         self.device = device
         self.batch_size = batch_size
 
@@ -58,13 +60,8 @@ class ClassificationSimulator(nn.Module):
 
     def _build_input_graph(self, inputs: Data, is_training: bool) -> Data:
         features = inputs.x[:, self.feature_index_start : self.feature_index_end]
-        node_type = inputs.x[:, self.node_type_index]
-        one_hot_type = torch.nn.functional.one_hot(
-            torch.squeeze(node_type.long()), NodeType.SIZE
-        )
-
-        node_features = torch.cat([features, one_hot_type], dim=1)
-
+        node_features_list = [features]
+        node_features = torch.cat(node_features_list, dim=1)
         node_features_normalized = self._node_normalizer(node_features, is_training)
 
         if self._edge_normalizer is not None:
@@ -77,6 +74,7 @@ class ClassificationSimulator(nn.Module):
             pos=inputs.pos,
             edge_attr=edge_attr,
             edge_index=inputs.edge_index,
+            y = inputs.y
         )
 
         return graph

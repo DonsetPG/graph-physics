@@ -3,6 +3,7 @@ import unittest
 from graphphysics.dataset.dataset_classification import GraphClassificationDataset
 from tests.mock import MOCK_CLASSIFICATION_META_SAVE_PATH, MOCK_CLASSIFICATION_SAVE_PATH
 from graphphysics.dataset.preprocessing import build_preprocessing
+from torch_geometric.data import DataLoader
 
 class TestGraphClassificationDataset(unittest.TestCase):
     def setUp(self):
@@ -18,6 +19,7 @@ class TestGraphClassificationDataset(unittest.TestCase):
         graph = self.dataset[0]
         assert graph.num_nodes == 945
         assert graph.edge_index is None
+        assert graph.y == 0
 
 class TestGraphClassificationDatasetMasking(unittest.TestCase):
     def setUp(self):
@@ -50,9 +52,7 @@ class TestGraphClassificationDatasetPreprocessing(unittest.TestCase):
         graph = self.dataset[0]
         assert graph.num_nodes == 945
         assert graph.edge_index.shape == (2, 5608) 
-        # assert graph.edge_attr.shape == (5608, 3) est ce que je suis censé avoir des edge_attr ?
         assert graph.face is None
-
 
 
 if __name__ == "__main__":

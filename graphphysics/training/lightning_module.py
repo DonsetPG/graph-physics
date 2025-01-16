@@ -11,7 +11,7 @@ from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 
-#On garde
+
 def build_mask(param: dict, graph: Batch):
     if len(graph.x.shape) > 2:
         node_type = graph.x[:, 0, param["index"]["node_type_index"]]

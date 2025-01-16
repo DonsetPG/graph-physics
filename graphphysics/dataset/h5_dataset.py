@@ -22,7 +22,6 @@ class H5Dataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
-        #idem que dataset.py
     ):
         super().__init__(
             meta_path=meta_path,

@@ -4,7 +4,6 @@ import torch
 import torch.nn as nn
 from torch_geometric.data import Data
 from graphphysics.models.classification_simulator import ClassificationSimulator
-from graphphysics.utils.nodetype import NodeType
 
 
 class MockModel(nn.Module):
@@ -33,7 +32,7 @@ class TestClassificationSimulator(unittest.TestCase):
         self.mock_model = MockModel(output_size=self.output_size)
 
         self.simulator = ClassificationSimulator(
-            node_input_size=self.node_input_size + NodeType.SIZE,
+            node_input_size=self.node_input_size,
             edge_input_size=self.edge_input_size,
             output_size=self.output_size,
             feature_index_start=self.feature_index_start,
@@ -50,8 +49,7 @@ class TestClassificationSimulator(unittest.TestCase):
         # Create sample input data
         num_nodes = 10
         num_edges = 15
-        x = torch.randn(num_nodes, self.node_input_size + 1)
-        x[:, 5] = torch.abs(x[:, 5])
+        x = torch.randn(num_nodes, self.node_input_size)
         y = torch.randn(num_nodes, self.output_size)
         edge_attr = torch.randn(num_edges, self.edge_input_size)
         edge_index = torch.randint(0, num_nodes, (2, num_edges))

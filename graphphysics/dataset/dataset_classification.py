@@ -54,7 +54,6 @@ class GraphClassificationDataset(Dataset):
   
         mesh_io = meshio.read(file_path)
         points, cells = mesh_io.points, mesh_io.cells
-        node_features = torch.zeros((len(points), 1), dtype=torch.float32)
 
         t = meshio.Mesh(points, cells)
         if "triangle" in t.cells_dict:
@@ -88,21 +87,13 @@ class GraphClassificationDataset(Dataset):
  
         if self.preprocessing is not None:
             graph = self.preprocessing(graph)
-    
-
-
-        #   graph_data = {
-        #       "x": torch.zeros((graph.num_nodes, 1), dtype=torch.float32),
-        #       "pos": graph.pos,
-        #       "edge_index": graph.edge_index,
-        #       "edge_attr": graph.edge_attr,
-        #       "y": torch.tensor(label, dtype=torch.float32),
-        #   }
 
         if self.masking_ratio is not None:
             selected_indices = get_masked_indexes(graph, self.masking_ratio)
         else :
             selected_indices = None
+
+        graph.y = label 
 
         if selected_indices is not None: 
             return graph, selected_indices
