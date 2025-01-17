@@ -30,7 +30,7 @@ class LightningModule(L.LightningModule):
         learning_rate: float,
         num_steps: int,
         warmup: int,
-        trajectory_length: int = 599, # A MODIFIER
+        trajectory_length: int = 599,
         only_processor: bool = False,
         masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
     ):
@@ -68,17 +68,17 @@ class LightningModule(L.LightningModule):
 
         self.val_step_outputs = []
         self.val_step_targets = []
-        self.trajectory_length = trajectory_length # A MODIFIER
+        self.trajectory_length = trajectory_length
         self.current_val_trajectory = 0
         self.last_val_prediction = None
 
         # For one trajectory vizualization
         self.trajectory_to_save: list[Batch] = []
 
-    def forward(self, graph: Batch): # ???
+    def forward(self, graph: Batch):
         return self.model(graph)
 
-    def training_step(self, batch: Batch): # Modifier ce qui concerne les targets
+    def training_step(self, batch: Batch):
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
 
@@ -91,7 +91,7 @@ class LightningModule(L.LightningModule):
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
-    def validation_step(self, batch: Batch, batch_idx: int):  # Supprimer les histoires de trajectory
+    def validation_step(self, batch: Batch, batch_idx: int):
         # Determine if we need to reset the trajectory
         if batch.traj_index > self.current_val_trajectory:
             self.current_val_trajectory += 1
@@ -134,7 +134,7 @@ class LightningModule(L.LightningModule):
     def on_validation_epoch_end(self):
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
-        targets = torch.cat(self.val_step_targets, dim=0) # A MODIFIER
+        targets = torch.cat(self.val_step_targets, dim=0)
 
         # Compute RMSE over all rollouts
         squared_diff = (predicteds - targets) ** 2
@@ -148,7 +148,6 @@ class LightningModule(L.LightningModule):
             prog_bar=True,
         )
 
-        # Modifier tout ça, moins de pyvista, pas de trajectoire
         # Save trajectory graphs as .vtu files
         save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
         os.makedirs(save_dir, exist_ok=True)

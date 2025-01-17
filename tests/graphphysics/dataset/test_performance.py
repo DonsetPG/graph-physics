@@ -20,7 +20,6 @@ NUM_WORKERS = 2
 PREFETCH_FACTOR = 1
 PERSISTENT_WORKERS = True
 
-@pytest.mark.skip(reason="a bit long atm")
 def get_items_h5():
     transform = build_preprocessing(add_edges_features=True)
     dataset = H5Dataset(
@@ -32,7 +31,6 @@ def get_items_h5():
     for _ in range(ITEMS_TO_FETCH):
         dataset[0]
 
-@pytest.mark.skip(reason="a bit long atm")
 def get_items_xdmf():
     transform = build_preprocessing(add_edges_features=True)
     dataset = XDMFDataset(
@@ -44,7 +42,6 @@ def get_items_xdmf():
     for _ in range(ITEMS_TO_FETCH):
         dataset[0]
 
-@pytest.mark.skip(reason="a bit long atm")
 def get_items_h5dataloader():
     transform = build_preprocessing(add_edges_features=True)
     dataset = H5Dataset(
@@ -65,7 +62,6 @@ def get_items_h5dataloader():
         if indx > ITEMS_TO_FETCH / BATCH_SIZE:
             break
 
-@pytest.mark.skip(reason="a bit long atm")
 def get_items_xdmfdataloader():
     transform = build_preprocessing(add_edges_features=True)
     dataset = XDMFDataset(
@@ -85,18 +81,14 @@ def get_items_xdmfdataloader():
         if indx > ITEMS_TO_FETCH / BATCH_SIZE:
             break
 
-@pytest.mark.skip(reason="a bit long atm")
 def test_get_h5items(benchmark):
     benchmark(get_items_h5)
 
-@pytest.mark.skip(reason="a bit long atm")
 def test_get_xdmfitems(benchmark):
     benchmark(get_items_xdmf)
 
-@pytest.mark.skip(reason="a bit long atm")
 def test_get_dataloader_h5items(benchmark):
     benchmark(get_items_h5dataloader)
 
-@pytest.mark.skip(reason="a bit long atm")
 def test_get_dataloader_xdmfitems(benchmark):
     benchmark(get_items_xdmfdataloader)

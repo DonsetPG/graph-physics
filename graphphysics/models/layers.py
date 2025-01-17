@@ -15,9 +15,6 @@ except ImportError:
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
 
 
-# Rien à changer de tout le fichier. On va peut-être devoir rajouter le pooling pour la dernièe couche du modèle
-# A voir si c'est nécessaire ou si on a juste une fonction déjà existante à utiliser.
-
 class RMSNorm(nn.Module):
     """
     Root Mean Square Layer Normalization.

@@ -20,6 +20,10 @@ class GraphClassificationDataset(Dataset):
         masking_ratio=None,
         switch_to_val: bool = False,
     ):
+        
+        if switch_to_val:
+            root_folder = root_folder.replace("training", "validation")
+
         self.root_folder = root_folder
         self.classes = [
             d

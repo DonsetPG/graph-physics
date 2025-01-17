@@ -50,5 +50,3 @@ class L2Loss(_Loss):
 
         errors = ((network_output - target) ** 2)[mask]
         return torch.mean(errors)
-
-

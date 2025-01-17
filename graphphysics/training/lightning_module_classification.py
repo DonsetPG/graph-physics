@@ -47,7 +47,7 @@ class LightningModuleClassification(L.LightningModule):
             hidden_size=self.param["model"]["hidden_size"],   
         )
 
-        # print(processor)
+        print(processor)
 
         self.model = ClassificationSimulator(
             node_input_size=self.param["model"]["node_input_size"],
@@ -104,8 +104,8 @@ class LightningModuleClassification(L.LightningModule):
         conf_matrix = confusion_matrix(targets.numpy(), predicteds.numpy())
         f1 = f1_score(targets.numpy(), predicteds.numpy(), average='weighted')
 
-        self.log("val_conf_matrix", conf_matrix)
-        self.log("val_f1_score", f1)
+        self.log("val_conf_matrix", torch.tensor(conf_matrix), on_step=False ,on_epoch=True, prog_bar=True)
+        self.log("val_f1_score", f1, on_step=False, on_epoch=True, prog_bar=True)
 
         # Clear stored outputs
         self.val_step_outputs.clear()

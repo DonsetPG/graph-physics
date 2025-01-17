@@ -65,10 +65,6 @@ class TestDecoder1(unittest.TestCase):
 
     def test_forward(self):
         output = self.decoder(self.x, self.batch)
-        print(f"Input x shape: {self.x.shape}")
-        print(f"Input batch shape: {self.batch.shape}")
-        print(f"Output shape: {output.shape}")
-
         self.assertEqual(output.shape, (1,1))  
 
 if __name__ == "__main__":

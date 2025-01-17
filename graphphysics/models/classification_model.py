@@ -34,7 +34,7 @@ class ClassificationModel(nn.Module):
             [GraphNetBlock(hidden_size=hidden_size) for _ in range(message_passing_num)]
         )
 
-        self.decode_module = decoder_1(hidden_size, hidden_size)
+        self.decode_module = Decoder_1(hidden_size, hidden_size)
 
     def forward(self, graph: Batch) -> torch.Tensor:
         edge_index = graph.edge_index
@@ -46,12 +46,12 @@ class ClassificationModel(nn.Module):
         x_decoded = self.decode_module(x, graph.batch)
         return x_decoded
 
-class decoder_1(nn.Module):
+class Decoder_1(nn.Module):
     def __init__(self, in_size, hidden_size, out_size=1, nb_of_layers=4, layer_norm=True):
         super().__init__()
         self.mlp = build_mlp(in_size, hidden_size, out_size, nb_of_layers, layer_norm)
     
-    def forward(self, x: torch.Tensor, batch) -> torch.Tensor:
+    def forward(self, x: torch.Tensor, batch: Batch) -> torch.Tensor:
         x = global_mean_pool(x, batch)
         x = self.mlp(x)
         return torch.sigmoid(x)  

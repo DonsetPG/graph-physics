@@ -90,7 +90,7 @@ def main(argv):
     )
 
     val_dataset = GraphClassificationDataset(
-        root_folder=parameters["dataset"]["val_folder"],
+        root_folder=parameters["dataset"]["train_folder"],
         meta_path=parameters["dataset"]["meta_path"],
         preprocessing=preprocessing,
         masking_ratio=None,
@@ -135,8 +135,6 @@ def main(argv):
     # Define or resume model
     num_steps = num_epochs * len(train_dataloader)
 
-
-    # a voir si on a toujours les trajectory length
     if model_save_path and os.path.isfile(model_save_path):
         logger.info(f"Loading model from checkpoint: {model_save_path}")
         lightning_module = LightningModuleClassification.load_from_checkpoint(

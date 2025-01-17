@@ -38,7 +38,7 @@ def get_preprocessing(
         Callable[[Data], Data]: A function that preprocesses a Data object.
     """
     preprocessing_params = param.get("transformations", {}).get("preprocessing", {})
-    noise_scale = preprocessing_params.get("noise", 0) # est ce que j'ai encore besoin du noise ? 
+    noise_scale = preprocessing_params.get("noise", 0)
     noise_parameters = None
     if noise_scale != 0:
         noise_parameters = {
@@ -119,7 +119,6 @@ def get_simulator(param: Dict[str, Any], model, device: torch.device) -> Simulat
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
 
 
-    # A MODIFIER 
     return Simulator(
         node_input_size=node_input_size,
         edge_input_size=param["model"]["edge_input_size"],
@@ -163,7 +162,6 @@ def get_dataset(
     extension = dataset_params.get("extension", "")
 
 
-    # A quoi sert use_previous_data ?
     if extension == "h5":
         return H5Dataset(
             h5_path=dataset_params["h5_path"],

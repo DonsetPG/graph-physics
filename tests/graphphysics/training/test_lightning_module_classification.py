@@ -71,7 +71,7 @@ class TestLightningModuleClassification(unittest.TestCase):
                 "num_heads": 4
             },
             "dataset": {
-                "extension": "obj",
+                "extension": "xdmf",
                 "obj_folder": MOCK_CLASSIFICATION_SAVE_PATH, 
                 "meta_path": MOCK_CLASSIFICATION_META_SAVE_PATH,
                 "khop": 1

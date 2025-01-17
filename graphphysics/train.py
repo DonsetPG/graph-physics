@@ -134,7 +134,6 @@ def main(argv):
     num_steps = num_epochs * len(train_dataloader)
 
 
-    # a voir si on a toujours les trajectory length
     if model_save_path and os.path.isfile(model_save_path):
         logger.info(f"Loading model from checkpoint: {model_save_path}")
         lightning_module = LightningModule.load_from_checkpoint(

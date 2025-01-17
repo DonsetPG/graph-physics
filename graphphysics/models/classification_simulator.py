@@ -83,22 +83,3 @@ class ClassificationSimulator(nn.Module):
         graph = self._build_input_graph(inputs=inputs, is_training=self.training)
         network_output = self.model(graph)
         return network_output
-    
-    def freeze_all(self) -> None:
-        for param in self.model.parameters():
-            param.requires_grad = False
-
-    def load_checkpoint(self, ckpdir: Optional[str] = None) -> None:
-        if ckpdir is None:
-            ckpdir = self.model_dir
-        checkpoint = torch.load(ckpdir, map_location=self.device)
-        self.load_state_dict(checkpoint["model"])
-
-        normalizer_keys = ["_output_normalizer", "_node_normalizer", "_edge_normalizer"]
-        for key in normalizer_keys:
-            normalizer_state = checkpoint.get(key, {})
-            normalizer = getattr(self, key, None)
-            if normalizer and normalizer_state:
-                for attr_name, value in normalizer_state.items():
-                    setattr(normalizer, attr_name, value)
-        logger.success(f"Simulator model loaded checkpoint {ckpdir}")

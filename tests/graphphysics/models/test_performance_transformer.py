@@ -18,7 +18,6 @@ NUM_WORKERS = 2
 PREFETCH_FACTOR = 1
 PERSISTENT_WORKERS = True
 
-@pytest.mark.skip(reason="a bit long atm")
 def process_items_xdmfdataloader():
     transform = build_preprocessing(add_edges_features=True)
     dataset = XDMFDataset(
@@ -43,6 +42,5 @@ def process_items_xdmfdataloader():
         if indx > ITEMS_TO_FETCH / BATCH_SIZE:
             break
 
-@pytest.mark.skip(reason="a bit long atm")
 def test_process_items_xdmfdataloader(benchmark):
     benchmark(process_items_xdmfdataloader)
