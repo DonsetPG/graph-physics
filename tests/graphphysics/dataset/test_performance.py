@@ -1,6 +1,5 @@
 from torch_geometric.loader import DataLoader
 import unittest
-import pytest
 
 from graphphysics.dataset.h5_dataset import H5Dataset
 from tests.mock import (

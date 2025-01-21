@@ -59,6 +59,7 @@ class EncodeProcessDecode(nn.Module):
                 hidden_size=hidden_size,
                 out_size=hidden_size,
             )
+
             self.decode_module = build_mlp(
                 in_size=hidden_size,
                 hidden_size=hidden_size,
@@ -145,6 +146,7 @@ class EncodeTransformDecode(nn.Module):
                 hidden_size=hidden_size,
                 out_size=hidden_size,
             )
+            
             self.decode_module = build_mlp(
                 in_size=hidden_size,
                 hidden_size=hidden_size,

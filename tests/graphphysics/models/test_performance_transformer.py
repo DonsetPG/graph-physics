@@ -1,6 +1,5 @@
 from torch_geometric.loader import DataLoader
 import unittest
-import pytest
 
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from tests.mock import (

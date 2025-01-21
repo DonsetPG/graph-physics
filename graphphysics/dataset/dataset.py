@@ -31,7 +31,6 @@ class BaseDataset(Dataset, ABC):
 
         self.trajectory_length: int = self.meta["trajectory_length"]
         self.num_trajectories: Optional[int] = None
-
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
             {}
         )  # Cache for k-hop edge indices per trajectory
