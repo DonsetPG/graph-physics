@@ -1,6 +1,6 @@
 {
     "dataset": {
-        "extension": "obj",
+        "extension": "xdmf",
         "obj_folder": "dataset/train", 
         "meta_path": "dataset/meta.json",
         "khop": 1

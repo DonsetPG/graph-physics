@@ -20,7 +20,7 @@ class GraphClassificationDataset(Dataset):
         masking_ratio=None,
         switch_to_val: bool = False,
     ):
-        
+
         if switch_to_val:
             root_folder = root_folder.replace("training", "validation")
 
@@ -31,7 +31,7 @@ class GraphClassificationDataset(Dataset):
             if os.path.isdir(os.path.join(root_folder, d))
         ]
         self.class_to_idx = {cls_name: i for i, cls_name in enumerate(self.classes)}
- 
+
         self.file_paths = []
         self.labels = []
         for cls in self.classes:
@@ -55,7 +55,7 @@ class GraphClassificationDataset(Dataset):
 
         file_path = self.file_paths[idx]
         label = self.labels[idx]
-  
+
         mesh_io = meshio.read(file_path)
         points, cells = mesh_io.points, mesh_io.cells
 
@@ -71,35 +71,35 @@ class GraphClassificationDataset(Dataset):
                     torch.stack([face[2], face[3], face[0]], dim=0),
                     torch.stack([face[3], face[0], face[1]], dim=0),
                 ],
-                 dim=1,
+                dim=1,
             )
             faces = faces.T.numpy()
- 
+
         graph = meshdata_to_graph(
             points=np.array(points).astype(np.float32),
             cells=np.array(faces).astype(np.int32),
             point_data=None,
         )
 
-        graph = graph.to(self.device)  
- 
+        graph = graph.to(self.device)
+
         classification_processing = T.Compose(
             [T.RandomFlip(axis=random.randint(0, 2)), T.RandomJitter(translate=0.002)]
         )
- 
+
         graph = classification_processing(graph)
- 
+
         if self.preprocessing is not None:
             graph = self.preprocessing(graph)
 
         if self.masking_ratio is not None:
             selected_indices = get_masked_indexes(graph, self.masking_ratio)
-        else :
+        else:
             selected_indices = None
 
-        graph.y = label 
+        graph.y = label
 
-        if selected_indices is not None: 
+        if selected_indices is not None:
             return graph, selected_indices
         else:
             return graph

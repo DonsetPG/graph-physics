@@ -13,12 +13,10 @@ from torch_geometric.loader import DataLoader
 
 from graphphysics.dataset.dataset_classification import GraphClassificationDataset
 from graphphysics.training.callback import LogPyVistaPredictionsCallback
-from graphphysics.training.lightning_module_classification import LightningModuleClassification
-from graphphysics.training.parse_parameters import (
-    get_dataset,
-    get_num_workers,
-    get_preprocessing,
+from graphphysics.training.lightning_module_classification import (
+    LightningModuleClassification,
 )
+from graphphysics.training.parse_parameters import get_num_workers, get_preprocessing
 from graphphysics.utils.progressbar import ColabProgressBar
 
 warnings.filterwarnings(

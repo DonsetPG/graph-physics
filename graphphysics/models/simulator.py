@@ -47,7 +47,6 @@ class Simulator(nn.Module):
             device (torch.device): The device to run the model on.
             model_dir (str, optional): Directory to save/load the model checkpoint. Defaults to "checkpoint/simulator.pth".
         """
-        # Voir tout ce qu'il faut modifier pour que ça fonctionne
         super(Simulator, self).__init__()
 
         self.node_input_size = node_input_size
@@ -77,7 +76,6 @@ class Simulator(nn.Module):
 
         self.device = device
 
-    # On en veut plus de ça
     def _get_pre_target(self, inputs: Data) -> torch.Tensor:
         """
         Extracts the previous target values from the input data.
@@ -90,7 +88,6 @@ class Simulator(nn.Module):
         """
         return inputs.x[:, self.output_index_start : self.output_index_end]
 
-    # Ca aussi
     def _get_target_normalized(
         self, inputs: Data, is_training: bool = True
     ) -> torch.Tensor:
@@ -111,7 +108,6 @@ class Simulator(nn.Module):
 
         return target_delta_normalized
 
-    # A garder 
     def _get_one_hot_type(self, inputs: Data) -> torch.Tensor:
         """
         Converts node types to one-hot encoded vectors.
@@ -127,7 +123,6 @@ class Simulator(nn.Module):
             torch.squeeze(node_type.long()), NodeType.SIZE
         )
 
-    # A garder
     def _build_node_features(
         self, inputs: Data, one_hot_type: torch.Tensor
     ) -> torch.Tensor:
@@ -146,7 +141,6 @@ class Simulator(nn.Module):
 
         return node_features
 
-    #  Hyper important à garder, permet d'avoir le graphe que l'on veut, voir si on garde le target delta normalized
     def _build_input_graph(
         self, inputs: Data, is_training: bool
     ) -> Tuple[Data, torch.Tensor]:
@@ -180,7 +174,6 @@ class Simulator(nn.Module):
 
         return graph, target_delta_normalized
 
-    # Modifier pour virer les targets ou alors mettre le bon format en (0 ou 1) mais je pense que c'est pas ici 
     def _build_outputs(
         self, inputs: Data, network_output: torch.Tensor
     ) -> torch.Tensor:
@@ -198,7 +191,6 @@ class Simulator(nn.Module):
         update = self._output_normalizer.inverse(network_output)
         return pre_target + update
 
-    # Est ce qu'on en a encore besoin vu qu'on fait un seul forward ?
     def forward(
         self, inputs: Data
     ) -> Tuple[torch.Tensor, torch.Tensor, Optional[torch.Tensor]]:
@@ -225,7 +217,6 @@ class Simulator(nn.Module):
             outputs = self._build_outputs(inputs=inputs, network_output=network_output)
             return network_output, target_delta_normalized, outputs
 
-    # A garder
     def freeze_all(self) -> None:
         """
         Freezes all parameters in the model to prevent them from being updated during training.
@@ -233,7 +224,6 @@ class Simulator(nn.Module):
         for param in self.model.parameters():
             param.requires_grad = False
 
-    # A garder
     def load_checkpoint(self, ckpdir: Optional[str] = None) -> None:
         """
         Loads the model and normalizer states from a checkpoint file.
@@ -256,7 +246,6 @@ class Simulator(nn.Module):
 
         logger.success(f"Simulator model loaded checkpoint {ckpdir}")
 
-    # A garder
     def save_checkpoint(self, savedir: Optional[str] = None) -> None:
         """
         Saves the model and normalizer states to a checkpoint file.

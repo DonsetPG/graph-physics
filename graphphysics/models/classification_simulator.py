@@ -1,14 +1,9 @@
-import os
-from typing import Optional
-
 import torch
 import torch.nn as nn
-from loguru import logger
 from torch_geometric.data import Data
 
-
 from graphphysics.models.layers import Normalizer
-from graphphysics.utils.nodetype import NodeType
+
 
 class ClassificationSimulator(nn.Module):
     def __init__(
@@ -47,16 +42,14 @@ class ClassificationSimulator(nn.Module):
         self._node_normalizer = Normalizer(
             size=node_input_size, name="node_normalizer", device=device
         )
-        self._edge_normalizer =  (
+        self._edge_normalizer = (
             Normalizer(size=edge_input_size, name="edge_normalizer", device=device)
             if self.edge_input_size is not None
             else None
         )
-           
+
         self.device = device
         self.batch_size = batch_size
-
-
 
     def _build_input_graph(self, inputs: Data, is_training: bool) -> Data:
         features = inputs.x[:, self.feature_index_start : self.feature_index_end]
@@ -74,7 +67,7 @@ class ClassificationSimulator(nn.Module):
             pos=inputs.pos,
             edge_attr=edge_attr,
             edge_index=inputs.edge_index,
-            y = inputs.y
+            y=inputs.y,
         )
 
         return graph

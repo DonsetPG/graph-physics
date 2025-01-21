@@ -118,7 +118,6 @@ def get_simulator(param: Dict[str, Any], model, device: torch.device) -> Simulat
     """
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
 
-
     return Simulator(
         node_input_size=node_input_size,
         edge_input_size=param["model"]["edge_input_size"],
@@ -160,7 +159,6 @@ def get_dataset(
     dataset_params = param.get("dataset", {})
     khop = dataset_params.get("khop", 1)
     extension = dataset_params.get("extension", "")
-
 
     if extension == "h5":
         return H5Dataset(

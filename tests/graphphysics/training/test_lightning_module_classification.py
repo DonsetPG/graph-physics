@@ -5,16 +5,19 @@ from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data, Batch
 import lightning as L
-from graphphysics.training.lightning_module_classification import LightningModuleClassification
+from graphphysics.training.lightning_module_classification import (
+    LightningModuleClassification,
+)
 from graphphysics.dataset.dataset_classification import GraphClassificationDataset
 
 from tests.mock import (
     MOCK_CLASSIFICATION_META_SAVE_PATH,
-    MOCK_CLASSIFICATION_SAVE_PATH,   
+    MOCK_CLASSIFICATION_SAVE_PATH,
 )
 
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
+
 
 class MockDataset(GraphClassificationDataset):
     def __init__(self):
@@ -37,7 +40,6 @@ class MockDataset(GraphClassificationDataset):
         return data
 
 
-
 class TestLightningModuleClassification(unittest.TestCase):
     def setUp(self):
         self.parameters = {
@@ -46,20 +48,20 @@ class TestLightningModuleClassification(unittest.TestCase):
                     "noise": [10.0],
                     "noise_index_start": [0],
                     "noise_index_end": [1],
-                    "masking": 0.1
+                    "masking": 0.1,
                 },
                 "world_pos_parameters": {
                     "use": False,
                     "world_pos_index_start": 0,
-                    "world_pos_index_end": 3
-                }
+                    "world_pos_index_end": 3,
+                },
             },
             "index": {
                 "feature_index_start": 0,
                 "feature_index_end": 2,
                 "output_index_start": 0,
                 "output_index_end": 1,
-                "node_type_index": 1
+                "node_type_index": 1,
             },
             "model": {
                 "type": "classification",
@@ -68,18 +70,16 @@ class TestLightningModuleClassification(unittest.TestCase):
                 "node_input_size": 2,
                 "output_size": 1,
                 "edge_input_size": 4,
-                "num_heads": 4
+                "num_heads": 4,
             },
             "dataset": {
                 "extension": "xdmf",
-                "obj_folder": MOCK_CLASSIFICATION_SAVE_PATH, 
+                "obj_folder": MOCK_CLASSIFICATION_SAVE_PATH,
                 "meta_path": MOCK_CLASSIFICATION_META_SAVE_PATH,
-                "khop": 1
+                "khop": 1,
             },
-            "training": {
-                "batch_size": 1
-            }
-    }
+            "training": {"batch_size": 1},
+        }
         self.learning_rate = 0.001
         self.num_steps = 100
         self.warmup = 10
@@ -95,9 +95,11 @@ class TestLightningModuleClassification(unittest.TestCase):
         self.dataloader = DataLoader(self.dataset, batch_size=1)
 
     def test_forward(self):
+        self.dataloader = DataLoader(self.dataset, batch_size=2)
         batch = next(iter(self.dataloader))
         output = self.model.forward(batch.to(device))
         self.assertIsNotNone(output)
+        self.assertEqual(output.shape[0], 2)
 
     def test_training_step(self):
         batch = next(iter(self.dataloader))
@@ -138,8 +140,20 @@ class TestLightningModuleClassification(unittest.TestCase):
             self.model.on_validation_epoch_end()
 
             # Check that confusion matrix and F1 score are computed and logged
-            mock_log.assert_any_call("val_conf_matrix", unittest.mock.ANY)
-            mock_log.assert_any_call("val_f1_score", unittest.mock.ANY)
+            mock_log.assert_any_call(
+                "val_conf_matrix",
+                unittest.mock.ANY,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            mock_log.assert_any_call(
+                "val_f1_score",
+                unittest.mock.ANY,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
 
         # Check that val_step_outputs and val_step_targets are cleared
         self.assertEqual(len(self.model.val_step_outputs), 0)
@@ -155,6 +169,7 @@ class TestLightningModuleClassification(unittest.TestCase):
     def test_full_training_loop(self):
         trainer = L.Trainer(fast_dev_run=True)
         trainer.fit(self.model, train_dataloaders=self.dataloader)
+
 
 if __name__ == "__main__":
     unittest.main()

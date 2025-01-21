@@ -87,6 +87,7 @@ def add_obstacles_next_pos(
     graph.x = torch.cat([world_pos, obstacle_displacement, other_features], dim=1)
     return graph
 
+
 def add_world_edges(
     graph: Data,
     world_pos_index_start: int,
@@ -131,6 +132,7 @@ def add_world_edges(
     graph.edge_index = edge_index
     return graph
 
+
 def add_world_pos_features(
     graph: Data,
     world_pos_index_start: int,
@@ -163,6 +165,7 @@ def add_world_pos_features(
     )
 
     return graph
+
 
 def add_noise(
     graph: Data,
@@ -349,6 +352,7 @@ class Random3DRotate(BaseTransform):
             data.y = rotated_target
 
         return data
+
 
 def build_preprocessing(
     noise_parameters: Optional[dict] = None,

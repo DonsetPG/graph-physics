@@ -133,7 +133,6 @@ def main(argv):
     # Define or resume model
     num_steps = num_epochs * len(train_dataloader)
 
-
     if model_save_path and os.path.isfile(model_save_path):
         logger.info(f"Loading model from checkpoint: {model_save_path}")
         lightning_module = LightningModule.load_from_checkpoint(

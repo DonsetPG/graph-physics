@@ -1,9 +1,9 @@
 import torch
 import torch.nn as nn
-
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Batch
 from torch_geometric.nn import global_mean_pool
-from graphphysics.models.layers import GraphNetBlock, Transformer, build_mlp
+
+from graphphysics.models.layers import GraphNetBlock, build_mlp
 
 
 class ClassificationModel(nn.Module):
@@ -12,12 +12,12 @@ class ClassificationModel(nn.Module):
         message_passing_num: int,
         node_input_size: int,
         edge_input_size: int,
-        output_size : int = 1,
-        hidden_size: int=128,
+        output_size: int = 1,
+        hidden_size: int = 128,
     ):
         super(ClassificationModel, self).__init__()
         self.hidden_size = hidden_size
- 
+
         self.nodes_encoder = build_mlp(
             in_size=node_input_size,
             hidden_size=hidden_size,
@@ -46,19 +46,15 @@ class ClassificationModel(nn.Module):
         x_decoded = self.decode_module(x, graph.batch)
         return x_decoded
 
+
 class Decoder_1(nn.Module):
-    def __init__(self, in_size, hidden_size, out_size=1, nb_of_layers=4, layer_norm=True):
+    def __init__(
+        self, in_size, hidden_size, out_size=1, nb_of_layers=4, layer_norm=True
+    ):
         super().__init__()
         self.mlp = build_mlp(in_size, hidden_size, out_size, nb_of_layers, layer_norm)
-    
+
     def forward(self, x: torch.Tensor, batch: Batch) -> torch.Tensor:
         x = global_mean_pool(x, batch)
         x = self.mlp(x)
-        return torch.sigmoid(x)  
-
-
-
-
-
-
-
+        return torch.sigmoid(x)

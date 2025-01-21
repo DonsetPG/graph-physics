@@ -34,6 +34,7 @@ def get_h5_dataset(
         meta = json.load(fp)
     return file_handle, datasets_index, len(datasets_index), meta
 
+
 def get_traj_as_meshes(
     file_handle: h5py.File, traj_number: str, meta: Dict[str, Any]
 ) -> Dict[str, np.ndarray]:
@@ -61,6 +62,7 @@ def get_traj_as_meshes(
         meshes[key] = data
 
     return meshes
+
 
 def get_frame_as_mesh(
     traj: Dict[str, np.ndarray],
@@ -119,6 +121,7 @@ def get_frame_as_mesh(
     cells = traj["cells"][frame] if traj["cells"].ndim > 1 else traj["cells"]
 
     return mesh_pos, cells, point_data, target_point_data
+
 
 def get_frame_as_graph(
     traj: Dict[str, np.ndarray],

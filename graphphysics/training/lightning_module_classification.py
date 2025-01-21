@@ -1,16 +1,13 @@
-import os
-import torch.nn as nn
-
 import lightning as L
 import torch
-from loguru import logger
-from torch_geometric.data import Batch
+import torch.nn as nn
 from sklearn.metrics import confusion_matrix, f1_score
+from torch_geometric.data import Batch
 
-from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
-from graphphysics.utils.scheduler import CosineWarmupScheduler
 from graphphysics.models.classification_model import ClassificationModel
 from graphphysics.models.classification_simulator import ClassificationSimulator
+from graphphysics.utils.scheduler import CosineWarmupScheduler
+
 
 class LightningModuleClassification(L.LightningModule):
     def __init__(
@@ -44,7 +41,7 @@ class LightningModuleClassification(L.LightningModule):
             node_input_size=self.param["model"]["node_input_size"],
             edge_input_size=self.param["model"]["edge_input_size"],
             output_size=self.param["model"]["output_size"],
-            hidden_size=self.param["model"]["hidden_size"],   
+            hidden_size=self.param["model"]["hidden_size"],
         )
 
         print(processor)
@@ -63,7 +60,7 @@ class LightningModuleClassification(L.LightningModule):
             device=device,
         )
 
-        self.loss = nn.BCELoss() 
+        self.loss = nn.BCELoss()
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -72,22 +69,21 @@ class LightningModuleClassification(L.LightningModule):
         self.val_step_outputs = []
         self.val_step_targets = []
 
-
-    def forward(self, graph: Batch): 
+    def forward(self, graph: Batch):
         return self.model(graph)
 
-    def training_step(self, batch: Batch): 
+    def training_step(self, batch: Batch):
         pred = self.model(batch).reshape(-1)
-        target = batch.y 
-        loss = self.loss(pred, target) 
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True) 
+        target = batch.y
+        loss = self.loss(pred, target)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
-    def validation_step(self, batch: Batch, batch_idx: int):  
+    def validation_step(self, batch: Batch, batch_idx: int):
 
         with torch.no_grad():
             pred = self.model(batch).reshape(-1)
-        target = batch.y    
+        target = batch.y
         self.val_step_outputs.append(pred.cpu())
         self.val_step_targets.append(target.cpu())
 
@@ -102,9 +98,15 @@ class LightningModuleClassification(L.LightningModule):
 
         # Compute confusion matrix and F1 score
         conf_matrix = confusion_matrix(targets.numpy(), predicteds.numpy())
-        f1 = f1_score(targets.numpy(), predicteds.numpy(), average='weighted')
+        f1 = f1_score(targets.numpy(), predicteds.numpy(), average="weighted")
 
-        self.log("val_conf_matrix", torch.tensor(conf_matrix), on_step=False ,on_epoch=True, prog_bar=True)
+        self.log(
+            "val_conf_matrix",
+            torch.tensor(conf_matrix),
+            on_step=False,
+            on_epoch=True,
+            prog_bar=True,
+        )
         self.log("val_f1_score", f1, on_step=False, on_epoch=True, prog_bar=True)
 
         # Clear stored outputs

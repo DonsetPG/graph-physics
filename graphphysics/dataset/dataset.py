@@ -29,7 +29,7 @@ class BaseDataset(Dataset, ABC):
 
         self.meta: Dict[str, Any] = meta
 
-        self.trajectory_length: int = self.meta["trajectory_length"] 
+        self.trajectory_length: int = self.meta["trajectory_length"]
         self.num_trajectories: Optional[int] = None
 
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
@@ -44,7 +44,7 @@ class BaseDataset(Dataset, ABC):
         self.khop = khop
         self.add_edge_features = add_edge_features
 
-        self.use_previous_data = use_previous_data 
+        self.use_previous_data = use_previous_data
 
     @property
     @abstractmethod

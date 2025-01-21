@@ -23,6 +23,7 @@ def aneurysm_node_type(graph: Data) -> torch.Tensor:
 
     return node_type.to(device)
 
+
 def build_features(graph: Data) -> Data:
     node_type = aneurysm_node_type(graph)
 

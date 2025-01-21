@@ -12,6 +12,7 @@ from torch_geometric.data import Data, Dataset
 from graphphysics.training.lightning_module import build_mask
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 
+
 class LogPyVistaPredictionsCallback(Callback):
     """
     PyTorch Lightning Callback to log model predictions as images using PyVista.
@@ -81,7 +82,6 @@ class LogPyVistaPredictionsCallback(Callback):
         wandb_logger = trainer.logger
         wandb_logger.experiment.log({"pyvista_predictions": images})
         wandb_logger.experiment.log({"pyvista_ground_truth": ground_truth})
-
 
         frames_predictions = []
         frames_ground_truth = []

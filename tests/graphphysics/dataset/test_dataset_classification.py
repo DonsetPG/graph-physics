@@ -5,6 +5,7 @@ from tests.mock import MOCK_CLASSIFICATION_META_SAVE_PATH, MOCK_CLASSIFICATION_S
 from graphphysics.dataset.preprocessing import build_preprocessing
 from torch_geometric.data import DataLoader
 
+
 class TestGraphClassificationDataset(unittest.TestCase):
     def setUp(self):
         self.dataset = GraphClassificationDataset(
@@ -21,6 +22,7 @@ class TestGraphClassificationDataset(unittest.TestCase):
         assert graph.edge_index is None
         assert graph.y == 0
 
+
 class TestGraphClassificationDatasetMasking(unittest.TestCase):
     def setUp(self):
         self.dataset = GraphClassificationDataset(
@@ -30,14 +32,15 @@ class TestGraphClassificationDatasetMasking(unittest.TestCase):
         )
 
     def test_length(self):
-        assert len(self.dataset) == 2 
+        assert len(self.dataset) == 2
 
-    def test_get(self): 
+    def test_get(self):
         graph, selected_index = self.dataset[0]
         assert graph.num_nodes == 945
         assert graph.edge_index is None
         assert selected_index is not None
-        assert len(selected_index) == int((1 - 0.4) * 945) 
+        assert len(selected_index) == int((1 - 0.4) * 945)
+
 
 class TestGraphClassificationDatasetPreprocessing(unittest.TestCase):
     def setUp(self):
@@ -48,10 +51,10 @@ class TestGraphClassificationDatasetPreprocessing(unittest.TestCase):
             preprocessing=transform,
         )
 
-    def test_get(self): 
+    def test_get(self):
         graph = self.dataset[0]
         assert graph.num_nodes == 945
-        assert graph.edge_index.shape == (2, 5608) 
+        assert graph.edge_index.shape == (2, 5608)
         assert graph.face is None
 
 

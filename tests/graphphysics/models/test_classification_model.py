@@ -1,7 +1,8 @@
 import unittest
 import torch
 from torch_geometric.data import Data, Batch
-from graphphysics.models.classification_model import ClassificationModel, decoder_1
+from graphphysics.models.classification_model import ClassificationModel, Decoder_1
+
 
 class TestClassificationModel(unittest.TestCase):
     def setUp(self):
@@ -29,7 +30,7 @@ class TestClassificationModel(unittest.TestCase):
         )
         output = model(self.graph)
         # output should have dim  0 (scalar)
-        self.assertEqual(output.shape, (1,1))
+        self.assertEqual(output.shape, (1, 1))
 
     def test_gradients(self):
         model = ClassificationModel(
@@ -55,17 +56,21 @@ class TestClassificationModel(unittest.TestCase):
             hidden_size=self.hidden_size,
         )
         output = model(self.graph)
-        self.assertEqual(output.shape, (1,1))
+        self.assertEqual(output.shape, (1, 1))
+
 
 class TestDecoder1(unittest.TestCase):
     def setUp(self):
-        self.decoder = decoder_1(in_size=128, hidden_size=128)
+        self.decoder = Decoder_1(in_size=128, hidden_size=128)
         self.x = torch.randn(100, 128)  # 100 nodes with 128 features each
-        self.batch = torch.zeros(100, dtype=torch.long)  # All nodes belong to the same graph
+        self.batch = torch.zeros(
+            100, dtype=torch.long
+        )  # All nodes belong to the same graph
 
     def test_forward(self):
         output = self.decoder(self.x, self.batch)
-        self.assertEqual(output.shape, (1,1))  
+        self.assertEqual(output.shape, (1, 1))
+
 
 if __name__ == "__main__":
     unittest.main()
