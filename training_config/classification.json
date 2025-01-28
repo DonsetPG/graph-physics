@@ -1,29 +1,34 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "obj_folder": "dataset/train", 
-        "meta_path": "dataset/meta.json",
-        "khop": 1
+        "obj_folder": "dataset_up/classification/training", 
+        "meta_path": "dataset_config/classification_meta.json",
+        "khop": 1,
+        "number_of_sample": 1024,
+        "number_of_connections":6
+
     },
     "model": {
-        "type": "classification",
-        "message_passing_num": 10,
-        "hidden_size": 128,
-        "node_input_size": 1,
-        "output_size": 1,
-        "edge_input_size": 0,
-        "num_heads": 4
+        "type": "pn",
+        "hidden_layers": 4,
+        "hidden_size": 64,
+        "node_input_size": 3,
+        "output_size": 2,
+        "edge_input_size": 4,
+        "num_heads": 4,
+        "dim_model" :[] 
+
     },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 1,
+        "feature_index_end": 3,
         "output_index_start": 0,
         "output_index_end": 1,
         "node_type_index": 1
     },
     "transformations": {
         "preprocessing": {
-            "noise": [10.0],
+            "noise": 0,
             "noise_index_start": [0],
             "noise_index_end": [1],
             "masking": 0.1

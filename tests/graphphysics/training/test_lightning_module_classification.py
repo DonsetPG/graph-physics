@@ -1,6 +1,7 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import torch
+import wandb
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data, Batch
@@ -33,10 +34,11 @@ class MockDataset(GraphClassificationDataset):
     def __getitem__(self, idx):
         x = torch.randn(10, 8)
         x = torch.abs(x)
+        pos = torch.randn(10, 3)
         edge_index = torch.randint(0, 10, (2, 20))
         edge_attr = torch.randn(20, 4)
-        data = Data(x=x, edge_index=edge_index, edge_attr=edge_attr)
-        data.y = torch.randint(0, 2, ()).float()
+        data = Data(x=x, pos=pos, edge_index=edge_index, edge_attr=edge_attr)
+        data.y = torch.randint(0, 2, (2,)).float()
         return data
 
 
@@ -58,19 +60,18 @@ class TestLightningModuleClassification(unittest.TestCase):
             },
             "index": {
                 "feature_index_start": 0,
-                "feature_index_end": 2,
+                "feature_index_end": 3,
                 "output_index_start": 0,
                 "output_index_end": 1,
                 "node_type_index": 1,
             },
             "model": {
-                "type": "classification",
-                "message_passing_num": 10,
-                "hidden_size": 128,
-                "node_input_size": 2,
-                "output_size": 1,
-                "edge_input_size": 4,
-                "num_heads": 4,
+                "type": "pn",
+                "hidden_layers": 2,
+                "hidden_size": 64,
+                "node_input_size": 3,
+                "edge_input_size": 0,
+                "output_size": 2,
             },
             "dataset": {
                 "extension": "xdmf",
@@ -99,7 +100,7 @@ class TestLightningModuleClassification(unittest.TestCase):
         batch = next(iter(self.dataloader))
         output = self.model.forward(batch.to(device))
         self.assertIsNotNone(output)
-        self.assertEqual(output.shape[0], 2)
+        self.assertEqual(output.shape, (2, 2))
 
     def test_training_step(self):
         batch = next(iter(self.dataloader))
@@ -118,38 +119,63 @@ class TestLightningModuleClassification(unittest.TestCase):
         # Check that val_step_outputs and val_step_targets have been updated
         self.assertEqual(len(self.model.val_step_outputs), 1)
         self.assertEqual(len(self.model.val_step_targets), 1)
-        self.assertEqual(self.model.val_step_outputs[0].shape, (1,))
-        self.assertEqual(self.model.val_step_targets[0].shape, (1,))
+        self.assertEqual(self.model.val_step_outputs[0].shape, (2,))
+        self.assertEqual(self.model.val_step_targets[0].shape, (2,))
 
     def test_on_validation_epoch_end(self):
         # Simulate multiple validation steps
         num_steps = 3
         batch_size = 5
-        output_dim = 1
+        output_dim = 2
         self.model.eval()
 
+        wandb_run = wandb.init()
+
         # Simulate val_step_outputs and val_step_targets
-        for i in range(num_steps):
-            predicted_outputs = torch.randint(0, 2, (batch_size, output_dim)).float()
-            targets = torch.randint(0, 2, (batch_size, output_dim)).float()
-            self.model.val_step_outputs.append(predicted_outputs)
-            self.model.val_step_targets.append(targets)
+        predicted_outputs = [
+            torch.randint(0, 2, (batch_size,)).float() for _ in range(num_steps)
+        ]
+        targets = [torch.randint(0, 2, (batch_size,)).float() for _ in range(num_steps)]
+        self.model.val_step_outputs.extend(predicted_outputs)
+        self.model.val_step_targets.extend(targets)
 
         # Run on_validation_epoch_end
-        with patch.object(self.model, "log") as mock_log:
+        with patch.object(self.model, "log_dict") as mock_log_dict:
             self.model.on_validation_epoch_end()
 
             # Check that confusion matrix and F1 score are computed and logged
-            mock_log.assert_any_call(
-                "val_conf_matrix",
-                unittest.mock.ANY,
+            mock_log_dict.assert_any_call(
+                {
+                    "Aneurysm True ValCM[0,0]/pred": unittest.mock.ANY,
+                    "Aneurysm True ValCM[0,0]/Target": 66,
+                },
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,
             )
-            mock_log.assert_any_call(
-                "val_f1_score",
-                unittest.mock.ANY,
+            mock_log_dict.assert_any_call(
+                {
+                    "Vessel False ValCM[0,1]/pred": unittest.mock.ANY,
+                    "Vessel False ValCM[0,1]/Target": 0,
+                },
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            mock_log_dict.assert_any_call(
+                {
+                    "Aneurysm False ValCM[1,0]/pred": unittest.mock.ANY,
+                    "Aneurysm False ValCM[1,0]/Target": 0,
+                },
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+            )
+            mock_log_dict.assert_any_call(
+                {
+                    "Vessel True ValCM[1,1]/pred": unittest.mock.ANY,
+                    "Vessel True ValCM[1,1]/Target": 338,
+                },
                 on_step=False,
                 on_epoch=True,
                 prog_bar=True,

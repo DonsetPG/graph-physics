@@ -8,6 +8,7 @@ import torch
 import torch_geometric.transforms as T
 from torch.utils.data import Dataset
 
+from graphphysics.dataset.preprocessing import Random3DRotate
 from graphphysics.utils.torch_graph import get_masked_indexes, meshdata_to_graph
 
 
@@ -19,6 +20,8 @@ class GraphClassificationDataset(Dataset):
         preprocessing=None,
         masking_ratio=None,
         switch_to_val: bool = False,
+        number_of_sample: int = 1024,
+        number_of_connections: int = 6,
     ):
 
         if switch_to_val:
@@ -47,6 +50,9 @@ class GraphClassificationDataset(Dataset):
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.preprocessing = preprocessing
         self.masking_ratio = masking_ratio
+
+        self.number_of_sample = number_of_sample
+        self.number_of_connections = number_of_connections
 
     def __len__(self):
         return len(self.file_paths)
@@ -80,11 +86,19 @@ class GraphClassificationDataset(Dataset):
             cells=np.array(faces).astype(np.int32),
             point_data=None,
         )
-
         graph = graph.to(self.device)
 
         classification_processing = T.Compose(
-            [T.RandomFlip(axis=random.randint(0, 2)), T.RandomJitter(translate=0.002)]
+            [
+                T.NormalizeScale(),
+                T.RandomFlip(axis=random.randint(0, 2)),
+                T.RandomJitter(0.002),
+                Random3DRotate(),
+                T.SamplePoints(
+                    num=self.number_of_sample, remove_faces=False, include_normals=True
+                ),
+                T.KNNGraph(k=self.number_of_connections),
+            ]
         )
 
         graph = classification_processing(graph)
@@ -92,12 +106,19 @@ class GraphClassificationDataset(Dataset):
         if self.preprocessing is not None:
             graph = self.preprocessing(graph)
 
+        graph.x = graph.normal
+
         if self.masking_ratio is not None:
             selected_indices = get_masked_indexes(graph, self.masking_ratio)
         else:
             selected_indices = None
 
-        graph.y = label
+        # Set the label
+        if label == 1:
+            graph.y = torch.tensor([0, 1], dtype=torch.float32)
+
+        else:
+            graph.y = torch.tensor([1, 0], dtype=torch.float32)
 
         if selected_indices is not None:
             return graph, selected_indices

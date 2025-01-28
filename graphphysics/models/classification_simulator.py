@@ -1,6 +1,6 @@
 import torch
 import torch.nn as nn
-from torch_geometric.data import Data
+from torch_geometric.data import Batch
 
 from graphphysics.models.layers import Normalizer
 
@@ -16,8 +16,8 @@ class ClassificationSimulator(nn.Module):
         output_index_start: int,
         output_index_end: int,
         node_type_index: int,
-        batch_size: int,
         model: nn.Module,
+        model_type: str,
         device: torch.device,
         model_dir="checkpoint/simulator.pth",
     ):
@@ -36,6 +36,7 @@ class ClassificationSimulator(nn.Module):
 
         self.model_dir = model_dir
         self.model = model.to(device)
+        self.model_type = model_type
         self._output_normalizer = Normalizer(
             size=output_size, name="output_normalizer", device=device
         )
@@ -49,30 +50,25 @@ class ClassificationSimulator(nn.Module):
         )
 
         self.device = device
-        self.batch_size = batch_size
 
-    def _build_input_graph(self, inputs: Data, is_training: bool) -> Data:
+    def _build_input_graph(self, inputs: Batch, is_training: bool) -> Batch:
         features = inputs.x[:, self.feature_index_start : self.feature_index_end]
         node_features_list = [features]
         node_features = torch.cat(node_features_list, dim=1)
         node_features_normalized = self._node_normalizer(node_features, is_training)
 
-        if self._edge_normalizer is not None:
-            edge_attr = self._edge_normalizer(inputs.edge_attr, is_training)
-        else:
-            edge_attr = inputs.edge_attr
+        if self.model_type == "epd":
+            if self._edge_normalizer is not None:
+                edge_attr = self._edge_normalizer(inputs.edge_attr, is_training)
+            else:
+                edge_attr = inputs.edge_attr
+            inputs.edge_attr = edge_attr
 
-        graph = Data(
-            x=node_features_normalized,
-            pos=inputs.pos,
-            edge_attr=edge_attr,
-            edge_index=inputs.edge_index,
-            y=inputs.y,
-        )
+        inputs.x = node_features_normalized
 
-        return graph
+        return inputs
 
-    def forward(self, inputs: Data):
+    def forward(self, inputs: Batch) -> torch.Tensor:
         graph = self._build_input_graph(inputs=inputs, is_training=self.training)
         network_output = self.model(graph)
         return network_output

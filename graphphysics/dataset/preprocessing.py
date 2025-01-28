@@ -344,12 +344,12 @@ class Random3DRotate(BaseTransform):
         if hasattr(data, "x") and data.x is not None and self.feature_indices:
             data.x = self._rotate_features(data.x, rotation_matrix)
 
-        if hasattr(data, "y") and data.x is not None:
-            target = data.y[:, 0:3]
-            # Apply rotation
-            rotated_target = target @ rotation_matrix.to(target.device, target.dtype)
-            # Update the target
-            data.y = rotated_target
+        # if hasattr(data, "y") and data.x is not None:
+        #     target = data.y[:, 0:3]
+        #     # Apply rotation
+        #     rotated_target = target @ rotation_matrix.to(target.device, target.dtype)
+        #     # Update the target
+        #     data.y = rotated_target
 
         return data
 

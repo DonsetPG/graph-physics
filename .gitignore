@@ -12,3 +12,13 @@ nohup.out
 .DS_Store
 .idea/
 meshes/
+
+checkpoints/*
+dataset/*
+test.sh
+wandb/*
+dataset_up/*
+dataset_down/*
+*.json
+*.sh
+*.png

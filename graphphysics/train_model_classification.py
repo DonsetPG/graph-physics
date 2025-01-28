@@ -3,7 +3,6 @@ import os
 import warnings
 
 import torch
-import wandb
 from absl import app, flags
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
@@ -11,8 +10,8 @@ from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 from torch_geometric.loader import DataLoader
 
+import wandb
 from graphphysics.dataset.dataset_classification import GraphClassificationDataset
-from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module_classification import (
     LightningModuleClassification,
 )
@@ -27,6 +26,7 @@ torch.set_float32_matmul_precision("high")
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
+flags.DEFINE_string("project_folder", "pn_features", "Name of the WandB project")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_float("init_lr", 0.001, "Initial learning rate")
 flags.DEFINE_integer("batch_size", 2, "Batch size")
@@ -61,6 +61,7 @@ def main(argv):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     wandb_project_name = FLAGS.project_name
+    wandb_project_folder = FLAGS.project_folder
     num_epochs = FLAGS.num_epochs
     initial_lr = FLAGS.init_lr
     batch_size = FLAGS.batch_size
@@ -70,29 +71,42 @@ def main(argv):
     model_save_path = FLAGS.model_save_path
     use_edge_feature = not FLAGS.no_edge_feature
 
-    # Build preprocessing function
-    preprocessing = get_preprocessing(
-        param=parameters,
-        device=device,
-        use_edge_feature=use_edge_feature,
-        extra_node_features=None,
-    )
+    if parameters["model"]["type"] == "epd":
+        # Build preprocessing function
+        preprocessing = get_preprocessing(
+            param=parameters,
+            device=device,
+            use_edge_feature=use_edge_feature,
+            extra_node_features=None,
+        )
+    elif (
+        parameters["model"]["type"] == "pn"
+        or parameters["model"]["type"] == "pn2"
+        or parameters["model"]["type"] == "pt"
+    ):
+        preprocessing = None
+    else:
+        preprocessing = None
 
     # Get training and validation datasets
     train_dataset = GraphClassificationDataset(
-        root_folder=parameters["dataset"]["train_folder"],
+        root_folder=parameters["dataset"]["obj_folder"],
         meta_path=parameters["dataset"]["meta_path"],
         preprocessing=preprocessing,
         masking_ratio=None,
         switch_to_val=False,
+        number_of_sample=parameters["dataset"]["number_of_sample"],
+        number_of_connections=parameters["dataset"]["number_of_connections"],
     )
 
     val_dataset = GraphClassificationDataset(
-        root_folder=parameters["dataset"]["train_folder"],
+        root_folder=parameters["dataset"]["obj_folder"],
         meta_path=parameters["dataset"]["meta_path"],
         preprocessing=preprocessing,
         masking_ratio=None,
         switch_to_val=True,
+        number_of_sample=parameters["dataset"]["number_of_sample"],
+        number_of_connections=parameters["dataset"]["number_of_connections"],
     )
 
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)
@@ -152,19 +166,22 @@ def main(argv):
         )
 
     # Initialize WandbLogger
-    wandb_run = wandb.init(project=wandb_project_name)
+    wandb_run = wandb.init(project=wandb_project_folder, name=wandb_project_name)
     wandb_logger = WandbLogger(experiment=wandb_run)
     checkpoint_callback = ModelCheckpoint(dirpath="checkpoints/")
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     wandb_logger.experiment.config.update(
         {
+            "number_of_samples": parameters["dataset"]["number_of_sample"],
+            "number_of_connections": parameters["dataset"]["number_of_connections"],
             "architecture": parameters["model"]["type"],
-            "#_layers": parameters["model"]["message_passing_num"],
+            "#_layers": parameters["model"]["hidden_layers"],
             "#_neurons": parameters["model"]["hidden_size"],
             "#_hops": parameters["dataset"]["khop"],
             "max_lr": initial_lr,
             "batch_size": batch_size,
+            "dim_model": parameters["model"]["dim_model"],
         }
     )
 
@@ -177,7 +194,6 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1]),
             lr_monitor,
         ],
         log_every_n_steps=100,
