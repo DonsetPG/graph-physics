@@ -48,7 +48,7 @@ class LightningModuleClassification(L.LightningModule):
 
         if model_type == "epd":
             processor = ClassificationModel(
-                message_passing_num=parameters["model"]["message_passing_num"],
+                message_passing_num=parameters["model"]["hidden_layers"],
                 node_input_size=parameters["model"]["node_input_size"],
                 edge_input_size=parameters["model"]["edge_input_size"],
                 output_size=parameters["model"]["output_size"],

@@ -97,6 +97,7 @@ def main(argv):
         switch_to_val=False,
         number_of_sample=parameters["dataset"]["number_of_sample"],
         number_of_connections=parameters["dataset"]["number_of_connections"],
+        model_type=parameters["model"]["type"],
     )
 
     val_dataset = GraphClassificationDataset(
@@ -107,6 +108,7 @@ def main(argv):
         switch_to_val=True,
         number_of_sample=parameters["dataset"]["number_of_sample"],
         number_of_connections=parameters["dataset"]["number_of_connections"],
+        model_type=parameters["model"]["type"],
     )
 
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)

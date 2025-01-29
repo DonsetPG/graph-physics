@@ -22,6 +22,7 @@ class GraphClassificationDataset(Dataset):
         switch_to_val: bool = False,
         number_of_sample: int = 1024,
         number_of_connections: int = 6,
+        model_type: str = "epd",
     ):
 
         if switch_to_val:
@@ -53,6 +54,8 @@ class GraphClassificationDataset(Dataset):
 
         self.number_of_sample = number_of_sample
         self.number_of_connections = number_of_connections
+
+        self.model_type = model_type
 
     def __len__(self):
         return len(self.file_paths)
@@ -88,25 +91,40 @@ class GraphClassificationDataset(Dataset):
         )
         graph = graph.to(self.device)
 
-        classification_processing = T.Compose(
-            [
-                T.NormalizeScale(),
-                T.RandomFlip(axis=random.randint(0, 2)),
-                T.RandomJitter(0.002),
-                Random3DRotate(),
-                T.SamplePoints(
-                    num=self.number_of_sample, remove_faces=False, include_normals=True
-                ),
-                T.KNNGraph(k=self.number_of_connections),
-            ]
-        )
+        if self.model_type == "epd":
+            classification_processing = T.Compose(
+                [
+                    T.NormalizeScale(),
+                    T.RandomFlip(axis=random.randint(0, 2)),
+                    T.RandomJitter(0.02),
+                    Random3DRotate(),
+                ]
+            )
+        else:
+            classification_processing = T.Compose(
+                [
+                    T.NormalizeScale(),
+                    T.RandomFlip(axis=random.randint(0, 2)),
+                    T.RandomJitter(0.002),
+                    Random3DRotate(),
+                    T.SamplePoints(
+                        num=self.number_of_sample,
+                        remove_faces=False,
+                        include_normals=True,
+                    ),
+                    T.KNNGraph(k=self.number_of_connections),
+                ]
+            )
 
         graph = classification_processing(graph)
 
         if self.preprocessing is not None:
             graph = self.preprocessing(graph)
 
-        graph.x = graph.normal
+        if self.model_type == "epd":
+            graph.x = graph.pos
+        else:
+            graph.x = graph.normal
 
         if self.masking_ratio is not None:
             selected_indices = get_masked_indexes(graph, self.masking_ratio)

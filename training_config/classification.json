@@ -5,19 +5,18 @@
         "meta_path": "dataset_config/classification_meta.json",
         "khop": 1,
         "number_of_sample": 1024,
-        "number_of_connections":6
+        "number_of_connections":16
 
     },
     "model": {
-        "type": "pn",
-        "hidden_layers": 4,
+        "type": "epd",
+        "hidden_layers": 30,
         "hidden_size": 64,
         "node_input_size": 3,
         "output_size": 2,
         "edge_input_size": 4,
         "num_heads": 4,
         "dim_model" :[] 
-
     },
     "index": {
         "feature_index_start": 0,

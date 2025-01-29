@@ -336,7 +336,7 @@ class ClassificationModel(nn.Module):
         message_passing_num: int,
         node_input_size: int,
         edge_input_size: int,
-        output_size: int = 1,
+        output_size: int = 2,
         hidden_size: int = 128,
     ):
         super(ClassificationModel, self).__init__()
@@ -373,12 +373,14 @@ class ClassificationModel(nn.Module):
 
 class Decoder_1(nn.Module):
     def __init__(
-        self, in_size, hidden_size, out_size=1, nb_of_layers=4, layer_norm=True
+        self, in_size, hidden_size, out_size=2, nb_of_layers=8, layer_norm=True
     ):
         super().__init__()
         self.mlp = build_mlp(in_size, hidden_size, out_size, nb_of_layers, layer_norm)
 
+        self.softmax = nn.Softmax(dim=1)
+
     def forward(self, x: torch.Tensor, batch: Batch) -> torch.Tensor:
         x = global_mean_pool(x, batch)
         x = self.mlp(x)
-        return torch.sigmoid(x)
+        return self.softmax(x)
