@@ -71,8 +71,6 @@ def main(argv):
     model_save_path = FLAGS.model_save_path
     use_edge_feature = not FLAGS.no_edge_feature
 
-    
-
     # Get training and validation datasets
     dataset_kwargs = {
         "root_folder": parameters["dataset"]["obj_folder"],

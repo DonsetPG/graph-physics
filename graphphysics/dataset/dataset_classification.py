@@ -9,7 +9,7 @@ import torch_geometric.transforms as T
 from torch.utils.data import Dataset
 
 from graphphysics.dataset.preprocessing import Random3DRotate
-from graphphysics.utils.torch_graph import get_masked_indexes, meshdata_to_graph
+from graphphysics.utils.torch_graph import meshdata_to_graph
 
 
 class GraphClassificationDataset(Dataset):
@@ -50,10 +50,9 @@ class GraphClassificationDataset(Dataset):
         self.number_of_sample = number_of_sample
         self.number_of_connections = number_of_connections
 
-
     def __len__(self):
         return len(self.file_paths)
-    
+
     def get_processing(self):
         return T.Compose(
             [
@@ -69,14 +68,13 @@ class GraphClassificationDataset(Dataset):
                 T.KNNGraph(k=self.number_of_connections),
             ]
         )
-        
+
     def set_label(self, label):
         if label == 1:
             return torch.tensor([0, 1], dtype=torch.float32)
 
         else:
             return torch.tensor([1, 0], dtype=torch.float32)
-
 
     def __getitem__(self, idx):
 

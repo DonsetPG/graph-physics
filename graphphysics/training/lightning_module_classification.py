@@ -8,7 +8,6 @@ from torch_geometric.data import Batch
 
 import wandb
 from graphphysics.models.classification_model import (
-    ClassificationModel,
     ClassificationPointNetP2,
     ClassificationPointTransformer,
     PointNetClassifier,
@@ -52,7 +51,7 @@ class LightningModuleClassification(L.LightningModule):
             "output_size": parameters["model"]["output_size"],
             "hidden_size": parameters["model"]["hidden_size"],
             "number_of_connections": parameters["dataset"]["number_of_connections"],
-            "dim_model" : parameters["model"]["dim_model"],
+            "dim_model": parameters["model"]["dim_model"],
         }
 
         if model_type == "pn":
