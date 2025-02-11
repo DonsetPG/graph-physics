@@ -29,20 +29,23 @@ class PointNetLayer(MessagePassing):
         # Initialization of the MLP:
         # Here, the number of input features correspond to the hidden
         # node dimensionality plus point dimensionality (=3).
-        self.mlp = Sequential(
-            Linear(in_channels + 3, out_channels),
-            ReLU(),
-            Linear(out_channels, out_channels),
+        self.mlp = build_mlp(
+            in_size=in_channels + 3,
+            hidden_size=out_channels,
+            out_size=out_channels,
+            nb_of_layers=2,
+            layer_norm=False
         )
 
     def forward(
         self,
-        h: Tensor,
-        pos: Tensor,
-        edge_index: Tensor,
+        graph: Batch,
     ) -> Tensor:
         # Start propagating messages.
-        return self.propagate(edge_index, h=h, pos=pos)
+        x=graph.x
+        edge_index=graph.edge_index
+        pos=graph.pos
+        return self.propagate(edge_index, h=x, pos=pos)
 
     def message(
         self,
@@ -65,14 +68,17 @@ class PointNetClassifier(torch.nn.Module):
         hidden_layers: int = 2,
         hidden_size: int = 64,
         output_size: int = 2,
+        **kwargs
     ):
         super().__init__()
-
-        self.conv1 = PointNetLayer(node_input_size, hidden_size)
-
+        
         self.processer_list = nn.ModuleList(
-            [PointNetLayer(hidden_size, hidden_size) for _ in range(hidden_layers)]
+             [PointNetLayer(node_input_size, hidden_size), ReLU()]
         )
+        
+        for _ in range(hidden_layers):
+          self.processer_list.append(PointNetLayer(hidden_size, hidden_size))
+          self.processer_list.append(ReLU())
 
         self.classifier = Linear(hidden_size, output_size)
 
@@ -80,47 +86,33 @@ class PointNetClassifier(torch.nn.Module):
 
     def forward(self, graph=Batch) -> Tensor:
 
-        h = graph.x
-        pos = graph.pos
-        edge_index = graph.edge_index
-        batch = graph.batch
-
-        # Perform two-layers of message passing:
-        h = self.conv1(h=h, pos=pos, edge_index=edge_index)
-        h = h.relu()
-
         for layer in self.processer_list:
-            h = layer(h=h, pos=pos, edge_index=edge_index)
-            h = h.relu()
+            graph.x = layer(graph)
 
         # Global Pooling:
-        h = global_max_pool(h, batch)  # [num_examples, hidden_channels]
+        x = global_max_pool(graph.x, graph.batch)  # [num_examples, hidden_channels]
 
-        h = self.classifier(h)  # [num_examples, output_channels]
+        x = self.classifier(x)  # [num_examples, output_channels]
 
         # Classifier:
-        return self.softmax(h)
+        return self.softmax(x)
 
 
 # The PointNet++ classification model and layer
 class SAModule(torch.nn.Module):
-    def __init__(self, ratio, r, nn, num_neighbors=16):
+    def __init__(self, ratio, r, nn, number_of_connections=16):
         super().__init__()
         self.ratio = ratio
         self.r = r
         self.conv = PointNetConv(nn, add_self_loops=False)
-        self.num_neighbors = num_neighbors
+        self.number_of_connections = number_of_connections
+
+    def _radius(self, idx, pos, batch):
+        return radius(pos, pos[idx], self.r, batch, batch[idx], max_num_neighbors=self.number_of_connections)
 
     def forward(self, x, pos, batch):
         idx = fps(pos, batch, ratio=self.ratio)
-        row, col = radius(
-            pos,
-            pos[idx],
-            self.r,
-            batch,
-            batch[idx],
-            max_num_neighbors=self.num_neighbors,
-        )
+        row, col = self._radius(idx, pos, batch)
         edge_index = torch.stack([col, row], dim=0)
         x_dst = None if x is None else x[idx]
         x = self.conv((x, x_dst), (pos, pos[idx]), edge_index)
@@ -129,12 +121,12 @@ class SAModule(torch.nn.Module):
 
 
 class GlobalSAModule(torch.nn.Module):
-    def __init__(self, nn):
+    def __init__(self, net):
         super().__init__()
-        self.nn = nn
+        self.net = net
 
     def forward(self, x, pos, batch):
-        x = self.nn(torch.cat([x, pos], dim=1))
+        x = self.net(torch.cat([x, pos], dim=1))
         x = global_max_pool(x, batch)
         pos = pos.new_zeros((x.size(0), 3))
         batch = torch.arange(x.size(0), device=batch.device)
@@ -145,38 +137,41 @@ class ClassificationPointNetP2(torch.nn.Module):
     def __init__(
         self,
         node_input_size: int = 3,
-        dim_model: list = [[64, 128, 128], [128, 128, 256], [256, 512, 1024]],
+        dim_model: list = [[64, 128, 128], [128, 128, 256], [256, 512, 1024], [1024, 512]],
         output_size: int = 2,
-        num_neighbors: int = 16,
+        number_of_connections: int = 16,
+        **kwargs
     ):
         super().__init__()
 
         self.sa_modules = nn.ModuleList()
-        for i in range(len(dim_model)):
-            if i == 0:
-                self.sa_modules.append(
-                    SAModule(
-                        0.5,
-                        0.2,
-                        MLP([3 + node_input_size] + dim_model[i]),
-                        num_neighbors,
-                    )
-                )
-            elif i == len(dim_model) - 1:
-                self.sa_modules.append(
-                    GlobalSAModule(MLP([dim_model[i - 1][-1] + 3] + dim_model[i]))
-                )
-            else:
-                self.sa_modules.append(
-                    SAModule(
-                        0.25,
-                        0.4,
-                        MLP([dim_model[i - 1][-1] + 3] + dim_model[i]),
-                        num_neighbors,
-                    )
-                )
+        # Initialize the first SAModule
+        self.sa_modules.append(
+            SAModule(
+            0.5,
+            0.2,
+            build_mlp(3 + node_input_size, dim_model[0][0], dim_model[0][-1], len(dim_model[0])),
+            number_of_connections,
+            )
+        )
 
-        self.mlp = MLP([1024, 512, 256, output_size], dropout=0.5, norm=None)
+        # Add the intermediate SAModules
+        for i in range(1, len(dim_model) - 1):
+            self.sa_modules.append(
+                SAModule(
+                    0.25,
+                    0.4,
+                    build_mlp(dim_model[i - 1][-1] + 3, dim_model[i][0], dim_model[i][-1], len(dim_model[i])),
+                    number_of_connections,
+                )
+            )
+
+        # Add the final GlobalSAModule
+        self.sa_modules.append(
+            GlobalSAModule(build_mlp(dim_model[-2][-1] + 3, dim_model[-1][0], dim_model[-1][-1], len(dim_model[-1])))
+        )
+
+        self.mlp = build_mlp(dim_model[-1][0], dim_model[-1][1], output_size, 2, dropout=0.5, norm=False)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -184,7 +179,7 @@ class ClassificationPointNetP2(torch.nn.Module):
         sa0_out = (data.x, data.pos, data.batch)
 
         for sa in self.sa_modules:
-            sa0_out = sa(*sa0_out)
+            sa0_out = sa(sa0_out)
 
         x, pos, batch = sa0_out
 
@@ -202,11 +197,9 @@ class TransformerBlock(torch.nn.Module):
         self.lin_in = Linear(in_channels, in_channels)
         self.lin_out = Linear(out_channels, out_channels)
 
-        self.pos_nn = MLP([3, 64, out_channels], norm=None, plain_last=False)
+        self.pos_nn = build_mlp(in_size=3, hidden_size=64, out_size=out_channels, nb_of_layers=2, layer_norm=False, plain_last=False)
 
-        self.attn_nn = MLP(
-            [out_channels, 64, out_channels], norm=None, plain_last=False
-        )
+        self.attn_nn = build_mlp(in_size=out_channels, hidden_size=64, out_size=out_channels, nb_of_layers=2, layer_norm=False, plain_last=False)
 
         self.transformer = PointTransformerConv(
             in_channels, out_channels, pos_nn=self.pos_nn, attn_nn=self.attn_nn
@@ -224,11 +217,11 @@ class TransitionDown(torch.nn.Module):
     cardinality and uses an mlp to augment features dimensionnality.
     """
 
-    def __init__(self, in_channels, out_channels, ratio=0.25, k=16):
+    def __init__(self, node_input_size, output_size, ratio=0.25, k=16):
         super().__init__()
         self.k = k
         self.ratio = ratio
-        self.mlp = MLP([in_channels, out_channels], plain_last=False)
+        self.mlp = MLP([node_input_size, output_size], plain_last=False)
 
     def forward(self, x, pos, batch):
         # FPS sampling
@@ -260,15 +253,22 @@ class TransitionDown(torch.nn.Module):
 
 
 class ClassificationPointTransformer(torch.nn.Module):
-    def __init__(self, in_channels, dim_model, out_channels=2, num_neighbors=16):
+    def __init__(
+            self, 
+            node_input_size: int = 3, 
+            dim_model: list = [32, 64, 128, 256, 512, 64], 
+            output_size: int = 2, 
+            number_of_connections: int = 16, 
+            **kwargs
+    ):
         super().__init__()
-        self.num_neighbors = num_neighbors
+        self.number_of_connections = number_of_connections
 
         # dummy feature is created if there is none given
-        in_channels = max(in_channels, 1)
+        node_input_size = max(node_input_size, 1)
 
         # first block
-        self.mlp_input = MLP([in_channels, dim_model[0]], plain_last=False)
+        self.mlp_input = MLP([node_input_size, dim_model[0]], plain_last=False)
 
         self.transformer_input = TransformerBlock(
             in_channels=dim_model[0], out_channels=dim_model[0]
@@ -277,13 +277,13 @@ class ClassificationPointTransformer(torch.nn.Module):
         self.transformers_down = torch.nn.ModuleList()
         self.transition_down = torch.nn.ModuleList()
 
-        for i in range(len(dim_model) - 1):
+        for i in range(len(dim_model) - 2):
             # Add Transition Down block followed by a Transformer block
             self.transition_down.append(
                 TransitionDown(
                     in_channels=dim_model[i],
                     out_channels=dim_model[i + 1],
-                    k=self.num_neighbors,
+                    k=self.number_of_connections,
                 )
             )
 
@@ -294,7 +294,7 @@ class ClassificationPointTransformer(torch.nn.Module):
             )
 
         # class score computation
-        self.mlp_output = MLP([dim_model[-1], 64, out_channels], norm=None)
+        self.mlp_output = build_mlp(dim_model[-2], dim_model[-1], output_size, 2, norm=False)
 
         self.softmax = nn.Softmax(dim=1)
 
@@ -310,14 +310,14 @@ class ClassificationPointTransformer(torch.nn.Module):
 
         # first block
         x = self.mlp_input(x)
-        edge_index = knn_graph(pos, k=self.num_neighbors, batch=batch)
+        edge_index = knn_graph(pos, k=self.number_of_connections, batch=batch)
         x = self.transformer_input(x, pos, edge_index)
 
         # backbone
         for i in range(len(self.transformers_down)):
             x, pos, batch = self.transition_down[i](x, pos, batch=batch)
 
-            edge_index = knn_graph(pos, k=self.num_neighbors, batch=batch)
+            edge_index = knn_graph(pos, k=self.number_of_connections, batch=batch)
             x = self.transformers_down[i](x, pos, edge_index)
 
         # GlobalAveragePooling
@@ -327,60 +327,3 @@ class ClassificationPointTransformer(torch.nn.Module):
         out = self.mlp_output(x)
 
         return self.softmax(out)
-
-
-# A Classification model with message passing
-class ClassificationModel(nn.Module):
-    def __init__(
-        self,
-        message_passing_num: int,
-        node_input_size: int,
-        edge_input_size: int,
-        output_size: int = 2,
-        hidden_size: int = 128,
-    ):
-        super(ClassificationModel, self).__init__()
-        self.hidden_size = hidden_size
-
-        self.nodes_encoder = build_mlp(
-            in_size=node_input_size,
-            hidden_size=hidden_size,
-            out_size=hidden_size,
-        )
-
-        self.edges_encoder = build_mlp(
-            in_size=edge_input_size,
-            hidden_size=hidden_size,
-            out_size=hidden_size,
-        )
-
-        self.processer_list = nn.ModuleList(
-            [GraphNetBlock(hidden_size=hidden_size) for _ in range(message_passing_num)]
-        )
-
-        self.decode_module = Decoder_1(hidden_size, hidden_size)
-
-    def forward(self, graph: Batch) -> torch.Tensor:
-        edge_index = graph.edge_index
-        x = self.nodes_encoder(graph.x)
-        edge_attr = self.edges_encoder(graph.edge_attr)
-        for block in self.processer_list:
-            x, edge_attr = block(x, edge_index, edge_attr)
-
-        x_decoded = self.decode_module(x, graph.batch)
-        return x_decoded
-
-
-class Decoder_1(nn.Module):
-    def __init__(
-        self, in_size, hidden_size, out_size=2, nb_of_layers=8, layer_norm=True
-    ):
-        super().__init__()
-        self.mlp = build_mlp(in_size, hidden_size, out_size, nb_of_layers, layer_norm)
-
-        self.softmax = nn.Softmax(dim=1)
-
-    def forward(self, x: torch.Tensor, batch: Batch) -> torch.Tensor:
-        x = global_mean_pool(x, batch)
-        x = self.mlp(x)
-        return self.softmax(x)

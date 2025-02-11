@@ -46,36 +46,21 @@ class LightningModuleClassification(L.LightningModule):
 
         model_type = parameters["model"]["type"]
 
-        if model_type == "epd":
-            processor = ClassificationModel(
-                message_passing_num=parameters["model"]["hidden_layers"],
-                node_input_size=parameters["model"]["node_input_size"],
-                edge_input_size=parameters["model"]["edge_input_size"],
-                output_size=parameters["model"]["output_size"],
-                hidden_size=parameters["model"]["hidden_size"],
-            )
-        elif model_type == "pn":
-            processor = PointNetClassifier(
-                node_input_size=parameters["model"]["node_input_size"],
-                hidden_layers=parameters["model"]["hidden_layers"],
-                hidden_size=parameters["model"]["hidden_size"],
-                output_size=parameters["model"]["output_size"],
-            )
-        elif model_type == "pn2":
-            processor = ClassificationPointNetP2(
-                node_input_size=parameters["model"]["node_input_size"],
-                dim_model=parameters["model"]["dim_model"],
-                output_size=parameters["model"]["output_size"],
-                num_neighbors=parameters["dataset"]["number_of_connections"],
-            )
-        elif model_type == "pt":
-            processor = ClassificationPointTransformer(
-                in_channels=parameters["model"]["node_input_size"],
-                dim_model=parameters["model"]["dim_model"],
-                out_channels=parameters["model"]["output_size"],
-                num_neighbors=parameters["dataset"]["number_of_connections"],
-            )
+        model_kwargs = {
+            "hidden_layers": parameters["model"]["hidden_layers"],
+            "node_input_size": parameters["model"]["node_input_size"],
+            "output_size": parameters["model"]["output_size"],
+            "hidden_size": parameters["model"]["hidden_size"],
+            "number_of_connections": parameters["dataset"]["number_of_connections"],
+            "dim_model" : parameters["model"]["dim_model"],
+        }
 
+        if model_type == "pn":
+            processor = PointNetClassifier(**model_kwargs)
+        elif model_type == "pn2":
+            processor = ClassificationPointNetP2(**model_kwargs)
+        elif model_type == "pt":
+            processor = ClassificationPointTransformer(**model_kwargs)
         else:
             raise ValueError(f"Model type '{model_type}' not supported.")
 
@@ -83,7 +68,6 @@ class LightningModuleClassification(L.LightningModule):
 
         self.model = ClassificationSimulator(
             node_input_size=self.param["model"]["node_input_size"],
-            edge_input_size=self.param["model"]["edge_input_size"],
             output_size=self.param["model"]["output_size"],
             feature_index_start=self.param["index"]["feature_index_start"],
             feature_index_end=self.param["index"]["feature_index_end"],
@@ -91,7 +75,6 @@ class LightningModuleClassification(L.LightningModule):
             output_index_end=self.param["index"]["output_index_end"],
             node_type_index=self.param["index"]["node_type_index"],
             model=processor,
-            model_type=self.param["model"]["type"],
             device=device,
         )
 

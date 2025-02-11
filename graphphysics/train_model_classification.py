@@ -15,7 +15,7 @@ from graphphysics.dataset.dataset_classification import GraphClassificationDatas
 from graphphysics.training.lightning_module_classification import (
     LightningModuleClassification,
 )
-from graphphysics.training.parse_parameters import get_num_workers, get_preprocessing
+from graphphysics.training.parse_parameters import get_num_workers
 from graphphysics.utils.progressbar import ColabProgressBar
 
 warnings.filterwarnings(
@@ -71,44 +71,24 @@ def main(argv):
     model_save_path = FLAGS.model_save_path
     use_edge_feature = not FLAGS.no_edge_feature
 
-    if parameters["model"]["type"] == "epd":
-        # Build preprocessing function
-        preprocessing = get_preprocessing(
-            param=parameters,
-            device=device,
-            use_edge_feature=use_edge_feature,
-            extra_node_features=None,
-        )
-    elif (
-        parameters["model"]["type"] == "pn"
-        or parameters["model"]["type"] == "pn2"
-        or parameters["model"]["type"] == "pt"
-    ):
-        preprocessing = None
-    else:
-        preprocessing = None
+    
 
     # Get training and validation datasets
+    dataset_kwargs = {
+        "root_folder": parameters["dataset"]["obj_folder"],
+        "meta_path": parameters["dataset"]["meta_path"],
+        "number_of_sample": parameters["dataset"]["number_of_sample"],
+        "number_of_connections": parameters["dataset"]["number_of_connections"],
+    }
+
     train_dataset = GraphClassificationDataset(
-        root_folder=parameters["dataset"]["obj_folder"],
-        meta_path=parameters["dataset"]["meta_path"],
-        preprocessing=preprocessing,
-        masking_ratio=None,
+        **dataset_kwargs,
         switch_to_val=False,
-        number_of_sample=parameters["dataset"]["number_of_sample"],
-        number_of_connections=parameters["dataset"]["number_of_connections"],
-        model_type=parameters["model"]["type"],
     )
 
     val_dataset = GraphClassificationDataset(
-        root_folder=parameters["dataset"]["obj_folder"],
-        meta_path=parameters["dataset"]["meta_path"],
-        preprocessing=preprocessing,
-        masking_ratio=None,
+        **dataset_kwargs,
         switch_to_val=True,
-        number_of_sample=parameters["dataset"]["number_of_sample"],
-        number_of_connections=parameters["dataset"]["number_of_connections"],
-        model_type=parameters["model"]["type"],
     )
 
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)

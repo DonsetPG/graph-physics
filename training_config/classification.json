@@ -24,18 +24,5 @@
         "output_index_start": 0,
         "output_index_end": 1,
         "node_type_index": 1
-    },
-    "transformations": {
-        "preprocessing": {
-            "noise": 0,
-            "noise_index_start": [0],
-            "noise_index_end": [1],
-            "masking": 0.1
-        },
-        "world_pos_parameters": {
-            "use": false,
-            "world_pos_index_start": 0,
-            "world_pos_index_end": 3
-        }
     }
 }

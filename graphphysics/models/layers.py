@@ -80,6 +80,8 @@ def build_mlp(
     out_size: int,
     nb_of_layers: int = 4,
     layer_norm: bool = True,
+    dropout: float = 0.0,
+    plain_last: bool = True,
 ) -> nn.Module:
     """
     Builds a Multilayer Perceptron.
@@ -92,6 +94,9 @@ def build_mlp(
             Must be at least 2. Defaults to 4.
         layer_norm (bool, optional): Whether to apply RMS normalization to the
             output layer. Defaults to True.
+        dropout (float, optional): Dropout probability. Defaults to 0.0.
+        plain_last (bool, optional): Whether to exclude activation and dropout
+            from the last layer. Defaults to False.
 
     Returns:
         nn.Module: The constructed MLP model.
@@ -99,13 +104,21 @@ def build_mlp(
     assert nb_of_layers >= 2, "The MLP must have at least 2 layers (input and output)."
 
     layers = [nn.Linear(in_size, hidden_size), nn.ReLU()]
+    if dropout > 0.0:
+        layers.extend([nn.Dropout(dropout)])
 
     # Add hidden layers
     for _ in range(nb_of_layers - 2):
         layers.extend([nn.Linear(hidden_size, hidden_size), nn.ReLU()])
+        if dropout > 0.0:
+            layers.extend([nn.Dropout(dropout)])
 
     # Add output layer
     layers.append(nn.Linear(hidden_size, out_size))
+
+    if not plain_last:
+        layers.append(nn.ReLU())
+        layers.append(nn.Dropout(dropout))
 
     if layer_norm:
         layers.append(RMSNorm(out_size))

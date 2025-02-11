@@ -17,12 +17,9 @@ class GraphClassificationDataset(Dataset):
         self,
         root_folder: str,
         meta_path: str,
-        preprocessing=None,
-        masking_ratio=None,
         switch_to_val: bool = False,
         number_of_sample: int = 1024,
         number_of_connections: int = 6,
-        model_type: str = "epd",
     ):
 
         if switch_to_val:
@@ -49,16 +46,37 @@ class GraphClassificationDataset(Dataset):
             self.meta = json.loads(fp.read())
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-        self.preprocessing = preprocessing
-        self.masking_ratio = masking_ratio
 
         self.number_of_sample = number_of_sample
         self.number_of_connections = number_of_connections
 
-        self.model_type = model_type
 
     def __len__(self):
         return len(self.file_paths)
+    
+    def get_processing(self):
+        return T.Compose(
+            [
+                T.NormalizeScale(),
+                T.RandomFlip(axis=random.randint(0, 2)),
+                T.RandomJitter(0.002),
+                Random3DRotate(),
+                T.SamplePoints(
+                    num=self.number_of_sample,
+                    remove_faces=False,
+                    include_normals=True,
+                ),
+                T.KNNGraph(k=self.number_of_connections),
+            ]
+        )
+        
+    def set_label(self, label):
+        if label == 1:
+            return torch.tensor([0, 1], dtype=torch.float32)
+
+        else:
+            return torch.tensor([1, 0], dtype=torch.float32)
+
 
     def __getitem__(self, idx):
 
@@ -91,54 +109,11 @@ class GraphClassificationDataset(Dataset):
         )
         graph = graph.to(self.device)
 
-        if self.model_type == "epd":
-            classification_processing = T.Compose(
-                [
-                    T.NormalizeScale(),
-                    T.RandomFlip(axis=random.randint(0, 2)),
-                    T.RandomJitter(0.02),
-                    Random3DRotate(),
-                ]
-            )
-        else:
-            classification_processing = T.Compose(
-                [
-                    T.NormalizeScale(),
-                    T.RandomFlip(axis=random.randint(0, 2)),
-                    T.RandomJitter(0.002),
-                    Random3DRotate(),
-                    T.SamplePoints(
-                        num=self.number_of_sample,
-                        remove_faces=False,
-                        include_normals=True,
-                    ),
-                    T.KNNGraph(k=self.number_of_connections),
-                ]
-            )
-
+        classification_processing = self.get_processing()
         graph = classification_processing(graph)
 
-        if self.preprocessing is not None:
-            graph = self.preprocessing(graph)
+        graph.x = graph.normal
 
-        if self.model_type == "epd":
-            graph.x = graph.pos
-        else:
-            graph.x = graph.normal
+        graph.y = self.set_label(label)
 
-        if self.masking_ratio is not None:
-            selected_indices = get_masked_indexes(graph, self.masking_ratio)
-        else:
-            selected_indices = None
-
-        # Set the label
-        if label == 1:
-            graph.y = torch.tensor([0, 1], dtype=torch.float32)
-
-        else:
-            graph.y = torch.tensor([1, 0], dtype=torch.float32)
-
-        if selected_indices is not None:
-            return graph, selected_indices
-        else:
-            return graph
+        return graph

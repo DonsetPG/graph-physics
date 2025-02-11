@@ -9,7 +9,6 @@ class ClassificationSimulator(nn.Module):
     def __init__(
         self,
         node_input_size: int,
-        edge_input_size: int,
         output_size: int,
         feature_index_start: int,
         feature_index_end: int,
@@ -17,14 +16,12 @@ class ClassificationSimulator(nn.Module):
         output_index_end: int,
         node_type_index: int,
         model: nn.Module,
-        model_type: str,
         device: torch.device,
         model_dir="checkpoint/simulator.pth",
     ):
         super(ClassificationSimulator, self).__init__()
 
         self.node_input_size = node_input_size
-        self.edge_input_size = edge_input_size if edge_input_size > 0 else None
         self.output_size = output_size
 
         self.feature_index_start = feature_index_start
@@ -36,17 +33,11 @@ class ClassificationSimulator(nn.Module):
 
         self.model_dir = model_dir
         self.model = model.to(device)
-        self.model_type = model_type
         self._output_normalizer = Normalizer(
             size=output_size, name="output_normalizer", device=device
         )
         self._node_normalizer = Normalizer(
             size=node_input_size, name="node_normalizer", device=device
-        )
-        self._edge_normalizer = (
-            Normalizer(size=edge_input_size, name="edge_normalizer", device=device)
-            if self.edge_input_size is not None
-            else None
         )
 
         self.device = device
@@ -56,13 +47,6 @@ class ClassificationSimulator(nn.Module):
         node_features_list = [features]
         node_features = torch.cat(node_features_list, dim=1)
         node_features_normalized = self._node_normalizer(node_features, is_training)
-
-        if self.model_type == "epd":
-            if self._edge_normalizer is not None:
-                edge_attr = self._edge_normalizer(inputs.edge_attr, is_training)
-            else:
-                edge_attr = inputs.edge_attr
-            inputs.edge_attr = edge_attr
 
         inputs.x = node_features_normalized
 
