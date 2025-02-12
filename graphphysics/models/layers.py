@@ -101,6 +101,21 @@ def build_mlp(
     Returns:
         nn.Module: The constructed MLP model.
     """
+
+    if nb_of_layers == 1:
+        layers = [nn.Linear(in_size, out_size)]
+        if dropout > 0.0:
+            layers.extend([nn.Dropout(dropout)])
+
+        if not plain_last:
+            layers.append(nn.ReLU())
+            layers.append(nn.Dropout(dropout))
+
+        if layer_norm:
+            layers.append(RMSNorm(out_size))
+
+        return nn.Sequential(*layers)
+
     assert nb_of_layers >= 2, "The MLP must have at least 2 layers (input and output)."
 
     layers = [nn.Linear(in_size, hidden_size), nn.ReLU()]

@@ -4,7 +4,6 @@ from torch import Tensor
 from torch.nn import Linear, ReLU
 from torch_geometric.data import Batch
 from torch_geometric.nn import (
-    MLP,
     MessagePassing,
     PointNetConv,
     PointTransformerConv,
@@ -64,7 +63,7 @@ class PointNetLayer(MessagePassing):
 class PointNetClassifier(torch.nn.Module):
     def __init__(
         self,
-        node_input_size: int = 3,
+        node_input_size: int = 8,
         hidden_layers: int = 2,
         hidden_size: int = 64,
         output_size: int = 2,
@@ -143,7 +142,7 @@ class GlobalSAModule(torch.nn.Module):
 class ClassificationPointNetP2(torch.nn.Module):
     def __init__(
         self,
-        node_input_size: int = 3,
+        node_input_size: int = 8,
         dim_model: list = [
             [64, 128, 128],
             [128, 128, 256],
@@ -173,7 +172,7 @@ class ClassificationPointNetP2(torch.nn.Module):
         )
 
         # Add the intermediate SAModules
-        for i in range(1, len(dim_model) - 1):
+        for i in range(1, len(dim_model) - 2):
             self.sa_modules.append(
                 SAModule(
                     0.25,
@@ -192,16 +191,21 @@ class ClassificationPointNetP2(torch.nn.Module):
         self.sa_modules.append(
             GlobalSAModule(
                 build_mlp(
-                    dim_model[-2][-1] + 3,
-                    dim_model[-1][0],
-                    dim_model[-1][-1],
+                    dim_model[-3][-1] + 3,
+                    dim_model[-2][0],
+                    dim_model[-2][-1],
                     len(dim_model[-1]),
                 )
             )
         )
 
         self.mlp = build_mlp(
-            dim_model[-1][0], dim_model[-1][1], output_size, 2, dropout=0.5, norm=False
+            dim_model[-1][0],
+            dim_model[-1][1],
+            output_size,
+            2,
+            dropout=0.5,
+            layer_norm=False,
         )
 
         self.softmax = nn.Softmax(dim=1)
@@ -210,7 +214,7 @@ class ClassificationPointNetP2(torch.nn.Module):
         sa0_out = (data.x, data.pos, data.batch)
 
         for sa in self.sa_modules:
-            sa0_out = sa(sa0_out)
+            sa0_out = sa(*sa0_out)
 
         x, pos, batch = sa0_out
 
@@ -223,14 +227,14 @@ class ClassificationPointNetP2(torch.nn.Module):
 
 # The PointTransformer classification model and layer
 class TransformerBlock(torch.nn.Module):
-    def __init__(self, in_channels, out_channels):
+    def __init__(self, in_channels, hidden_size, out_channels):
         super().__init__()
         self.lin_in = Linear(in_channels, in_channels)
         self.lin_out = Linear(out_channels, out_channels)
 
         self.pos_nn = build_mlp(
-            in_size=3,
-            hidden_size=64,
+            in_size=in_channels,
+            hidden_size=hidden_size,
             out_size=out_channels,
             nb_of_layers=2,
             layer_norm=False,
@@ -239,7 +243,7 @@ class TransformerBlock(torch.nn.Module):
 
         self.attn_nn = build_mlp(
             in_size=out_channels,
-            hidden_size=64,
+            hidden_size=hidden_size,
             out_size=out_channels,
             nb_of_layers=2,
             layer_norm=False,
@@ -266,7 +270,9 @@ class TransitionDown(torch.nn.Module):
         super().__init__()
         self.k = k
         self.ratio = ratio
-        self.mlp = MLP([node_input_size, output_size], plain_last=False)
+        self.mlp = build_mlp(
+            node_input_size, output_size, nb_of_layers=1, layer_norm=False
+        )
 
     def forward(self, x, pos, batch):
         # FPS sampling
@@ -302,6 +308,7 @@ class ClassificationPointTransformer(torch.nn.Module):
         self,
         node_input_size: int = 3,
         dim_model: list = [32, 64, 128, 256, 512, 64],
+        hidden_size: int = 64,
         output_size: int = 2,
         number_of_connections: int = 16,
         **kwargs
@@ -313,10 +320,12 @@ class ClassificationPointTransformer(torch.nn.Module):
         node_input_size = max(node_input_size, 1)
 
         # first block
-        self.mlp_input = MLP([node_input_size, dim_model[0]], plain_last=False)
+        self.mlp_input = build_mlp(
+            node_input_size, dim_model[0], nb_of_layers=1, plain_last=False
+        )
 
         self.transformer_input = TransformerBlock(
-            in_channels=dim_model[0], out_channels=dim_model[0]
+            in_channels=dim_model[0], hidden_size=hidden_size, out_channels=dim_model[0]
         )
         # backbone layers
         self.transformers_down = torch.nn.ModuleList()
@@ -340,7 +349,7 @@ class ClassificationPointTransformer(torch.nn.Module):
 
         # class score computation
         self.mlp_output = build_mlp(
-            dim_model[-2], dim_model[-1], output_size, 2, norm=False
+            dim_model[-2], dim_model[-1], output_size, 2, layer_norm=False
         )
 
         self.softmax = nn.Softmax(dim=1)
