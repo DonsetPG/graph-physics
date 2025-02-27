@@ -64,8 +64,8 @@ class XDMFDataset(BaseDataset):
             optionally along with selected indices if masking is applied.
         """
         traj_index, frame = self.get_traj_frame(index=index)
-
         xdmf_file = self.file_paths[traj_index]
+        traj_id = xdmf_file.split("/")[-1].split(".")[0].split("_")[-1]
         reader = meshio.xdmf.TimeSeriesReader(xdmf_file)
 
         num_steps = reader.num_steps
@@ -130,6 +130,7 @@ class XDMFDataset(BaseDataset):
             point_data=point_data,
             time=time,
             target=target_data,
+            id=traj_id,
         )
 
         if self.use_previous_data:
