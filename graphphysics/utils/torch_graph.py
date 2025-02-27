@@ -116,7 +116,7 @@ def meshdata_to_graph(
 
     Parameters:
         points (np.ndarray): The coordinates of the mesh points.
-        cells (np.ndarray): The connectivity of the mesh (how points form cells).
+        cells (np.ndarray): The connectivity of the mesh (how points form cells); either triangles or tetrahedras.
         point_data (Dict[str, np.ndarray]): A dictionary of point-associated data.
         time (int or float): A scalar value representing the time step.
         target (np.ndarray, optional): An optional target tensor.
@@ -158,12 +158,24 @@ def meshdata_to_graph(
     else:
         target_features = None
 
-    # Convert cells to tensor
-    face = torch.tensor(cells.T, dtype=torch.long)
+    # Get tetrahedras and triangles from cells
+    tetra = None
+    if cells.shape[0] == 4:
+        tetra = cells
+        face = torch.cat(
+                [
+                    cells[0:3],
+                    cells[1:4],
+                    torch.stack([cells[2], cells[3], cells[0]], dim=0),
+                    torch.stack([cells[3], cells[0], cells[1]], dim=0),
+                ],
+                dim=1,
+            )
 
     return Data(
         x=node_features,
         face=face,
+        tetra=tetra,
         y=target_features,
         pos=torch.tensor(points, dtype=torch.float32),
         id=id,

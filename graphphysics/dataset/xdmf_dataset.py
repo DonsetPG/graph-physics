@@ -83,19 +83,9 @@ class XDMFDataset(BaseDataset):
 
         # Get faces or cells
         if "triangle" in mesh.cells_dict:
-            faces = mesh.cells_dict["triangle"]
+            cells = mesh.cells_dict["triangle"]
         elif "tetra" in mesh.cells_dict:
-            face = torch.tensor(mesh.cells_dict["tetra"].T, dtype=torch.long)
-            faces = torch.cat(
-                [
-                    face[0:3],
-                    face[1:4],
-                    torch.stack([face[2], face[3], face[0]], dim=0),
-                    torch.stack([face[3], face[0], face[1]], dim=0),
-                ],
-                dim=1,
-            )
-            faces = faces.T.numpy()
+            cells = torch.tensor(mesh.cells_dict["tetra"].T, dtype=torch.long)
         else:
             raise ValueError(
                 "Unsupported cell type. Only 'triangle' and 'tetra' cells are supported."
@@ -126,7 +116,7 @@ class XDMFDataset(BaseDataset):
         # Create graph from mesh data
         graph = meshdata_to_graph(
             points=points.astype(np.float32),
-            cells=faces,
+            cells=cells,
             point_data=point_data,
             time=time,
             target=target_data,

@@ -8,7 +8,7 @@ from torch_geometric.data import Batch
 from graphphysics.training.parse_parameters import get_model, get_simulator
 from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
 from graphphysics.utils.nodetype import NodeType
-from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
+from graphphysics.utils.pyvista_mesh import convert_to_meshio_vtu, vtu_to_xdmf
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 
 
@@ -183,16 +183,20 @@ class LightningModule(L.LightningModule):
         os.makedirs(save_dir, exist_ok=True)
         for idx, graph in enumerate(self.trajectory_to_save):
             try:
-                mesh = convert_to_pyvista_mesh(graph, add_all_data=True)
+                mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                 # Construct filename
-                filename = os.path.join(save_dir, f"graph_{idx}.vtk")
+                filename = os.path.join(save_dir, f"graph_{idx}.vtu")
                 # Save the mesh
-                mesh.save(filename)
+                mesh.write(filename)
             except Exception as e:
                 logger.error(
                     f"Error saving graph {idx} at epoch {self.current_epoch}: {e}"
                 )
-        logger.info(f"Validation Trajectory saved at {save_dir}")
+        logger.info(f"Validation Trajectory saved at {save_dir} for trajectory {graph.id}")
+
+        # Convert vtk files to XDMF/H5 file
+        vtu_files = [os.path.join(save_dir, f"graph_{idx}.vtu") for idx in range(len(self.trajectory_to_save))]
+        vtu_to_xdmf(os.path.join(save_dir, f"graph_{graph.id[0]}"), vtu_files)
 
         # Clear stored outputs
         self.val_step_outputs.clear()

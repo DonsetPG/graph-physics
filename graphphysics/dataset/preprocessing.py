@@ -401,7 +401,7 @@ def build_preprocessing(
                     node_type_index=world_pos_parameters["node_type_index"],
                 ),
                 _3d_face_to_edge,
-                T.FaceToEdge(),
+                T.FaceToEdge(remove_faces=False),
                 partial(
                     add_world_edges,
                     world_pos_index_start=world_pos_parameters["world_pos_index_start"],
@@ -420,7 +420,7 @@ def build_preprocessing(
             )
         )
     else:
-        preprocessing.append(T.FaceToEdge())
+        preprocessing.append(T.FaceToEdge(remove_faces=False))
         if add_edges_features:
             preprocessing.extend(add_edge_features())
 
