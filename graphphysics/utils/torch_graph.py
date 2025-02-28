@@ -163,14 +163,14 @@ def meshdata_to_graph(
     if cells.shape[0] == 4:
         tetra = cells
         face = torch.cat(
-                [
-                    cells[0:3],
-                    cells[1:4],
-                    torch.stack([cells[2], cells[3], cells[0]], dim=0),
-                    torch.stack([cells[3], cells[0], cells[1]], dim=0),
-                ],
-                dim=1,
-            )
+            [
+                cells[0:3],
+                cells[1:4],
+                torch.stack([cells[2], cells[3], cells[0]], dim=0),
+                torch.stack([cells[3], cells[0], cells[1]], dim=0),
+            ],
+            dim=1,
+        )
     if cells.shape[0] == 3:
         face = torch.tensor(cells, dtype=torch.long)
 

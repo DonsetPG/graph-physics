@@ -28,7 +28,7 @@ jobs:
         pip install autoflake==2.3.0
         pip install pytest==8.0.1
         pip install meshio==5.3.5
-        pip install h5py==3.10.0
+        pip install h5py==3.13.0
         pip install pyvista
         pip install lightning
         pip install pytest-benchmark

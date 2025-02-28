@@ -1,10 +1,10 @@
-import meshio
-import numpy as np
 import os
 import shutil
-from torch_geometric.data import Data
-
 from typing import List
+
+import meshio
+import numpy as np
+from torch_geometric.data import Data
 
 
 def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mesh:
@@ -57,7 +57,9 @@ def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mes
     return mesh
 
 
-def vtu_to_xdmf(filename: str, files_list: List[str], timestep=1, remove_vtus: bool = True) -> None:
+def vtu_to_xdmf(
+    filename: str, files_list: List[str], timestep=1, remove_vtus: bool = True
+) -> None:
     """
     Writes a time series of meshes (same points and cells) into XDMF/HDF5 format.
 
@@ -92,7 +94,9 @@ def vtu_to_xdmf(filename: str, files_list: List[str], timestep=1, remove_vtus: b
             t += timestep
 
     # The H5 archive is systematically created in cwd, we just need to move it
-    shutil.move(src=os.path.join(os.getcwd(), os.path.split(h5_filename)[1]), dst=h5_filename)
+    shutil.move(
+        src=os.path.join(os.getcwd(), os.path.split(h5_filename)[1]), dst=h5_filename
+    )
 
     # Remove the original vtu files
     if remove_vtus:
