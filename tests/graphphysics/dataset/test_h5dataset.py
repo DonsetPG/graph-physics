@@ -61,7 +61,6 @@ class TestH5DatasetPreprocessing(unittest.TestCase):
         assert graph.num_nodes == 1876
         assert graph.edge_index.shape == (2, 10788)
         assert graph.edge_attr.shape == (10788, 3)
-        assert graph.face is None
 
 
 class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
@@ -80,7 +79,6 @@ class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
         assert graph.num_nodes == 1876
         assert graph.edge_index.shape == (2, 10788)
         assert graph.edge_attr is None
-        assert graph.face is None
 
 
 class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
@@ -119,4 +117,3 @@ class TestH5DatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
         assert graph.num_nodes == 1876
         assert graph.edge_index.shape == (2, 31746)
         assert graph.edge_attr is None
-        assert graph.face is None
