@@ -3,7 +3,6 @@ import numpy as np
 import os
 import shutil
 from torch_geometric.data import Data
-from tqdm import tqdm
 
 from typing import List
 
@@ -58,13 +57,14 @@ def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mes
     return mesh
 
 
-def vtu_to_xdmf(filename: str, filelist: List[str], timestep=1, remove_vtus: bool = True) -> None:
+def vtu_to_xdmf(filename: str, files_list: List[str], timestep=1, remove_vtus: bool = True) -> None:
     """
     Writes a time series of meshes (same points and cells) into XDMF/HDF5 format.
 
     Args:
         filename (str): Name for the XDMF/HDF5 file without the extension.
-        filelist (List[str]): List of the files' paths to compress.
+        files_list (List[str]): List of the files' paths to compress.
+        timestep (float, optional): Timestep between to consecutive timeframes.
         remove_vtus (bool, optional): If True, remove the original vtu files.
 
     Returns:
@@ -73,9 +73,9 @@ def vtu_to_xdmf(filename: str, filelist: List[str], timestep=1, remove_vtus: boo
     h5_filename = f"{filename}.h5"
     xdmf_filename = f"{filename}.xdmf"
 
-    init_vtk = meshio.read(filelist[0])
-    points = init_vtk.points
-    cells = init_vtk.cells
+    init_vtu = meshio.read(files_list[0])
+    points = init_vtu.points
+    cells = init_vtu.cells
 
     # Open the TimeSeriesWriter for HDF5
     with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
@@ -84,7 +84,7 @@ def vtu_to_xdmf(filename: str, filelist: List[str], timestep=1, remove_vtus: boo
 
         # Loop through time steps and write data
         t = 0
-        for file in tqdm(filelist, desc='Compressing VTKs into XDMF files'):
+        for file in files_list:
             mesh = meshio.read(file)
             point_data = mesh.point_data
             cell_data = mesh.cell_data
@@ -93,9 +93,8 @@ def vtu_to_xdmf(filename: str, filelist: List[str], timestep=1, remove_vtus: boo
 
     # The H5 archive is systematically created in cwd, we just need to move it
     shutil.move(src=os.path.join(os.getcwd(), os.path.split(h5_filename)[1]), dst=h5_filename)
-    print(f"Time series written to {xdmf_filename} and {h5_filename}")
 
     # Remove the original vtu files
     if remove_vtus:
-        for file in filelist:
+        for file in files_list:
             os.remove(file)

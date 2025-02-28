@@ -192,11 +192,17 @@ class LightningModule(L.LightningModule):
                 logger.error(
                     f"Error saving graph {idx} at epoch {self.current_epoch}: {e}"
                 )
-        logger.info(f"Validation Trajectory saved at {save_dir} for trajectory {graph.id}")
+        logger.info(f"Validation Trajectory saved at {save_dir}.")
 
         # Convert vtk files to XDMF/H5 file
-        vtu_files = [os.path.join(save_dir, f"graph_{idx}.vtu") for idx in range(len(self.trajectory_to_save))]
-        vtu_to_xdmf(os.path.join(save_dir, f"graph_{graph.id[0]}"), vtu_files)
+        try:
+            vtu_files = [os.path.join(save_dir, f"graph_{idx}.vtu") for idx in range(len(self.trajectory_to_save))]
+            print(f"FILE: {os.path.join(save_dir, 'graph')}")
+            vtu_to_xdmf(os.path.join(save_dir, f"graph_epoch_{self.current_epoch}"), vtu_files)
+        except Exception as e:
+            logger.error(
+                f"Error compressing vtus at epoch {self.current_epoch}: {e}"
+            )
 
         # Clear stored outputs
         self.val_step_outputs.clear()

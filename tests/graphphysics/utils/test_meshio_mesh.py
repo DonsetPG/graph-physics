@@ -121,7 +121,7 @@ class TestVtuToXdmf(unittest.TestCase):
 
     def test_2d_vtus(self):
         """ Test 2D vtus compression"""
-        vtu_to_xdmf(self.filename, filelist=self.files_2d, remove_vtus=False)
+        vtu_to_xdmf(self.filename, self.files_2d, remove_vtus=False)
 
         # Check that both archive files exist
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
@@ -133,7 +133,7 @@ class TestVtuToXdmf(unittest.TestCase):
     def test_3d_vtus(self):
         """ Test 3D vtus compression"""
 
-        vtu_to_xdmf(self.filename, filelist=self.files_3d, remove_vtus=False)
+        vtu_to_xdmf(self.filename, self.files_3d, remove_vtus=False)
 
         # Check that both archive files exist
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
@@ -145,7 +145,7 @@ class TestVtuToXdmf(unittest.TestCase):
     def test_remove_vtus(self):
         """ Test the VTUs removal after compression. """
 
-        vtu_to_xdmf(self.filename, filelist=self.tmp_files, remove_vtus=True)
+        vtu_to_xdmf(self.filename, self.tmp_files, remove_vtus=True)
 
         # Check that all vtu files were removed.
         for file in self.tmp_files:
