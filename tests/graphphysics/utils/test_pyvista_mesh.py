@@ -2,7 +2,6 @@ import unittest
 import numpy as np
 import torch
 from torch_geometric.data import Data
-import pyvista as pv
 
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 
