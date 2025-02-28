@@ -8,7 +8,7 @@ from torch_geometric.data import Batch
 from graphphysics.training.parse_parameters import get_model, get_simulator
 from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
 from graphphysics.utils.nodetype import NodeType
-from graphphysics.utils.pyvista_mesh import convert_to_meshio_vtu, vtu_to_xdmf
+from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu, vtu_to_xdmf
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 
 

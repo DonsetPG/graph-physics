@@ -85,7 +85,7 @@ class XDMFDataset(BaseDataset):
         if "triangle" in mesh.cells_dict:
             cells = mesh.cells_dict["triangle"]
         elif "tetra" in mesh.cells_dict:
-            cells = torch.tensor(mesh.cells_dict["tetra"].T, dtype=torch.long)
+            cells = torch.tensor(mesh.cells_dict["tetra"], dtype=torch.long)
         else:
             raise ValueError(
                 "Unsupported cell type. Only 'triangle' and 'tetra' cells are supported."
