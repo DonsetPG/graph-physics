@@ -11,6 +11,7 @@ MOCK_H5_META_SAVE_PATH = "tests/mock_h5/meta.json"
 MOCK_H5_META10_SAVE_PATH = "tests/mock_h5/meta10.json"
 MOCK_VTU_FOLDER_PATH = "tests/mock_vtu"
 MOCK_VTU_PATH = os.path.join(MOCK_VTU_FOLDER_PATH, "cylinder_0.vtu")
+MOCK_VTU_ANEURYSM_FOLDER_PATH = "tests/mock_vtu_aneurysm"
 MOCK_XDMF_FOLDER = "tests/mock_xdmf"
 os.makedirs(MOCK_XDMF_FOLDER, exist_ok=True)
 MOCK_XDMF_PATH = os.path.join(MOCK_XDMF_FOLDER, "mock.xdmf")

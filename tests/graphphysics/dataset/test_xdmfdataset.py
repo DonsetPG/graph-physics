@@ -37,7 +37,7 @@ class TestH5Dataset(unittest.TestCase):
 class TestH5DatasetDistance(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
-            xdmf_folder="tests/mock_vtu_aneurysm",
+            xdmf_folder="tests/mock_xdmf_aneurysm",
             meta_path="tests/mock_h5/meta_aneurysm.json",
         )
         self.dataset.trajectory_length += 1
@@ -73,7 +73,7 @@ class TestH5DatasetDistance(unittest.TestCase):
         assert graph.edge_index is None
 
         reader = meshio.xdmf.TimeSeriesReader(
-            "tests/mock_vtu_aneurysm/AllFields_Resultats_MESH_11.xdmf"
+            "tests/mock_xdmf_aneurysm/AllFields_Resultats_MESH_11.xdmf"
         )
         points, cells = reader.read_points_cells()
         time, point_data, _ = reader.read_data(0)
@@ -99,7 +99,7 @@ class TestH5DatasetDistance(unittest.TestCase):
 class TestH5DatasetRotating(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
-            xdmf_folder="tests/mock_vtu_aneurysm",
+            xdmf_folder="tests/mock_xdmf_aneurysm",
             meta_path="tests/mock_h5/meta_aneurysm.json",
         )
         self.dataset.trajectory_length += 1
@@ -124,7 +124,7 @@ class TestH5DatasetRotating(unittest.TestCase):
         # assert rotated_graph.edge_index is None
 
         reader = meshio.xdmf.TimeSeriesReader(
-            "tests/mock_vtu_aneurysm/AllFields_Resultats_MESH_11.xdmf"
+            "tests/mock_xdmf_aneurysm/AllFields_Resultats_MESH_11.xdmf"
         )
         points, cells = reader.read_points_cells()
         time, point_data, _ = reader.read_data(0)
