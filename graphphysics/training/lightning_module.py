@@ -200,7 +200,6 @@ class LightningModule(L.LightningModule):
                 os.path.join(save_dir, f"graph_{idx}.vtu")
                 for idx in range(len(self.trajectory_to_save))
             ]
-            print(f"FILE: {os.path.join(save_dir, 'graph')}")
             vtu_to_xdmf(
                 os.path.join(save_dir, f"graph_epoch_{self.current_epoch}"), vtu_files
             )

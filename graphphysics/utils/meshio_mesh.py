@@ -38,12 +38,8 @@ def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mes
         raise ValueError("Graph must have 'face' attribute with face indices.")
 
     # Extract faces
-    if not hasattr(graph, "tetra") or graph.tetra is None:
-        faces = graph.face.cpu().numpy().T
-        cells = [("triangle", faces)]
-    else:
-        faces = graph.tetra.cpu().numpy().T
-        cells = [("tetra", faces)]
+    faces = (graph.tetra if getattr(graph, "tetra", None) is not None else graph.face).cpu().numpy().T
+    cells = [("tetra" if getattr(graph, "tetra", None) is not None else "triangle", faces)]
 
     # Create Meshio mesh
     mesh = meshio.Mesh(vertices, cells)

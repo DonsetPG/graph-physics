@@ -1,4 +1,5 @@
 import unittest
+import meshio
 import numpy as np
 import os
 import shutil
@@ -44,7 +45,7 @@ class TestConvertToMeshioVtu(unittest.TestCase):
 
     def test_add_all_data(self):
         """Test adding all node features to mesh point data when x is 2D."""
-        x = torch.tensor([[10, 20, 30], [40, 50, 60]])
+        x = torch.tensor([[10, 20], [30, 40], [50, 60]])
         graph = Data(pos=self.pos_2d, face=self.face_2d, x=x)
         mesh = convert_to_meshio_vtu(graph, add_all_data=True)
 
@@ -136,6 +137,22 @@ class TestVtuToXdmf(unittest.TestCase):
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
         self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
 
+        # Check the mesh structure
+        vtu_meshes = [meshio.read(f) for f in self.files_2d]
+        reader = meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf")
+        points, cells = reader.read_points_cells()
+        self.assertEqual(len(points), len(vtu_meshes[0].points))
+        self.assertEqual(reader.num_steps, len(vtu_meshes))
+
+        # Compare xdmf and vtu data
+        for i in range(reader.num_steps):
+            time, point_data, cell_data = reader.read_data(i)
+            self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
+            for key in point_data.keys():
+                self.assertTrue(
+                    np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
+                )
+
         os.remove(f"{self.filename}.h5")
         os.remove(f"{self.filename}.xdmf")
 
@@ -147,6 +164,22 @@ class TestVtuToXdmf(unittest.TestCase):
         # Check that both archive files exist
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
         self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        # Check the mesh structure
+        vtu_meshes = [meshio.read(f) for f in self.files_3d]
+        reader = meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf")
+        points, cells = reader.read_points_cells()
+        self.assertEqual(len(points), len(vtu_meshes[0].points))
+        self.assertEqual(reader.num_steps, len(vtu_meshes))
+
+        # Compare xdmf and vtu data
+        for i in range(reader.num_steps):
+            time, point_data, cell_data = reader.read_data(i)
+            self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
+            for key in point_data.keys():
+                self.assertTrue(
+                    np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
+                )
 
         os.remove(f"{self.filename}.h5")
         os.remove(f"{self.filename}.xdmf")

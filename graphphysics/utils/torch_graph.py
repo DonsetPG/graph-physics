@@ -120,7 +120,6 @@ def meshdata_to_graph(
         time (int or float): A scalar value representing the time step.
         target (np.ndarray, optional): An optional target tensor.
         return_only_node_features (bool): Whether to return only node features.
-        id (str, optional): Trajectory id.
 
     Returns:
         Data: A PyTorch Geometric Data object representing the mesh.
