@@ -120,11 +120,11 @@ class LightningModule(L.LightningModule):
         batch = batch.clone()
         if self.last_val_prediction is not None:
             # Update the batch with the last prediction
-            batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
+            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
                 self.last_val_prediction.detach()
             )
             if self.use_previous_data:
-                batch.x[:, self.previous_data_start : self.previous_data_end] = (
+                batch.x[:, self.previous_data_start: self.previous_data_end] = (
                     self.last_previous_data_prediction.detach()
                 )
 
@@ -136,7 +136,7 @@ class LightningModule(L.LightningModule):
         target = batch.y
 
         current_output = batch.x[
-            :, self.model.output_index_start : self.model.output_index_end
+            :, self.model.output_index_start: self.model.output_index_end
         ]
 
         with torch.no_grad():
@@ -232,3 +232,37 @@ class LightningModule(L.LightningModule):
                 "frequency": 1,
             },
         }
+
+    def predict_step(self, batch: Batch):
+        with torch.no_grad():
+            _, _, predicted_outputs = self.model(batch)
+            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
+                predicted_outputs.detach()
+            )
+            self.prediction_trajectory.append(batch)
+
+    def on_predict_epoch_end(self):
+        """"
+        Converts all the predictions as .xdmf files.
+        """
+        save_dir = "predictions"
+        os.makedirs(save_dir, exist_ok=True)
+        for idx, graph in enumerate(self.prediction_trajectory):
+            try:
+                vtu = convert_to_meshio_vtu(graph, add_all_data=True)
+                # Construct filename
+                filename = os.path.join(save_dir, f"graph_{idx}.vtu")
+                # Save the mesh
+                vtu.write(filename)
+            except Exception as e:
+                logger.error(
+                    f"Error saving graph {idx} at epoch {self.current_epoch}: {e}"
+                )
+        logger.info(f"Validation Trajectory saved at {save_dir} for trajectory {graph.id}")
+
+        # Convert vtk files to XDMF/H5 file
+        vtu_files = [os.path.join(save_dir, f"graph_{idx}.vtu") for idx in range(len(self.prediction_trajectory))]
+        vtu_to_xdmf(os.path.join(save_dir, f"graph_{graph.id[0]}"), vtu_files)
+
+        # Clear stored outputs
+        self.prediction_trajectory.clear()
