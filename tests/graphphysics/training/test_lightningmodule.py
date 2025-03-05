@@ -1,10 +1,12 @@
 import unittest
 from unittest.mock import MagicMock, patch
 import torch
+import meshio
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
 from torch_geometric.data import Data
 import lightning as L
+import os
 from graphphysics.training.lightning_module import LightningModule
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
@@ -207,7 +209,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
                     ],
                     dtype=torch.float,
                 )
-                graph = Data(pos=pos, edge_index=edge_index, x=x)
+                face = torch.tensor([[0], [1], [2]])
+                graph = Data(pos=pos, edge_index=edge_index, x=x, face=face)
                 self.model.trajectory_to_save.append(graph)
 
             # Simulate val_step_outputs and val_step_targets
@@ -235,6 +238,23 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertEqual(len(self.model.val_step_targets), 0)
             self.assertEqual(self.model.current_val_trajectory, 0)
             self.assertIsNone(self.model.last_val_prediction)
+
+            # Check that .xdmf is present
+            xdmf_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}.xdmf",
+            )
+            h5_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+
+            reader = meshio.xdmf.TimeSeriesReader(xdmf_path)
 
         def test_validation_step_resets_trajectory(self):
             # Create mock batches
