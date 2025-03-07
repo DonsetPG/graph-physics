@@ -150,7 +150,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertIsNotNone(self.model.last_val_prediction)
             self.assertEqual(self.model.last_val_prediction.shape, (10, 3))
 
-            # Check that last_val_prediction is not set
+            # Check that last_previous_data_prediction is not set
             self.assertIsNone(self.model.last_previous_data_prediction)
 
         def test_validation_step_w_previous_data(self):
@@ -256,6 +256,87 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
                 batch, batch_idx=self.trajectory_length
             )  # Should reset trajectory
             assert self.model.current_val_trajectory == 1
+
+        def test_prediction_step(self):
+            self.dataloader = DataLoader(self.dataset, batch_size=1)
+            batch = next(iter(self.dataloader))
+
+            self.assertEqual(self.model.use_previous_data, False)
+
+            # Run prediction step
+            self.model.eval()
+            self.model.predict_step(batch.to(device), batch_idx=0)
+
+            # Check that prediction_trajectory is set
+            self.assertIsNotNone(self.model.prediction_trajectory)
+            self.assertEqual(self.model.prediction_trajectory[0].shape, (10, 3))
+
+            # Check that last_pred_prediction is set
+            self.assertIsNotNone(self.model.last_pred_prediction)
+            self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
+
+            # Check that last_previous_data_prediction is not set
+            self.assertIsNone(self.model.last_previous_data_prediction)
+
+        def test_predict_step_w_previous_data(self):
+            self.dataloader = DataLoader(self.dataset, batch_size=1)
+            batch = next(iter(self.dataloader))
+
+            self.model.use_previous_data = True
+            self.model.previous_data_start = 3
+            self.model.previous_data_end = 6
+
+            self.assertEqual(self.model.use_previous_data, True)
+
+            # Run validation step
+            self.model.eval()
+            self.model.predict_step(batch.to(device), batch_idx=0)
+
+            # Check that prediction_trajectory is set
+            self.assertIsNotNone(self.model.prediction_trajectory)
+            self.assertEqual(self.model.prediction_trajectory[0].shape, (10, 3))
+
+            # Check that last_pred_prediction is set
+            self.assertIsNotNone(self.model.last_pred_prediction)
+            self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
+
+            # Check that last_previous_data_prediction is set
+            self.assertIsNotNone(self.model.last_previous_data_prediction)
+            self.assertEqual(self.model.last_previous_data_prediction.shape, (10, 3))
+
+            self.model.use_previous_data = False
+            self.model.previous_data_start = None
+            self.model.previous_data_end = None
+
+        def test_on_predict_epoch_end(self):
+            # Run on_validation_epoch_end
+            self.model.on_predict_epoch_end()
+
+            # Check that prediction_trajectories and prediction_trajectory are cleared
+            self.assertEqual(self.model.current_pred_trajectory, 0)
+            self.assertIsNone(len(self.model.prediction_trajectories), 0)
+            self.assertEqual(len(self.model.prediction_trajectories), 0)
+            self.assertIsNone(self.model.last_pred_prediction)
+            self.assertIsNone(self.model.last_previous_data_pred_prediction)
+
+        def test_predict_step_stores_and_resets_trajectory(self):
+            # Create mock batches
+            self.dataloader = DataLoader(self.dataset, batch_size=1)
+            batch = next(iter(self.dataloader))
+            self.model.eval()
+
+            # Run predict steps with batch_idx increasing
+            self.model.predict_step(batch.to(device), batch_idx=0)
+            first_trajectory = self.model.prediction_trajectory.clone()
+            assert self.model.current_pred_trajectory == 0
+            batch.traj_index = 1
+            self.model.predict_step(
+                batch, batch_idx=self.trajectory_length
+            )  # Should reset trajectory
+
+            # Check that trajectory is stored and traj index changed
+            self.assertEqual(first_trajectory, self.model.prediction_trajectories[0])
+            assert self.model.current_pred_trajectory == 1
 
     if __name__ == "__main__":
         unittest.main()
