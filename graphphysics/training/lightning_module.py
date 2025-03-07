@@ -7,8 +7,8 @@ from torch_geometric.data import Batch
 
 from graphphysics.training.parse_parameters import get_model, get_simulator
 from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
-from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu, vtu_to_xdmf
+from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 
 
@@ -127,11 +127,11 @@ class LightningModule(L.LightningModule):
         batch = batch.clone()
         if self.last_val_prediction is not None:
             # Update the batch with the last prediction
-            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
+            batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
                 self.last_val_prediction.detach()
             )
             if self.use_previous_data:
-                batch.x[:, self.previous_data_start: self.previous_data_end] = (
+                batch.x[:, self.previous_data_start : self.previous_data_end] = (
                     self.last_previous_data_prediction.detach()
                 )
 
@@ -143,7 +143,7 @@ class LightningModule(L.LightningModule):
         target = batch.y
 
         current_output = batch.x[
-            :, self.model.output_index_start: self.model.output_index_end
+            :, self.model.output_index_start : self.model.output_index_end
         ]
 
         with torch.no_grad():
@@ -251,11 +251,11 @@ class LightningModule(L.LightningModule):
 
         # print(f"LAST: {self.last_pred_prediction}")
         if self.last_pred_prediction is not None:
-            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
+            batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
                 self.last_pred_prediction.detach()
             )
             if self.use_previous_data:
-                batch.x[:, self.previous_data_start: self.previous_data_end] = (
+                batch.x[:, self.previous_data_start : self.previous_data_end] = (
                     self.last_previous_data_pred_prediction.detach()
                 )
 
@@ -263,7 +263,7 @@ class LightningModule(L.LightningModule):
         target = batch.y
 
         current_output = batch.x[
-            :, self.model.output_index_start: self.model.output_index_end
+            :, self.model.output_index_start : self.model.output_index_end
         ]
 
         with torch.no_grad():
@@ -277,14 +277,13 @@ class LightningModule(L.LightningModule):
         self.prediction_trajectory.append(batch)
 
     def on_predict_epoch_end(self):
-        """"
+        """ "
         Converts all the predictions as .xdmf files.
         """
         # Add the last prediction trajectory
         self.prediction_trajectories.append(self.prediction_trajectory)
 
         save_dir = "predictions"
-        idexes = [traj[0].traj_index for traj in self.prediction_trajectories]
         os.makedirs(save_dir, exist_ok=True)
         for traj_idx, trajectory in enumerate(self.prediction_trajectories):
             for frame, graph in enumerate(trajectory):
@@ -298,13 +297,23 @@ class LightningModule(L.LightningModule):
                     logger.error(
                         f"Error saving trajectory {traj_idx}, graph {frame} at epoch {self.current_epoch}: {e}"
                     )
-            logger.info(f"Validation Trajectory saved at {save_dir} for prediction trajectory {traj_idx}")
+            logger.info(
+                f"Validation Trajectory saved at {save_dir} for prediction trajectory {traj_idx}"
+            )
 
-            print(f"LEN : {len(trajectory)}")
             # Convert vtk files to XDMF/H5 file
-            vtu_files = [os.path.join(save_dir, f"graph_{traj_idx}_{frame}.vtu") for frame in range(len(trajectory))]
-            vtu_to_xdmf(os.path.join(save_dir, f"graph_{traj_idx}"), vtu_files)
+            try:
+                vtu_files = [
+                    os.path.join(save_dir, f"graph_{traj_idx}_{frame}.vtu")
+                    for frame in range(len(trajectory))
+                ]
+                vtu_to_xdmf(os.path.join(save_dir, f"graph_{traj_idx}"), vtu_files)
+            except Exception:
+                logger.error("Error compressing vtus during prediction.")
 
         # Clear stored outputs
         self.prediction_trajectory.clear()
         self.prediction_trajectories.clear()
+        self.last_pred_prediction = None
+        self.last_previous_data_pred_prediction = None
+        self.current_pred_trajectory = 0

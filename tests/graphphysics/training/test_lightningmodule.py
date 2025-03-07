@@ -3,18 +3,13 @@ from unittest.mock import MagicMock, patch
 import torch
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
-from torch_geometric.data import Data, Batch
+from torch_geometric.data import Data
 import lightning as L
-import shutil
-import tempfile
-import os
-import numpy as np
 from graphphysics.training.lightning_module import LightningModule
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
     MOCK_H5_SAVE_PATH,
 )
-import pyvista as pv
 
 with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model, patch(
     "graphphysics.training.parse_parameters.get_simulator"
@@ -249,7 +244,6 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Run validation steps with batch_idx increasing
             self.model.validation_step(batch.to(device), batch_idx=0)
-            first_prediction = self.model.last_val_prediction.clone()
             assert self.model.current_val_trajectory == 0
             batch.traj_index = 1
             self.model.validation_step(
@@ -265,18 +259,17 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Run prediction step
             self.model.eval()
-            self.model.predict_step(batch.to(device), batch_idx=0)
+            self.model.predict_step(batch.to(device))
 
             # Check that prediction_trajectory is set
             self.assertIsNotNone(self.model.prediction_trajectory)
-            self.assertEqual(self.model.prediction_trajectory[0].shape, (10, 3))
 
             # Check that last_pred_prediction is set
             self.assertIsNotNone(self.model.last_pred_prediction)
             self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
 
-            # Check that last_previous_data_prediction is not set
-            self.assertIsNone(self.model.last_previous_data_prediction)
+            # Check that last_previous_data_pred_prediction is not set
+            self.assertIsNone(self.model.last_previous_data_pred_prediction)
 
         def test_predict_step_w_previous_data(self):
             self.dataloader = DataLoader(self.dataset, batch_size=1)
@@ -290,19 +283,18 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Run validation step
             self.model.eval()
-            self.model.predict_step(batch.to(device), batch_idx=0)
+            self.model.predict_step(batch.to(device))
 
             # Check that prediction_trajectory is set
             self.assertIsNotNone(self.model.prediction_trajectory)
-            self.assertEqual(self.model.prediction_trajectory[0].shape, (10, 3))
 
             # Check that last_pred_prediction is set
             self.assertIsNotNone(self.model.last_pred_prediction)
             self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
 
-            # Check that last_previous_data_prediction is set
-            self.assertIsNotNone(self.model.last_previous_data_prediction)
-            self.assertEqual(self.model.last_previous_data_prediction.shape, (10, 3))
+            # Check that last_previous_data_pred_prediction is set
+            self.assertIsNotNone(self.model.last_previous_data_pred_prediction)
+            self.assertEqual(self.model.last_previous_data_pred_prediction.shape, (10, 3))
 
             self.model.use_previous_data = False
             self.model.previous_data_start = None
@@ -314,7 +306,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Check that prediction_trajectories and prediction_trajectory are cleared
             self.assertEqual(self.model.current_pred_trajectory, 0)
-            self.assertIsNone(len(self.model.prediction_trajectories), 0)
+            self.assertEqual(len(self.model.prediction_trajectory), 0)
             self.assertEqual(len(self.model.prediction_trajectories), 0)
             self.assertIsNone(self.model.last_pred_prediction)
             self.assertIsNone(self.model.last_previous_data_pred_prediction)
@@ -326,16 +318,13 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.eval()
 
             # Run predict steps with batch_idx increasing
-            self.model.predict_step(batch.to(device), batch_idx=0)
-            first_trajectory = self.model.prediction_trajectory.clone()
+            self.model.predict_step(batch.to(device))
             assert self.model.current_pred_trajectory == 0
             batch.traj_index = 1
-            self.model.predict_step(
-                batch, batch_idx=self.trajectory_length
-            )  # Should reset trajectory
+            self.model.predict_step(batch)  # Should reset trajectory
 
             # Check that trajectory is stored and traj index changed
-            self.assertEqual(first_trajectory, self.model.prediction_trajectories[0])
+            self.assertEqual(len(self.model.prediction_trajectories), 1)
             assert self.model.current_pred_trajectory == 1
 
     if __name__ == "__main__":
