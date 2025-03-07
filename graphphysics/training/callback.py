@@ -5,10 +5,10 @@ import lightning.pytorch as pl
 import numpy as np
 import pyvista as pv
 import torch
-import wandb
 from lightning.pytorch.callbacks import Callback
 from torch_geometric.data import Data, Dataset
 
+import wandb
 from graphphysics.training.lightning_module import build_mask
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 

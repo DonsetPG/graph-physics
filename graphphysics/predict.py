@@ -3,18 +3,19 @@ import warnings
 
 import torch
 from absl import app, flags
+from lightning.pytorch import Trainer
+from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 from torch_geometric.loader import DataLoader
 
-from lightning.pytorch import Trainer
-from lightning.pytorch.loggers import CSVLogger
+import wandb
+from graphphysics.external.aneurysm import build_features
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
     get_num_workers,
     get_preprocessing,
 )
-from graphphysics.external.aneurysm import build_features
 
 warnings.filterwarnings(
     "ignore", ".*Trying to infer the `batch_size` from an ambiguous collection.*"
@@ -23,6 +24,7 @@ warnings.filterwarnings(
 torch.set_float32_matmul_precision("high")
 
 FLAGS = flags.FLAGS
+flags.DEFINE_string("project_name", "prediction_project", "Name of the WandB project")
 flags.DEFINE_integer("batch_size", 2, "Batch size")
 flags.DEFINE_integer("num_workers", 2, "Number of DataLoader workers")
 flags.DEFINE_integer("prefetch_factor", 2, "Number of batches to prefetch")
@@ -53,6 +55,7 @@ def main(argv):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    wandb_project_name = FLAGS.project_name
     batch_size = FLAGS.batch_size
     num_workers = FLAGS.num_workers
     prefetch_factor = FLAGS.prefetch_factor
@@ -94,7 +97,6 @@ def main(argv):
         )
 
     # Create DataLoader
-    # TODO: let's test with only one traj for now
     predict_dataloader = DataLoader(**predict_dataloader_kwargs)
 
     # Load trained model
@@ -106,11 +108,26 @@ def main(argv):
         trajectory_length=predict_dataset.trajectory_length,
     )
 
-    csv_logger = CSVLogger("logs", name="prediction_log")
-    trainer = Trainer(accelerator="gpu" if torch.cuda.is_available() else "cpu",
-                      logger=csv_logger,
-                      devices=1,
-                      inference_mode=True)
+    # Initialize WandbLogger
+    wandb_run = wandb.init(project=wandb_project_name)
+    wandb_logger = WandbLogger(experiment=wandb_run)
+
+    wandb_logger.experiment.config.update(
+        {
+            "architecture": parameters["model"]["type"],
+            "#_layers": parameters["model"]["message_passing_num"],
+            "#_neurons": parameters["model"]["hidden_size"],
+            "#_hops": parameters["dataset"]["khop"],
+            "batch_size": batch_size,
+        }
+    )
+
+    trainer = Trainer(
+        accelerator="gpu" if torch.cuda.is_available() else "cpu",
+        logger=wandb_logger,
+        devices=1,
+        inference_mode=True,
+    )
 
     # Start prediction
     logger.success("Starting prediction")
