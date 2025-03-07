@@ -93,6 +93,13 @@ class LightningModule(L.LightningModule):
         # For one trajectory vizualization
         self.trajectory_to_save: list[Batch] = []
 
+        # Prediction
+        self.current_pred_trajectory = 0
+        self.prediction_trajectory: list[Batch] = []
+        self.prediction_trajectories: list[list[Batch]] = []
+        self.last_pred_prediction = None
+        self.last_previous_data_pred_prediction = None
+
     def forward(self, graph: Batch):
         return self.model(graph)
 
@@ -234,35 +241,70 @@ class LightningModule(L.LightningModule):
         }
 
     def predict_step(self, batch: Batch):
+        # Save precedent trajectory and reset the current one
+        if batch.traj_index > self.current_pred_trajectory:
+            self.current_pred_trajectory += 1
+            self.prediction_trajectories.append(self.prediction_trajectory)
+            self.prediction_trajectory = []
+            self.last_pred_prediction = None
+            self.last_previous_data_pred_prediction = None
+
+        # print(f"LAST: {self.last_pred_prediction}")
+        if self.last_pred_prediction is not None:
+            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
+                self.last_pred_prediction.detach()
+            )
+            if self.use_previous_data:
+                batch.x[:, self.previous_data_start: self.previous_data_end] = (
+                    self.last_previous_data_pred_prediction.detach()
+                )
+
+        mask = build_mask(self.param, batch)
+        target = batch.y
+
+        current_output = batch.x[
+            :, self.model.output_index_start: self.model.output_index_end
+        ]
+
         with torch.no_grad():
             _, _, predicted_outputs = self.model(batch)
-            batch.x[:, self.model.output_index_start: self.model.output_index_end] = (
-                predicted_outputs.detach()
-            )
-            self.prediction_trajectory.append(batch)
+
+        predicted_outputs[mask] = target[mask]
+        self.last_pred_prediction = predicted_outputs
+        if self.use_previous_data:
+            self.last_previous_data_pred_prediction = predicted_outputs - current_output
+
+        self.prediction_trajectory.append(batch)
 
     def on_predict_epoch_end(self):
         """"
         Converts all the predictions as .xdmf files.
         """
-        save_dir = "predictions"
-        os.makedirs(save_dir, exist_ok=True)
-        for idx, graph in enumerate(self.prediction_trajectory):
-            try:
-                vtu = convert_to_meshio_vtu(graph, add_all_data=True)
-                # Construct filename
-                filename = os.path.join(save_dir, f"graph_{idx}.vtu")
-                # Save the mesh
-                vtu.write(filename)
-            except Exception as e:
-                logger.error(
-                    f"Error saving graph {idx} at epoch {self.current_epoch}: {e}"
-                )
-        logger.info(f"Validation Trajectory saved at {save_dir} for trajectory {graph.id}")
+        # Add the last prediction trajectory
+        self.prediction_trajectories.append(self.prediction_trajectory)
 
-        # Convert vtk files to XDMF/H5 file
-        vtu_files = [os.path.join(save_dir, f"graph_{idx}.vtu") for idx in range(len(self.prediction_trajectory))]
-        vtu_to_xdmf(os.path.join(save_dir, f"graph_{graph.id[0]}"), vtu_files)
+        save_dir = "predictions"
+        idexes = [traj[0].traj_index for traj in self.prediction_trajectories]
+        os.makedirs(save_dir, exist_ok=True)
+        for traj_idx, trajectory in enumerate(self.prediction_trajectories):
+            for frame, graph in enumerate(trajectory):
+                try:
+                    vtu = convert_to_meshio_vtu(graph, add_all_data=True)
+                    # Construct filename
+                    filename = os.path.join(save_dir, f"graph_{traj_idx}_{frame}.vtu")
+                    # Save the mesh
+                    vtu.write(filename)
+                except Exception as e:
+                    logger.error(
+                        f"Error saving trajectory {traj_idx}, graph {frame} at epoch {self.current_epoch}: {e}"
+                    )
+            logger.info(f"Validation Trajectory saved at {save_dir} for prediction trajectory {traj_idx}")
+
+            print(f"LEN : {len(trajectory)}")
+            # Convert vtk files to XDMF/H5 file
+            vtu_files = [os.path.join(save_dir, f"graph_{traj_idx}_{frame}.vtu") for frame in range(len(trajectory))]
+            vtu_to_xdmf(os.path.join(save_dir, f"graph_{traj_idx}"), vtu_files)
 
         # Clear stored outputs
         self.prediction_trajectory.clear()
+        self.prediction_trajectories.clear()
