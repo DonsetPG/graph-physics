@@ -53,8 +53,7 @@ def main(argv):
 
     # Check that the training parameters path is provided
     if not FLAGS.training_parameters_path:
-        logger.error("The 'training_parameters_path' flag must be provided.")
-        return
+        raise ValueError("The 'training_parameters_path' flag must be provided.")
 
     # Load training parameters from JSON file
     training_parameters_path = FLAGS.training_parameters_path

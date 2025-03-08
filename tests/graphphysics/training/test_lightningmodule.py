@@ -321,6 +321,31 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.previous_data_end = None
 
         def test_on_predict_epoch_end(self):
+            # Simulate prediction_trajectory with sample graphs
+            num_graphs = 3
+            for i in range(num_graphs):
+                # Create a simple graph
+                pos = torch.tensor(
+                    [[0.0 + i, 0.0], [1.0 + i, 0.0], [1.0 + i, 1.0], [0.0 + i, 1.0]],
+                    dtype=torch.float,
+                )
+                edge_index = torch.tensor(
+                    [[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long
+                )
+                x = torch.tensor(
+                    [
+                        [i * 10 + 1, i * 10 + 1],
+                        [i * 10 + 2, i * 10 + 2],
+                        [i * 10 + 3, i * 10 + 3],
+                        [i * 10 + 4, i * 10 + 4],
+                    ],
+                    dtype=torch.float,
+                )
+                face = torch.tensor([[0], [1], [2]])
+                graph = Data(pos=pos, edge_index=edge_index, x=x, face=face, )
+                self.model.prediction_trajectory.append(graph)
+            self.model.prediction_trajectories.append(self.model.prediction_trajectory)
+
             # Run on_validation_epoch_end
             self.model.on_predict_epoch_end()
 
@@ -330,6 +355,20 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertEqual(len(self.model.prediction_trajectories), 0)
             self.assertIsNone(self.model.last_pred_prediction)
             self.assertIsNone(self.model.last_previous_data_pred_prediction)
+
+            # Check that prediction files are saved
+            traj_idx = 0
+            xdmf_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.xdmf",
+            )
+            h5_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
 
         def test_predict_step_stores_and_resets_trajectory(self):
             # Create mock batches

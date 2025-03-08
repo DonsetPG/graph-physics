@@ -37,8 +37,7 @@ def main(argv):
 
     # Check that the parameters path is provided
     if not FLAGS.predict_parameters_path:
-        logger.error("The 'predict_parameters_path' flag must be provided.")
-        return
+        raise ValueError("The 'predict_parameters_path' flag must be provided.")
 
     # Load training parameters from JSON file
     parameters_path = FLAGS.predict_parameters_path
