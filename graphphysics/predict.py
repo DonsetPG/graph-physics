@@ -25,9 +25,6 @@ torch.set_float32_matmul_precision("high")
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("project_name", "prediction_project", "Name of the WandB project")
-flags.DEFINE_integer("batch_size", 2, "Batch size")
-flags.DEFINE_integer("num_workers", 2, "Number of DataLoader workers")
-flags.DEFINE_integer("prefetch_factor", 2, "Number of batches to prefetch")
 flags.DEFINE_string("model_path", None, "Path to the checkpoint (.ckpt) file")
 flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
@@ -56,9 +53,6 @@ def main(argv):
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     wandb_project_name = FLAGS.project_name
-    batch_size = FLAGS.batch_size
-    num_workers = FLAGS.num_workers
-    prefetch_factor = FLAGS.prefetch_factor
     model_path = FLAGS.model_path
     use_edge_feature = not FLAGS.no_edge_feature
 
@@ -78,23 +72,12 @@ def main(argv):
         use_previous_data=True,
     )
 
-    num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)
-
     predict_dataloader_kwargs = {
         "dataset": predict_dataset,
         "shuffle": False,
-        "batch_size": batch_size,
-        "num_workers": num_workers,
+        "batch_size": 1,
+        "num_workers": 0,
     }
-
-    # Update arguments if num_workers > 0
-    if num_workers > 0:
-        predict_dataloader_kwargs.update(
-            {
-                "prefetch_factor": prefetch_factor,
-                "persistent_workers": True,
-            }
-        )
 
     # Create DataLoader
     predict_dataloader = DataLoader(**predict_dataloader_kwargs)
@@ -118,7 +101,6 @@ def main(argv):
             "#_layers": parameters["model"]["message_passing_num"],
             "#_neurons": parameters["model"]["hidden_size"],
             "#_hops": parameters["dataset"]["khop"],
-            "batch_size": batch_size,
         }
     )
 

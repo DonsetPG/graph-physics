@@ -168,6 +168,14 @@ class LightningModule(L.LightningModule):
             )
             self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
 
+    def reset_validation_epoch_end(self):
+        self.val_step_outputs.clear()
+        self.val_step_targets.clear()
+        self.current_val_trajectory = 0
+        self.last_val_prediction = None
+        self.last_previous_data_prediction = None
+        self.trajectory_to_save.clear()
+
     def on_validation_epoch_end(self):
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
@@ -214,12 +222,7 @@ class LightningModule(L.LightningModule):
             logger.error(f"Error compressing vtus at epoch {self.current_epoch}: {e}")
 
         # Clear stored outputs
-        self.val_step_outputs.clear()
-        self.val_step_targets.clear()
-        self.current_val_trajectory = 0
-        self.last_val_prediction = None
-        self.last_previous_data_prediction = None
-        self.trajectory_to_save.clear()
+        self. reset_validation_epoch_end()
 
     def configure_optimizers(self):
         """Initialize the optimizer"""
@@ -276,6 +279,13 @@ class LightningModule(L.LightningModule):
 
         self.prediction_trajectory.append(batch)
 
+    def reset_predict_epoch_end(self):
+        self.prediction_trajectory.clear()
+        self.prediction_trajectories.clear()
+        self.last_pred_prediction = None
+        self.last_previous_data_pred_prediction = None
+        self.current_pred_trajectory = 0
+
     def on_predict_epoch_end(self):
         """ "
         Converts all the predictions as .xdmf files.
@@ -312,8 +322,4 @@ class LightningModule(L.LightningModule):
                 logger.error("Error compressing vtus during prediction.")
 
         # Clear stored outputs
-        self.prediction_trajectory.clear()
-        self.prediction_trajectories.clear()
-        self.last_pred_prediction = None
-        self.last_previous_data_pred_prediction = None
-        self.current_pred_trajectory = 0
+        self.reset_predict_epoch_end()
