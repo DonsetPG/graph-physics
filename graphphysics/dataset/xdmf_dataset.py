@@ -21,6 +21,7 @@ class XDMFDataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        target_same_frame: bool = False,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -29,17 +30,19 @@ class XDMFDataset(BaseDataset):
             khop=khop,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            target_same_frame=target_same_frame
         )
         if switch_to_val:
             xdmf_folder = xdmf_folder.replace("train", "test")
         self.xdmf_folder = xdmf_folder
         self.meta_path = meta_path
+        self.target_same_frame = target_same_frame
 
         # Get list of XDMF files in the folder
         self.file_paths: List[str] = [
             os.path.join(xdmf_folder, f)
             for f in os.listdir(xdmf_folder)
-            if os.path.isfile(os.path.join(xdmf_folder, f)) and f.endswith(".xdmf")
+            if os.path.isfile(os.path.join(xdmf_folder, f)) and (f.endswith(".xdmf") or f.endswith(".xmf"))
         ]
         self._size_dataset: int = len(self.file_paths)
 
@@ -68,14 +71,15 @@ class XDMFDataset(BaseDataset):
         reader = meshio.xdmf.TimeSeriesReader(xdmf_file)
 
         num_steps = reader.num_steps
-        if frame >= num_steps - 1:
+        if (frame >= num_steps - 1) and (not self.target_same_frame):
             raise IndexError(
-                f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
-            )
+                f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames.")
 
         points, cells = reader.read_points_cells()
         time, point_data, _ = reader.read_data(frame)
-        _, target_point_data, _ = reader.read_data(frame + 1)
+        target_frame = frame + 1
+        if self.target_same_frame: target_frame = frame
+        _, target_point_data, _ = reader.read_data(target_frame)
 
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)

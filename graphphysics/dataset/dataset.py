@@ -21,6 +21,7 @@ class BaseDataset(Dataset, ABC):
         khop: int = 1,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
+        target_same_frame: bool = False
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -44,6 +45,7 @@ class BaseDataset(Dataset, ABC):
         self.add_edge_features = add_edge_features
 
         self.use_previous_data = use_previous_data
+        self.target_same_frame = target_same_frame
 
     @property
     @abstractmethod
@@ -63,12 +65,20 @@ class BaseDataset(Dataset, ABC):
         Returns:
             Tuple[int, int]: A tuple containing the trajectory number and the frame number within that trajectory.
         """
-        traj = index // (self.trajectory_length - 1)
-        frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
+        if (self.target_same_frame):
+            traj = index // self.trajectory_length
+            frame = index % self.trajectory_length
+        else:
+            traj = index // (self.trajectory_length - 1)
+            frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
+
         return traj, frame
 
     def __len__(self) -> int:
-        return self.size_dataset * (self.trajectory_length - 1)
+        if (self.target_same_frame):
+            return self.size_dataset*self.trajectory_length
+        else:
+            return self.size_dataset * (self.trajectory_length - 1)
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
