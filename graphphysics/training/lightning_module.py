@@ -222,7 +222,7 @@ class LightningModule(L.LightningModule):
             logger.error(f"Error compressing vtus at epoch {self.current_epoch}: {e}")
 
         # Clear stored outputs
-        self. reset_validation_epoch_end()
+        self.reset_validation_epoch_end()
 
     def configure_optimizers(self):
         """Initialize the optimizer"""

@@ -314,7 +314,9 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             # Check that last_previous_data_pred_prediction is set
             self.assertIsNotNone(self.model.last_previous_data_pred_prediction)
-            self.assertEqual(self.model.last_previous_data_pred_prediction.shape, (10, 3))
+            self.assertEqual(
+                self.model.last_previous_data_pred_prediction.shape, (10, 3)
+            )
 
             self.model.use_previous_data = False
             self.model.previous_data_start = None
@@ -342,7 +344,12 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
                     dtype=torch.float,
                 )
                 face = torch.tensor([[0], [1], [2]])
-                graph = Data(pos=pos, edge_index=edge_index, x=x, face=face, )
+                graph = Data(
+                    pos=pos,
+                    edge_index=edge_index,
+                    x=x,
+                    face=face,
+                )
                 self.model.prediction_trajectory.append(graph)
             self.model.prediction_trajectories.append(self.model.prediction_trajectory)
 

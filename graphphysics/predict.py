@@ -13,7 +13,6 @@ from graphphysics.external.aneurysm import build_features
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
-    get_num_workers,
     get_preprocessing,
 )
 
