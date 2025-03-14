@@ -143,7 +143,7 @@ class LightningModule(L.LightningModule):
         except Exception as e:
             logger.error(f"Error compressing vtus at epoch {self.current_epoch}: {e}")
 
-    def reset_validation_trajectory(self):
+    def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
@@ -181,7 +181,7 @@ class LightningModule(L.LightningModule):
     def validation_step(self, batch: Batch, batch_idx: int):
         # Determine if we need to reset the trajectory
         if batch.traj_index > self.current_val_trajectory:
-            self.reset_validation_trajectory()
+            self._reset_validation_trajectory()
 
         (
             predicted_outputs,
@@ -207,7 +207,7 @@ class LightningModule(L.LightningModule):
             )
             self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
 
-    def reset_validation_epoch_end(self):
+    def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
         self.val_step_targets.clear()
         self.current_val_trajectory = 0
@@ -239,7 +239,7 @@ class LightningModule(L.LightningModule):
         )
 
         # Clear stored outputs
-        self.reset_validation_epoch_end()
+        self._reset_validation_epoch_end()
 
     def configure_optimizers(self):
         """Initialize the optimizer"""
@@ -260,7 +260,7 @@ class LightningModule(L.LightningModule):
             },
         }
 
-    def reset_prediction_trajectory(self):
+    def _reset_prediction_trajectory(self):
         self.current_pred_trajectory += 1
         self.prediction_trajectories.append(self.prediction_trajectory)
         self.prediction_trajectory = []
@@ -270,7 +270,7 @@ class LightningModule(L.LightningModule):
     def predict_step(self, batch: Batch):
         # Save precedent trajectory and reset the current one
         if batch.traj_index > self.current_pred_trajectory:
-            self.reset_prediction_trajectory()
+            self._reset_prediction_trajectory()
         (
             predicted_outputs,
             target,
@@ -281,7 +281,7 @@ class LightningModule(L.LightningModule):
         )
         self.prediction_trajectory.append(batch)
 
-    def reset_predict_epoch_end(self):
+    def _reset_predict_epoch_end(self):
         self.prediction_trajectory.clear()
         self.prediction_trajectories.clear()
         self.last_pred_prediction = None
@@ -301,4 +301,4 @@ class LightningModule(L.LightningModule):
             self._save_trajectory_to_xdmf(trajectory, save_dir, f"graph_{traj_idx}")
 
         # Clear stored outputs
-        self.reset_predict_epoch_end()
+        self._reset_predict_epoch_end()
