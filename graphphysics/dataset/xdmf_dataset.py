@@ -102,9 +102,9 @@ class XDMFDataset(BaseDataset):
         }
 
         target_data = {
-            k: np.array(v).astype(self.meta["features"][k]["dtype"])
-            for k, v in target_point_data.items()
-            if k in self.meta["features"]
+            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
+            for k in self.meta["features"]
+            if k in target_point_data.keys()
             and self.meta["features"][k]["type"] == "dynamic"
         }
 
