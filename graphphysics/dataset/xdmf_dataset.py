@@ -76,7 +76,8 @@ class XDMFDataset(BaseDataset):
         points, cells = reader.read_points_cells()
         time, point_data, _ = reader.read_data(frame)
         _, target_point_data, _ = reader.read_data(frame + 1)
-
+        reader.__exit__(None, None, None)
+        
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
 
@@ -143,8 +144,6 @@ class XDMFDataset(BaseDataset):
         graph.traj_index = traj_index
 
         if selected_indices is not None:
-            reader.__exit__(None, None, None)
             return graph, selected_indices
         else:
-            reader.__exit__(None, None, None)
             return graph
