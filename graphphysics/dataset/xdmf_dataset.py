@@ -65,17 +65,21 @@ class XDMFDataset(BaseDataset):
         """
         traj_index, frame = self.get_traj_frame(index=index)
         xdmf_file = self.file_paths[traj_index]
-        reader = meshio.xdmf.TimeSeriesReader(xdmf_file)
 
-        num_steps = reader.num_steps
-        if frame >= num_steps - 1:
-            raise IndexError(
-                f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
-            )
+        # Read XDMF file
+        with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
+            num_steps = reader.num_steps
+            if frame >= num_steps - 1:
+                raise IndexError(
+                    f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
+                )
 
-        points, cells = reader.read_points_cells()
-        time, point_data, _ = reader.read_data(frame)
-        _, target_point_data, _ = reader.read_data(frame + 1)
+            points, cells = reader.read_points_cells()
+            time, point_data, _ = reader.read_data(frame)
+            _, target_point_data, _ = reader.read_data(frame + 1)
+
+            if self.use_previous_data:
+                _, previous_data, _ = reader.read_data(frame - 1)
 
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
@@ -122,7 +126,6 @@ class XDMFDataset(BaseDataset):
         )
 
         if self.use_previous_data:
-            _, previous_data, _ = reader.read_data(frame - 1)
             previous = {
                 k: np.array(v).astype(self.meta["features"][k]["dtype"])
                 for k, v in previous_data.items()
