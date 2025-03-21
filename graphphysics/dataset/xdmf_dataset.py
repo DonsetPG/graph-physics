@@ -96,9 +96,9 @@ class XDMFDataset(BaseDataset):
 
         # Process point data and target data
         point_data = {
-            k: np.array(v).astype(self.meta["features"][k]["dtype"])
-            for k, v in point_data.items()
-            if k in self.meta["features"]
+            k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
+            for k in self.meta["features"]
+            if k in mesh.point_data.keys()
         }
 
         target_data = {
