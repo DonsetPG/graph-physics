@@ -143,6 +143,8 @@ class XDMFDataset(BaseDataset):
         graph.traj_index = traj_index
 
         if selected_indices is not None:
+            reader.__exit__(None, None, None)
             return graph, selected_indices
         else:
+            reader.__exit__(None, None, None)
             return graph
