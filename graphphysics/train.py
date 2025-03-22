@@ -3,15 +3,15 @@ import os
 import warnings
 
 import torch
-import wandb
 from absl import app, flags
 from lightning.pytorch import Trainer
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
 from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 from torch_geometric.loader import DataLoader
-from graphphysics.external.aneurysm import build_features
 
+import wandb
+from graphphysics.external.aneurysm import build_features
 from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
