@@ -28,3 +28,7 @@ check-isort: ## check isort with black profile
 
 lint: ## Remove unused imports, run linters Black and isort
 	@make remove-unused-imports && isort graphphysics/ --profile black && black .
+
+train-predict: ## Train a small model and then predict
+	@bash train.sh
+	@bash predict.sh
