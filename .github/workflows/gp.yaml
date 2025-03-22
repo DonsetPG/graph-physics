@@ -47,4 +47,7 @@ jobs:
       env:
         WANDB_MODE: offline
       run: |
+        /usr/bin/Xvfb :99 -screen 0 1024x768x24 &
+        export DISPLAY=:99
+        python -c "import panel as pn; pn.extension('vtk')"
         make train-predict
