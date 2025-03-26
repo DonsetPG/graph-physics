@@ -81,14 +81,14 @@ class XDMFDataset(BaseDataset):
         _target_data_index = random.randint(1, self.random_next)
         _previous_data_index = random.randint(1, self.random_prev)
 
-        if frame - _previous_data_index < 0:
-            _previous_data_index = 1
-        if frame + _target_data_index > num_steps - 1:
-            _target_data_index = 1
-
         # Read XDMF file
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
             num_steps = reader.num_steps
+
+            if frame - _previous_data_index < 0:
+                _previous_data_index = 1
+            if frame + _target_data_index > num_steps - 1:
+                _target_data_index = 1
 
             if frame >= num_steps - 1:
                 raise IndexError(
