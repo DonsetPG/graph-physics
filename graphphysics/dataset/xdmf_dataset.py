@@ -1,4 +1,5 @@
 import os
+import random
 from typing import Callable, List, Optional, Tuple, Union
 
 import meshio
@@ -21,6 +22,8 @@ class XDMFDataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
+        random_next: int = 1,  # The target will be the frame : t + [1, random_next]
     ):
         super().__init__(
             meta_path=meta_path,
@@ -30,8 +33,16 @@ class XDMFDataset(BaseDataset):
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
         )
+
+        self.dt = self.meta["dt"]
+        self.random_next = random_next
+        self.random_prev = random_prev
+
         if switch_to_val:
             xdmf_folder = xdmf_folder.replace("train", "test")
+            self.random_next = 1
+            self.random_prev = 1
+
         self.xdmf_folder = xdmf_folder
         self.meta_path = meta_path
 
@@ -66,9 +77,19 @@ class XDMFDataset(BaseDataset):
         traj_index, frame = self.get_traj_frame(index=index)
         xdmf_file = self.file_paths[traj_index]
 
+        # Fetch index for previous_data and target
+        _target_data_index = random.randint(1, self.random_next)
+        _previous_data_index = random.randint(1, self.random_prev)
+
+        if frame - _previous_data_index < 0:
+            _previous_data_index = 1
+        if frame + _target_data_index > num_steps - 1:
+            _target_data_index = 1
+
         # Read XDMF file
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
             num_steps = reader.num_steps
+
             if frame >= num_steps - 1:
                 raise IndexError(
                     f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
@@ -76,10 +97,10 @@ class XDMFDataset(BaseDataset):
 
             points, cells = reader.read_points_cells()
             time, point_data, _ = reader.read_data(frame)
-            _, target_point_data, _ = reader.read_data(frame + 1)
+            _, target_point_data, _ = reader.read_data(frame + _target_data_index)
 
             if self.use_previous_data:
-                _, previous_data, _ = reader.read_data(frame - 1)
+                _, previous_data, _ = reader.read_data(frame - _previous_data_index)
 
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
@@ -124,6 +145,8 @@ class XDMFDataset(BaseDataset):
             time=time,
             target=target_data,
         )
+        # TODO: add target_dt and previous_dt as features per node.
+        graph.target_dt = _target_data_index * self.dt
 
         if self.use_previous_data:
             previous = {
@@ -134,6 +157,7 @@ class XDMFDataset(BaseDataset):
             }
             _reshape_array(previous)
             graph.previous_data = previous
+            graph.previous_dt = -_previous_data_index * self.dt
 
         graph = graph.to(self.device)
 
