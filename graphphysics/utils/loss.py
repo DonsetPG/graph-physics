@@ -93,10 +93,10 @@ class L1SmoothLoss(_Loss):
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
 
         Returns:
-            torch.Tensor: The mean squared error for the specified node types.
+            torch.Tensor: The L1Smooth loss for the specified node types.
 
         Note:
-            This method calculates the L2 loss only for nodes of the types specified in 'masks'.
+            This method calculates the L1Smooth loss only for nodes of the types specified in 'masks'.
             If 'selected_indexes' is provided, those nodes are excluded from the loss calculation.
         """
         mask = _prepare_mask_for_loss(
