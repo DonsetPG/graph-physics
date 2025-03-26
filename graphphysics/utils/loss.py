@@ -66,7 +66,7 @@ class L2Loss(_Loss):
 
 
 class L1SmoothLoss(_Loss):
-    def __init__(self, beta: float, **kwargs):
+    def __init__(self, beta: float = 1.0, **kwargs):
         super().__init__(**kwargs)
         self.beta = beta
 
