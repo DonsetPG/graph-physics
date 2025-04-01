@@ -3,7 +3,8 @@
         "extension": "xdmf",
         "xdmf_folder": "dataset/train",
         "meta_path": "dataset/meta.json",
-        "khop": 1
+        "khop": 1,
+        "new_edges_ratio": 0
     },
     "model": {
         "type": "transformer",
