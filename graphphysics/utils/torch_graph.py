@@ -84,10 +84,7 @@ def compute_k_hop_graph(
 
     # Build k-hop graph
     khop_mesh_graph = Data(
-        x=graph.x,
-        edge_index=khop_edge_index,
-        pos=graph.pos,
-        y=graph.y,
+        x=graph.x, edge_index=khop_edge_index, pos=graph.pos, y=graph.y, face=graph.face
     )
 
     # Optionally compute edge features
