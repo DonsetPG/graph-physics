@@ -17,7 +17,7 @@ from graphphysics.utils.nodetype import NodeType
 from graphphysics.external.aneurysm import aneurysm_node_type
 
 
-class TestH5Dataset(unittest.TestCase):
+class TestXDMFDataset(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
@@ -34,7 +34,7 @@ class TestH5Dataset(unittest.TestCase):
         assert graph.edge_index is None
 
 
-class TestH5DatasetDistance(unittest.TestCase):
+class TestXDMFDatasetDistance(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
             xdmf_folder="tests/mock_xdmf_aneurysm",
@@ -96,7 +96,7 @@ class TestH5DatasetDistance(unittest.TestCase):
         mesh.write("test_distance.vtu")
 
 
-class TestH5DatasetRotating(unittest.TestCase):
+class TestXDMFDatasetRotating(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
             xdmf_folder="tests/mock_xdmf_aneurysm",
@@ -141,7 +141,7 @@ class TestH5DatasetRotating(unittest.TestCase):
         mesh.write("test_rotate.vtu")
 
 
-class TestH5DatasetMasking(unittest.TestCase):
+class TestXDMFDatasetMasking(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
@@ -175,7 +175,7 @@ class TestH5DatasetPreprocessing(unittest.TestCase):
         assert graph.edge_attr.shape == (11070, 4)
 
 
-class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
+class TestXDMFDatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
     def setUp(self):
         transform = build_preprocessing(add_edges_features=False)
         self.dataset = XDMFDataset(
@@ -193,7 +193,26 @@ class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
         assert graph.edge_attr is None
 
 
-class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
+class TestXDMFDatasetPreprocessingRE(unittest.TestCase):
+    def setUp(self):
+        transform = build_preprocessing(add_edges_features=True)
+        self.dataset = XDMFDataset(
+            xdmf_folder=MOCK_XDMF_FOLDER,
+            meta_path=MOCK_H5_META10_SAVE_PATH,
+            preprocessing=transform,
+            new_edges_ratio=0.5,
+        )
+        self.dataset.trajectory_length += 1
+
+    def test_get(self):
+        graph = self.dataset[0]
+        assert graph.num_nodes == 1923
+        assert graph.edge_index.shape == (2, 16604)
+        assert graph.edge_attr.shape == (16604, 4)
+        assert graph.face is not None
+
+
+class TestXDMFDatasetPreprocessingKHOP(unittest.TestCase):
     def setUp(self):
         transform = build_preprocessing(add_edges_features=True)
         self.dataset = XDMFDataset(
@@ -209,10 +228,29 @@ class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
         assert graph.num_nodes == 1923
         assert graph.edge_index.shape == (2, 32638)
         assert graph.edge_attr.shape == (32638, 4)
-        assert graph.face is None
+        assert graph.face is not None
 
 
-class TestH5DatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
+class TestXDMFDatasetPreprocessingNoEdgeFeaturesRE(unittest.TestCase):
+    def setUp(self):
+        transform = build_preprocessing(add_edges_features=True)
+        self.dataset = XDMFDataset(
+            xdmf_folder=MOCK_XDMF_FOLDER,
+            meta_path=MOCK_H5_META10_SAVE_PATH,
+            preprocessing=transform,
+            new_edges_ratio=0.5,
+            add_edge_features=False,
+        )
+        self.dataset.trajectory_length += 1
+
+    def test_get(self):
+        graph = self.dataset[0]
+        assert graph.num_nodes == 1923
+        assert graph.edge_index.shape == (2, 16604)
+        assert graph.edge_attr is None
+
+
+class TestXDMFDatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
     def setUp(self):
         transform = build_preprocessing(add_edges_features=False)
         self.dataset = XDMFDataset(

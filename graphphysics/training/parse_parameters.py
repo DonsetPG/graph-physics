@@ -166,6 +166,7 @@ def get_dataset(
     """
     dataset_params = param.get("dataset", {})
     khop = dataset_params.get("khop", 1)
+    new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")
 
     if extension == "h5":
@@ -175,6 +176,7 @@ def get_dataset(
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
+            new_edges_ratio=new_edges_ratio,
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
@@ -186,6 +188,7 @@ def get_dataset(
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
+            new_edges_ratio=new_edges_ratio,
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,

@@ -3,7 +3,10 @@ from abc import ABC, abstractmethod
 from typing import Any, Callable, Dict, Optional, Tuple
 
 import torch
+import torch_geometric.transforms as T
+from loguru import logger
 from torch_geometric.data import Data, Dataset
+from torch_geometric.utils import add_random_edge
 
 from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
@@ -19,6 +22,7 @@ class BaseDataset(Dataset, ABC):
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
+        new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
     ):
@@ -41,6 +45,7 @@ class BaseDataset(Dataset, ABC):
         self.preprocessing = preprocessing
         self.masking_ratio = masking_ratio
         self.khop = khop
+        self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
 
         self.use_previous_data = use_previous_data
@@ -86,6 +91,41 @@ class BaseDataset(Dataset, ABC):
         """
         if self.preprocessing is not None:
             graph = self.preprocessing(graph)
+        return graph
+
+    def _add_random_edges(self, graph: Data) -> Data:
+        """Add p random edges to the adjacency matrix to simulate random jumps.
+
+        Parameters:
+            graph (Data): The input graph data.
+
+        Returns:
+            Data: The graph with added random edges.
+        """
+        new_edges_ratio = self.new_edges_ratio
+        if new_edges_ratio <= 0.0 or new_edges_ratio > 1.0:
+            return graph
+        edge_index = getattr(graph, "edge_index", None)
+        if edge_index is None:
+            logger.warning(
+                "You are trying to add random edges but your graph doesn't have any."
+            )
+            return graph
+
+        new_edge_index, _ = add_random_edge(
+            edge_index, p=new_edges_ratio, force_undirected=True
+        )
+        graph.edge_index = new_edge_index
+        if self.add_edge_features:
+            graph.edge_attr = None
+            edge_feature_computer = T.Compose(
+                [
+                    T.Cartesian(norm=False),
+                    T.Distance(norm=False),
+                ]
+            )
+            graph = edge_feature_computer(graph).to(self.device)
+
         return graph
 
     def _apply_k_hop(self, graph: Data, traj_index: int) -> Data:

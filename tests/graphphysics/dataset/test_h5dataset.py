@@ -81,6 +81,25 @@ class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
         assert graph.edge_attr is None
 
 
+class TestH5DatasetPreprocessingRE(unittest.TestCase):
+    def setUp(self):
+        transform = build_preprocessing(add_edges_features=True)
+        self.dataset = H5Dataset(
+            h5_path=MOCK_H5_SAVE_PATH,
+            meta_path=MOCK_H5_META_SAVE_PATH,
+            preprocessing=transform,
+            new_edges_ratio=0.5,
+        )
+        self.dataset.trajectory_length += 1
+
+    def test_get(self):
+        graph = self.dataset[0]
+        assert graph.num_nodes == 1876
+        assert graph.edge_index.shape == (2, 16182)
+        assert graph.edge_attr.shape == (16182, 3)
+        assert graph.face is not None
+
+
 class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
     def setUp(self):
         transform = build_preprocessing(add_edges_features=True)
@@ -97,7 +116,26 @@ class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
         assert graph.num_nodes == 1876
         assert graph.edge_index.shape == (2, 31746)
         assert graph.edge_attr.shape == (31746, 3)
-        assert graph.face is None
+        assert graph.face is not None
+
+
+class TestH5DatasetPreprocessingNoEdgeFeaturesRE(unittest.TestCase):
+    def setUp(self):
+        transform = build_preprocessing(add_edges_features=True)
+        self.dataset = H5Dataset(
+            h5_path=MOCK_H5_SAVE_PATH,
+            meta_path=MOCK_H5_META_SAVE_PATH,
+            preprocessing=transform,
+            new_edges_ratio=0.5,
+            add_edge_features=False,
+        )
+        self.dataset.trajectory_length += 1
+
+    def test_get(self):
+        graph = self.dataset[0]
+        assert graph.num_nodes == 1876
+        assert graph.edge_index.shape == (2, 16182)
+        assert graph.edge_attr is None
 
 
 class TestH5DatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
