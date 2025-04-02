@@ -17,7 +17,7 @@ def filter_edges(
         node_index (Tensor): The node indices to filter.
 
     Returns:
-        Tuple[Tensor, Tensor]: Filtered edge indices and attributes.
+        Tuple[Tensor, Tensor, Tensor]: Filtered edge indices and attributes, and the node masked index.
     """
     num_nodes = maybe_num_nodes(edge_index, None)
     node_index = node_index.to(device)
@@ -53,7 +53,7 @@ def build_masked_graph(
         - selected_indexes: A tensor containing the indices of the nodes to be selected.
 
     Returns:
-        A masked PyTorch Geometric Data object based on the selected indices.
+        A masked PyTorch Geometric Data object based on the selected indices, and the edge masked index.
     """
     masked_e_index, masked_e_attr, edges_mask = filter_edges(
         masked_graph.edge_index, selected_indexes, masked_graph.edge_attr
