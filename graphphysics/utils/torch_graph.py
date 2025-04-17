@@ -119,6 +119,7 @@ def meshdata_to_graph(
     time: Union[int, float] = 1,
     target: Optional[np.ndarray] = None,
     return_only_node_features: bool = False,
+    id: Optional[str] = None,
 ) -> Data:
     """Converts mesh data into a PyTorch Geometric Data object.
 
@@ -129,6 +130,7 @@ def meshdata_to_graph(
         time (int or float): A scalar value representing the time step.
         target (np.ndarray, optional): An optional target tensor.
         return_only_node_features (bool): Whether to return only node features.
+        id (str, optional): An optional mesh id to link graph to original dataset mesh.
 
     Returns:
         Data: A PyTorch Geometric Data object representing the mesh.
@@ -189,6 +191,7 @@ def meshdata_to_graph(
         tetra=tetra,
         y=target_features,
         pos=torch.tensor(points, dtype=torch.float32),
+        id=id,
     )
 
 

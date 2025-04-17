@@ -78,6 +78,7 @@ class XDMFDataset(BaseDataset):
         """
         traj_index, frame = self.get_traj_frame(index=index)
         xdmf_file = self.file_paths[traj_index]
+        mesh_id = os.path.splitext(os.path.basename(xdmf_file))[0].rsplit("_", 1)[-1]
 
         # Fetch index for previous_data and target
         _target_data_index = random.randint(1, self.random_next)
@@ -146,6 +147,7 @@ class XDMFDataset(BaseDataset):
             point_data=point_data,
             time=time,
             target=target_data,
+            id=mesh_id,
         )
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt

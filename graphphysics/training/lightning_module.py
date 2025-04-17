@@ -125,6 +125,7 @@ class LightningModule(L.LightningModule):
         save_dir: str,
         archive_filename: str,
         timestep: float = 1,
+        add_id: bool = False,
     ):
         os.makedirs(save_dir, exist_ok=True)
         archive_path = os.path.join(save_dir, archive_filename)
@@ -132,25 +133,32 @@ class LightningModule(L.LightningModule):
             init_mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
             points = init_mesh.points
             cells = init_mesh.cells
-            with meshio.xdmf.TimeSeriesWriter(f"{archive_path}.xdmf") as writer:
+            xdmf_filename = (
+                f"{archive_path}_{trajectory[0].id[0]}.xdmf"
+                if (add_id and trajectory[0].id[0] is not None)
+                else f"{archive_path}.xdmf"
+            )
+            with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
                 # Write the mesh (points and cells) once
                 writer.write_points_cells(points, cells)
                 # Loop through time steps and write data
-                t = 0
+                t = 0  # TODO: change to t=timestep or 2*timestep if previous_data
                 for idx, graph in enumerate(trajectory):
                     mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                     point_data = mesh.point_data
                     cell_data = mesh.cell_data
                     writer.write_data(t, point_data=point_data, cell_data=cell_data)
-                    t += timestep
+                    t += timestep  # TODO: use the meta.dt timestep
 
         except Exception as e:
             logger.error(f"Error saving graph {idx} at epoch {self.current_epoch}: {e}")
         logger.info(f"Validation Trajectory saved at {save_dir}.")
         # The H5 archive is systematically created in cwd, we just need to move it
         shutil.move(
-            src=os.path.join(os.getcwd(), os.path.split(f"{archive_path}.h5")[1]),
-            dst=f"{archive_path}.h5",
+            src=os.path.join(
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf','h5')}")[1]
+            ),
+            dst=f"{xdmf_filename.replace('xdmf','h5')}",
         )
 
     def _reset_validation_trajectory(self):
@@ -252,7 +260,11 @@ class LightningModule(L.LightningModule):
         # Save trajectory graphs
         save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
         self._save_trajectory_to_xdmf(
-            self.trajectory_to_save, save_dir, f"graph_epoch_{self.current_epoch}"
+            self.trajectory_to_save,
+            save_dir,
+            f"graph_epoch_{self.current_epoch}",
+            timestep=1,  # TODO: use the meta.dt timestep
+            add_id=True,
         )
 
         # Clear stored outputs
@@ -315,8 +327,14 @@ class LightningModule(L.LightningModule):
 
         save_dir = "predictions"
         os.makedirs(save_dir, exist_ok=True)
-        for traj_idx, trajectory in enumerate(self.prediction_trajectories):
-            self._save_trajectory_to_xdmf(trajectory, save_dir, f"graph_{traj_idx}")
+        for trajectory in self.prediction_trajectories:
+            self._save_trajectory_to_xdmf(
+                trajectory,
+                save_dir,
+                "graph",
+                timestep=1,  # TODO: use the meta.dt timestep
+                add_id=True,
+            )
 
         # Clear stored outputs
         self._reset_predict_epoch_end()
