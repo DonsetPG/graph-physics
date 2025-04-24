@@ -85,6 +85,7 @@ def main(argv):
         checkpoint_path=model_path,
         parameters=parameters,
         trajectory_length=predict_dataset.trajectory_length,
+        timestep=predict_dataset.dt,
     )
 
     # Initialize WandbLogger

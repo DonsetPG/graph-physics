@@ -33,6 +33,7 @@ class LightningModule(L.LightningModule):
         num_steps: int,
         warmup: int,
         trajectory_length: int = 599,
+        timestep: float = 1,
         only_processor: bool = False,
         masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
         use_previous_data: bool = False,
@@ -85,6 +86,7 @@ class LightningModule(L.LightningModule):
         self.val_step_outputs = []
         self.val_step_targets = []
         self.trajectory_length = trajectory_length
+        self.timestep = timestep
         self.current_val_trajectory = 0
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
@@ -142,13 +144,13 @@ class LightningModule(L.LightningModule):
                 # Write the mesh (points and cells) once
                 writer.write_points_cells(points, cells)
                 # Loop through time steps and write data
-                t = 0  # TODO: change to t=timestep or 2*timestep if previous_data
+                t = 0  # TODO: take into account previous_data shift etc
                 for idx, graph in enumerate(trajectory):
                     mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                     point_data = mesh.point_data
                     cell_data = mesh.cell_data
                     writer.write_data(t, point_data=point_data, cell_data=cell_data)
-                    t += timestep  # TODO: use the meta.dt timestep
+                    t += timestep
 
         except Exception as e:
             logger.error(f"Error saving graph {idx} at epoch {self.current_epoch}: {e}")
@@ -263,7 +265,7 @@ class LightningModule(L.LightningModule):
             self.trajectory_to_save,
             save_dir,
             f"graph_epoch_{self.current_epoch}",
-            timestep=1,  # TODO: use the meta.dt timestep
+            timestep=self.timestep,
             add_id=True,
         )
 
@@ -332,7 +334,7 @@ class LightningModule(L.LightningModule):
                 trajectory,
                 save_dir,
                 "graph",
-                timestep=1,  # TODO: use the meta.dt timestep
+                timestep=self.timestep,
                 add_id=True,
             )
 

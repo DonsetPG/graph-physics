@@ -176,6 +176,7 @@ def main(argv):
             learning_rate=initial_lr,
             num_steps=num_steps,
             trajectory_length=train_dataset.trajectory_length,
+            timestep=train_dataset.dt,
             **prev_data_kwargs,
         )
         logger.info(f"Resuming WandB run: {lightning_module.wandb_run_id}")
@@ -187,6 +188,7 @@ def main(argv):
             num_steps=num_steps,
             warmup=warmup,
             trajectory_length=train_dataset.trajectory_length,
+            timestep=train_dataset.dt,
             **prev_data_kwargs,
         )
 
