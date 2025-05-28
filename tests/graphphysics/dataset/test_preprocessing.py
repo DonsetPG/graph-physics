@@ -171,7 +171,7 @@ class TestGraphPreprocessing(unittest.TestCase):
         graph = transform(
             Data(
                 x=self.x,
-                face=torch.tensor([[0], [1], [2], [3]], dtype=torch.int),
+                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
                 y=self.y,
                 pos=self.pos,
             )
@@ -206,7 +206,7 @@ class TestGraphPreprocessing(unittest.TestCase):
         graph = transform(
             Data(
                 x=self.x,
-                face=torch.tensor([[0], [1], [2], [3]], dtype=torch.int),
+                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
                 y=self.y,
                 pos=self.pos,
             )
@@ -315,7 +315,7 @@ class TestGraphPreprocessing(unittest.TestCase):
         graph = transform(
             Data(
                 x=self.x,
-                face=torch.tensor([[0], [1], [2], [3]], dtype=torch.int),
+                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
                 y=self.y,
                 pos=self.pos,
             )

@@ -133,56 +133,51 @@ class TestVtuToXdmf(unittest.TestCase):
         """Test 2D vtus compression"""
         vtu_to_xdmf(self.filename, self.files_2d, remove_vtus=False)
 
-        # Check that both archive files exist
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
         self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
 
-        # Check the mesh structure
         vtu_meshes = [meshio.read(f) for f in self.files_2d]
-        reader = meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf")
-        points, cells = reader.read_points_cells()
-        self.assertEqual(len(points), len(vtu_meshes[0].points))
-        self.assertEqual(reader.num_steps, len(vtu_meshes))
-
-        # Compare xdmf and vtu data
-        for i in range(reader.num_steps):
-            time, point_data, cell_data = reader.read_data(i)
-            self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
-            for key in point_data.keys():
-                self.assertTrue(
-                    np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
-                )
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(vtu_meshes[0].points))
+            self.assertEqual(reader.num_steps, len(vtu_meshes))
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
+                    )
 
         os.remove(f"{self.filename}.h5")
         os.remove(f"{self.filename}.xdmf")
+
 
     def test_3d_vtus(self):
         """Test 3D vtus compression"""
 
         vtu_to_xdmf(self.filename, self.files_3d, remove_vtus=False)
 
-        # Check that both archive files exist
         self.assertTrue(os.path.exists(f"{self.filename}.h5"))
         self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
 
-        # Check the mesh structure
         vtu_meshes = [meshio.read(f) for f in self.files_3d]
-        reader = meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf")
-        points, cells = reader.read_points_cells()
-        self.assertEqual(len(points), len(vtu_meshes[0].points))
-        self.assertEqual(reader.num_steps, len(vtu_meshes))
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(vtu_meshes[0].points))
+            self.assertEqual(reader.num_steps, len(vtu_meshes))
 
-        # Compare xdmf and vtu data
-        for i in range(reader.num_steps):
-            time, point_data, cell_data = reader.read_data(i)
-            self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
-            for key in point_data.keys():
-                self.assertTrue(
-                    np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
-                )
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), vtu_meshes[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(point_data[key], vtu_meshes[i].point_data[key])
+                    )
 
         os.remove(f"{self.filename}.h5")
         os.remove(f"{self.filename}.xdmf")
+
 
     def test_remove_vtus(self):
         """Test the VTUs removal after compression."""

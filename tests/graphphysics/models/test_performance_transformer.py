@@ -1,5 +1,6 @@
 from torch_geometric.loader import DataLoader
 import unittest
+import torch
 
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from tests.mock import (
@@ -35,7 +36,8 @@ def process_items_xdmfdataloader():
     input_dim = 3
     output_dim = 3
     num_heads = 1
-    transformer = Transformer(input_dim, output_dim, num_heads)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    transformer = Transformer(input_dim, output_dim, num_heads).to(device)
     for batch_g in dataloader:
         transformer(batch_g.x, None)
         indx += 1
