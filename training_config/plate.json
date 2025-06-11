@@ -25,7 +25,7 @@
         "preprocessing": {
             "noise": 0.003,
             "noise_index_start": [0],
-            "noise_index_end": [6],
+            "noise_index_end": [3],
             "masking": 0
         },
         "world_pos_parameters": {
