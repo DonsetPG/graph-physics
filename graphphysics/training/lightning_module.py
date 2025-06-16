@@ -99,9 +99,9 @@ class LightningModule(L.LightningModule):
         self.trajectory_to_save: list[Batch] = []
 
         # Prediction
+        self.prediction_save_dir: str = "predictions"
         self.current_pred_trajectory = 0
         self.prediction_trajectory: list[Batch] = []
-        self.prediction_trajectories: list[list[Batch]] = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
@@ -139,7 +139,7 @@ class LightningModule(L.LightningModule):
                 # Write the mesh (points and cells) once
                 writer.write_points_cells(points, cells)
                 # Loop through time steps and write data
-                t = 0  # TODO: take into account previous_data shift etc
+                t = 0
                 for idx, graph in enumerate(trajectory):
                     mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                     point_data = mesh.point_data
@@ -149,7 +149,9 @@ class LightningModule(L.LightningModule):
 
         except Exception as e:
             logger.error(f"Error saving graph {idx} at epoch {self.current_epoch}: {e}")
-        logger.info(f"Validation Trajectory saved at {save_dir}.")
+        logger.info(
+            f"Validation Trajectory {xdmf_filename.replace('.xdmf','')} saved at {save_dir}."
+        )
         # The H5 archive is systematically created in cwd, we just need to move it
         shutil.move(
             src=os.path.join(
@@ -291,13 +293,15 @@ class LightningModule(L.LightningModule):
 
     def _reset_prediction_trajectory(self):
         self.current_pred_trajectory += 1
-        self.prediction_trajectories.append(self.prediction_trajectory)
         self.prediction_trajectory = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
     def predict_step(self, batch: Batch):
-        # Save precedent trajectory and reset the current one
+        """
+        Predict step: predict next step of the trajectory.
+        If the next step is in the next trajectory, save the current trajectory
+        to xdmf and reset the trajectory."""
         if batch.traj_index > self.current_pred_trajectory:
             # save
             if batch.traj_index == 0:
@@ -312,6 +316,9 @@ class LightningModule(L.LightningModule):
             )
             # reset
             self._reset_prediction_trajectory()
+            # init
+            self.prediction_trajectory = self._init_save_trajectory(batch)
+        # predict
         (
             batch,
             predicted_outputs,
@@ -325,14 +332,13 @@ class LightningModule(L.LightningModule):
 
     def _reset_predict_epoch_end(self):
         self.prediction_trajectory.clear()
-        self.prediction_trajectories.clear()
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
         self.current_pred_trajectory = 0
 
     def on_predict_epoch_end(self):
         """
-        Converts all the predictions as .xdmf files.
+        Save last trajectory to xdmf and clear stored outputs.
         """
         self._save_trajectory_to_xdmf(
             self.prediction_trajectory,
@@ -378,9 +384,12 @@ class LightningModule(L.LightningModule):
         else:
             return f"{prefix}_{traj_idx}"
 
-    def _init_save_trajectory(self):
+    def _init_save_trajectory(self, batch: Batch) -> list[Batch]:
         """
         Initialize trajectory to save by adding input frames where
-        no prediction is made (t=0 and t=dt if using previous data)
+        no prediction is made (t=0 and also t=dt if using previous data)
         """
-        raise (NotImplementedError("To be implemented"))
+        save_trajectory = [batch]  # TODO: add actual first frame of ground truth
+        if self.use_previous_data:  # TODO: add actual second frame of ground truth
+            save_trajectory.append(batch)
+        return save_trajectory
