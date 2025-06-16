@@ -112,7 +112,7 @@ class TestSimulator(unittest.TestCase):
 
     def test_build_outputs(self):
         network_output = torch.randn(10, self.output_size)
-        outputs = self.simulator._build_outputs(self.data, network_output)
+        outputs = self.simulator.build_outputs(self.data, network_output)
         self.assertEqual(outputs.shape, (10, self.output_size))
 
 
@@ -191,7 +191,7 @@ class TestSimulatorGMM(unittest.TestCase):
 
     def test_build_outputs(self):
         network_output = torch.randn(10, self.output_size)
-        outputs = self.simulator._build_outputs(self.data, network_output)
+        outputs = self.simulator.build_outputs(self.data, network_output)
         self.assertEqual(outputs.shape, (10, self.output_size))
 
 
