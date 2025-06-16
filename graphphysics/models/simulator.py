@@ -160,7 +160,8 @@ class Simulator(nn.Module):
             batch_size (int): Batch size for processing.
             model (nn.Module): The neural network model to be used.
             device (torch.device): The device to run the model on.
-            model_dir (str, optional): Directory to save/load the model checkpoint. Defaults to "checkpoint/simulator.pth".
+            model_dir (str, optional): Directory to save/load the model checkpoint.
+            Defaults to "checkpoint/simulator.pth".
         """
         super(Simulator, self).__init__()
 
@@ -289,9 +290,7 @@ class Simulator(nn.Module):
 
         return graph, target_delta_normalized
 
-    def _build_outputs(
-        self, inputs: Data, network_output: torch.Tensor
-    ) -> torch.Tensor:
+    def build_outputs(self, inputs: Data, network_output: torch.Tensor) -> torch.Tensor:
         """
         Reconstructs the outputs by inverting normalization and adding the pre-target.
 
@@ -330,7 +329,7 @@ class Simulator(nn.Module):
             return network_output, target_delta_normalized, None
         else:
             if self.model.K == 0:
-                outputs = self._build_outputs(
+                outputs = self.build_outputs(
                     inputs=inputs, network_output=network_output
                 )
                 return network_output, target_delta_normalized, outputs
@@ -341,7 +340,7 @@ class Simulator(nn.Module):
                     K=self.model.K,
                     temperature=self.model.temperature,
                 )
-                outputs = self._build_outputs(
+                outputs = self.build_outputs(
                     inputs=inputs, network_output=network_output
                 )
                 return network_output, target_delta_normalized, outputs
