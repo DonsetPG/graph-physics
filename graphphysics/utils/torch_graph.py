@@ -104,13 +104,16 @@ def compute_k_hop_graph(
     return khop_mesh_graph
 
 
-def compute_gradient(graph: Data, field: torch.Tensor) -> torch.Tensor:
+def compute_gradient(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
     """
     Compute the gradient of a vector field on an unstructured graph.
 
     Args:
         graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
         field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
 
     Returns:
         gradients (torch.Tensor): Tensor of shape (N, F, D) where N is the number of nodes,
@@ -130,16 +133,16 @@ def compute_gradient(graph: Data, field: torch.Tensor) -> torch.Tensor:
     distances_squared = torch.linalg.norm(dx, dim=1) ** 2
     du = u[j] - u[i]
 
-    counts = torch.zeros(N, device=field.device)
-    counts.index_add_(0, i, torch.ones(i.size(0), device=field.device))
-    counts.index_add_(0, j, torch.ones(j.size(0), device=field.device))
+    counts = torch.zeros(N, device=device)
+    counts.index_add_(0, i, torch.ones(i.size(0), device=device))
+    counts.index_add_(0, j, torch.ones(j.size(0), device=device))
 
     gradient_edges = torch.div(
         torch.matmul(du.unsqueeze(2), dx.unsqueeze(1)),
         distances_squared.unsqueeze(1).unsqueeze(1),
     )
 
-    gradient = torch.zeros((N, F, D), device=field.device)
+    gradient = torch.zeros((N, F, D), device=device)
     gradient.index_add_(0, i, gradient_edges)
     gradient.index_add_(0, j, gradient_edges)
 
