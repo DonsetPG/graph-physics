@@ -151,6 +151,47 @@ def compute_gradient(
     return gradient
 
 
+def compute_vector_gradient_product(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
+    """
+    Compute the product of a vector field with its gradient (e.g., u * grad(u)).
+
+    Args:
+        graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
+        field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
+
+    Returns:
+        product (torch.Tensor): Tensor of shape (N, F) representing the product u * grad(u).
+    """
+    gradient = compute_gradient(graph, field, device)  # Shape: (N, F, D)
+    product = torch.einsum(
+        "nf,nfd->nf", field, gradient
+    )  # Element-wise product and sum over D
+    return product
+
+
+def compute_divergence(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
+    """
+    Compute the divergence of a vector field on an unstructured graph.
+
+    Args:
+        graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
+        field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
+
+    Returns:
+        divergence (torch.Tensor): Tensor of shape (N,) representing the divergence of the vector field.
+    """
+    gradient = compute_gradient(graph, field, device)  # (N, F, D)
+    # divergence = torch.einsum("nii->n", gradient)
+    divergence = gradient[:, 0, 0] + gradient[:, 1, 1]  # Assuming 2D field
+    return divergence
+
+
 def meshdata_to_graph(
     points: np.ndarray,
     cells: np.ndarray,
