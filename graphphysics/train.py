@@ -189,9 +189,12 @@ def main(argv):
     # Initialize WandbLogger
     wandb_run = wandb.init(project=wandb_project_name)
     wandb_logger = WandbLogger(experiment=wandb_run)
-    checkpoint_callback = ModelCheckpoint(
-        dirpath="checkpoints/", filename=model_save_path + "_{epoch}-{step}"
-    )
+    if model_save_path is not None:
+        checkpoint_callback = ModelCheckpoint(
+            dirpath="checkpoints/", filename=model_save_path
+        )
+    else:
+        checkpoint_callback = ModelCheckpoint(dirpath="checkpoints")
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     wandb_logger.experiment.config.update(
@@ -220,7 +223,7 @@ def main(argv):
         log_every_n_steps=100,
     )
 
-    # Start training
+    # Resuming training from a checkpoint
     if model_path and os.path.isfile(model_path) and resume_training:
         logger.success("Resuming training")
         trainer.fit(
