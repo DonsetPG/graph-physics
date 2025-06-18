@@ -6,5 +6,5 @@ python -m graphphysics.train \
             --warmup=500 \
             --num_workers=0 \
             --prefetch_factor=0 \
-            --model_save_path=model.ckpt \
+            --model_save_name=model \
             --no_edge_feature
