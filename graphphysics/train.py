@@ -36,7 +36,14 @@ flags.DEFINE_integer("batch_size", 2, "Batch size")
 flags.DEFINE_integer("warmup", 1000, "Learning rate warmup steps")
 flags.DEFINE_integer("num_workers", 2, "Number of DataLoader workers")
 flags.DEFINE_integer("prefetch_factor", 2, "Number of batches to prefetch")
-flags.DEFINE_string("model_save_path", None, "Path to the checkpoint (.ckpt) file")
+flags.DEFINE_string(
+    "model_save_path", None, "Path to save the checkpoint (.ckpt) during training"
+)
+flags.DEFINE_string(
+    "model_path", None, "Path to the checkpoint (.ckpt) to resume training from"
+)
+flags.DEFINE_bool("resume_training", False, "Whether to resume an unfinished training or not")
+
 flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
 flags.DEFINE_integer(
     "previous_data_start", 4, "Index of the start of the previous data in the features"
@@ -77,6 +84,8 @@ def main(argv):
     num_workers = FLAGS.num_workers
     prefetch_factor = FLAGS.prefetch_factor
     model_save_path = FLAGS.model_save_path
+    model_path = FLAGS.model_path
+    resume_training = FLAGS.resume_training
     use_edge_feature = not FLAGS.no_edge_feature
     use_previous_data = FLAGS.use_previous_data
     previous_data_start = FLAGS.previous_data_start
@@ -155,10 +164,10 @@ def main(argv):
             "previous_data_end": previous_data_end,
         }
 
-    if model_save_path and os.path.isfile(model_save_path):
-        logger.info(f"Loading model from checkpoint: {model_save_path}")
+    if model_path and os.path.isfile(model_path):
+        logger.info(f"Loading model from checkpoint: {model_path}")
         lightning_module = LightningModule.load_from_checkpoint(
-            checkpoint_path=model_save_path,
+            checkpoint_path=model_path,
             parameters=parameters,
             warmup=warmup,
             learning_rate=initial_lr,
@@ -180,7 +189,9 @@ def main(argv):
     # Initialize WandbLogger
     wandb_run = wandb.init(project=wandb_project_name)
     wandb_logger = WandbLogger(experiment=wandb_run)
-    checkpoint_callback = ModelCheckpoint(dirpath="checkpoints/")
+    checkpoint_callback = ModelCheckpoint(
+        dirpath="checkpoints/", filename=model_save_path + "_{epoch}-{step}"
+    )
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
     wandb_logger.experiment.config.update(
@@ -210,12 +221,21 @@ def main(argv):
     )
 
     # Start training
-    logger.success("Starting training")
-    trainer.fit(
-        model=lightning_module,
-        train_dataloaders=train_dataloader,
-        val_dataloaders=valid_dataloader,
-    )
+    if model_path and os.path.isfile(model_path) and resume_training:
+        logger.success("Resuming training")
+        trainer.fit(
+            model=lightning_module,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=valid_dataloader,
+            ckpt_path=model_path,
+        )
+    else:
+        logger.success("Starting training")
+        trainer.fit(
+            model=lightning_module,
+            train_dataloaders=train_dataloader,
+            val_dataloaders=valid_dataloader,
+        )
 
 
 if __name__ == "__main__":
