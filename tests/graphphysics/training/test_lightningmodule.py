@@ -105,6 +105,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.dataset = MockDataset()
             self.dataloader = DataLoader(self.dataset, batch_size=2)
 
+            self.mock_checkpoint = {}
+
         def test_forward(self):
             batch = next(iter(self.dataloader))
             output = self.model.forward(batch.to(device))
@@ -392,6 +394,15 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             # Check that trajectory is stored and traj index changed
             self.assertEqual(len(self.model.prediction_trajectories), 1)
             assert self.model.current_pred_trajectory == 1
+        
+        def test_wandb_run_id_on_checkpoint_save_and_load(self):
+            self.model.wandb_run_id = "saved_run_id"
+            self.model.on_save_checkpoint(self.mock_checkpoint)            
+            self.assertEqual(self.mock_checkpoint["wandb_run_id"], "saved_run_id")
+
+            self.mock_checkpoint["wandb_run_id"] = "loaded_run_id"
+            self.model.on_load_checkpoint(self.mock_checkpoint)
+            self.assertEqual(self.model.wandb_run_id, "loaded_run_id")
 
     if __name__ == "__main__":
         unittest.main()

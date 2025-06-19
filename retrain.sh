@@ -7,8 +7,6 @@ python -m graphphysics.train \
             --num_workers=0 \
             --prefetch_factor=0 \
             --model_save_name=model \
-            --resume_training=True \
+            --resume_training \
             --model_path=checkpoints/model.ckpt \
             --no_edge_feature \
-            --resume_training=True \
-            --model_path=checkpoints/model.ckpt
