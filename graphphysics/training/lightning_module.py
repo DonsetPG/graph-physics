@@ -59,6 +59,7 @@ class LightningModule(L.LightningModule):
         device = "cuda" if torch.cuda.is_available() else "cpu"
 
         self.param = parameters
+        self.wandb_run_id = None
 
         processor = get_model(param=parameters, only_processor=only_processor)
 
@@ -319,3 +320,18 @@ class LightningModule(L.LightningModule):
 
         # Clear stored outputs
         self._reset_predict_epoch_end()
+    
+    def on_save_checkpoint(self, checkpoint: dict):
+        """
+        Save the wandb run ID to the checkpoint.
+        """
+        if self.wandb_run_id is not None:
+            checkpoint["wandb_run_id"] = self.wandb_run_id
+        else:
+            logger.warning("No wandb run ID found, skipping saving to checkpoint.")
+
+    def on_load_checkpoint(self, checkpoint):
+        """
+        Load the wandb run ID from the checkpoint.
+        """
+        self.wandb_run_id = checkpoint.get('wandb_run_id', None)  

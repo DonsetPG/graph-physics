@@ -175,6 +175,7 @@ def main(argv):
             trajectory_length=train_dataset.trajectory_length,
             **prev_data_kwargs,
         )
+        logger.info(f"Resuming WandB run: {lightning_module.wandb_run_id}")
     else:
         logger.info("Initializing new model")
         lightning_module = LightningModule(
@@ -189,6 +190,7 @@ def main(argv):
     # Initialize WandbLogger
     wandb_run = wandb.init(project=wandb_project_name)
     wandb_logger = WandbLogger(experiment=wandb_run)
+    lightning_module.wandb_run_id = wandb_logger.experiment.id
     if model_save_name is not None:
         checkpoint_callback = ModelCheckpoint(
             dirpath="checkpoints/", filename=model_save_name
