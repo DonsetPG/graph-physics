@@ -42,7 +42,9 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     "model_path", None, "Path to the checkpoint (.ckpt) to resume training from"
 )
-flags.DEFINE_bool("resume_training", False, "Whether to resume an unfinished training or not")
+flags.DEFINE_bool(
+    "resume_training", False, "Whether to resume an unfinished training or not"
+)
 
 flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
 flags.DEFINE_integer(
@@ -188,7 +190,13 @@ def main(argv):
         )
 
     # Initialize WandbLogger
-    wandb_run = wandb.init(project=wandb_project_name)
+    if resume_training:
+        wandb_run = wandb.init(
+            project=wandb_project_name, id=lightning_module.wandb_run_id, resume="allow"
+        )
+    else:
+        wandb_run = wandb.init(project=wandb_project_name)
+
     wandb_logger = WandbLogger(experiment=wandb_run)
     lightning_module.wandb_run_id = wandb_logger.experiment.id
     if model_save_name is not None:

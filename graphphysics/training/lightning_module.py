@@ -320,7 +320,7 @@ class LightningModule(L.LightningModule):
 
         # Clear stored outputs
         self._reset_predict_epoch_end()
-    
+
     def on_save_checkpoint(self, checkpoint: dict):
         """
         Save the wandb run ID to the checkpoint.
@@ -334,4 +334,4 @@ class LightningModule(L.LightningModule):
         """
         Load the wandb run ID from the checkpoint.
         """
-        self.wandb_run_id = checkpoint.get('wandb_run_id', None)  
+        self.wandb_run_id = checkpoint.get("wandb_run_id", None)
