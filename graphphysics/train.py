@@ -26,6 +26,7 @@ warnings.filterwarnings(
 )
 
 torch.set_float32_matmul_precision("high")
+torch.multiprocessing.set_sharing_strategy("file_system")
 
 FLAGS = flags.FLAGS
 flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
