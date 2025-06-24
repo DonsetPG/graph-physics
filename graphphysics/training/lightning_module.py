@@ -139,7 +139,7 @@ class LightningModule(L.LightningModule):
                 # Write the mesh (points and cells) once
                 writer.write_points_cells(points, cells)
                 # Loop through time steps and write data
-                t = 0
+                t = timestep if not self.use_previous_data else 2 * timestep
                 for idx, graph in enumerate(trajectory):
                     mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                     point_data = mesh.point_data
@@ -150,7 +150,7 @@ class LightningModule(L.LightningModule):
         except Exception as e:
             logger.error(f"Error saving graph {idx} at epoch {self.current_epoch}: {e}")
         logger.info(
-            f"Validation Trajectory {xdmf_filename.replace('.xdmf','')} saved at {save_dir}."
+            f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
         )
         # The H5 archive is systematically created in cwd, we just need to move it
         shutil.move(
@@ -316,8 +316,7 @@ class LightningModule(L.LightningModule):
             )
             # reset
             self._reset_prediction_trajectory()
-            # init
-            self.prediction_trajectory = self._init_save_trajectory(batch)
+
         # predict
         (
             batch,
@@ -383,13 +382,3 @@ class LightningModule(L.LightningModule):
             return f"{prefix}_{traj[0].id[0]}"
         else:
             return f"{prefix}_{traj_idx}"
-
-    def _init_save_trajectory(self, batch: Batch) -> list[Batch]:
-        """
-        Initialize trajectory to save by adding input frames where
-        no prediction is made (t=0 and also t=dt if using previous data)
-        """
-        save_trajectory = [batch]  # TODO: add actual first frame of ground truth
-        if self.use_previous_data:  # TODO: add actual second frame of ground truth
-            save_trajectory.append(batch)
-        return save_trajectory
