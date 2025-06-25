@@ -33,7 +33,7 @@ class LightningModule(L.LightningModule):
         num_steps: int,
         warmup: int,
         trajectory_length: int = 599,
-        timestep: float = 1,
+        timestep: float = 1.0,
         only_processor: bool = False,
         masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
         use_previous_data: bool = False,
@@ -301,11 +301,10 @@ class LightningModule(L.LightningModule):
         """
         Predict step: predict next step of the trajectory.
         If the next step is in the next trajectory, save the current trajectory
-        to xdmf and reset the trajectory."""
+        to xdmf and reset the trajectory.
+        """
         if batch.traj_index > self.current_pred_trajectory:
             # save
-            if batch.traj_index == 0:
-                os.makedirs(self.prediction_save_dir, exist_ok=True)
             self._save_trajectory_to_xdmf(
                 self.prediction_trajectory,
                 self.prediction_save_dir,

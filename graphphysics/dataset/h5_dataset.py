@@ -42,6 +42,8 @@ class H5Dataset(BaseDataset):
         self.h5_path = h5_path
         self.meta_path = meta_path
 
+        self.dt = self.meta["dt"]
+
         # Open the H5 file and load metadata
         (
             self.file_handle,
