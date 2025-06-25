@@ -57,6 +57,12 @@ def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mes
         for i in range(x_data.shape[1]):
             mesh.point_data[f"x{i}"] = x_data[:, i]
 
+    # Optionally add node targets as point data
+    if add_all_data and hasattr(graph, "y") and graph.y is not None:
+        y_data = graph.y.cpu().numpy()
+        for i in range(y_data.shape[1]):
+            mesh.point_data[f"y{i}"] = y_data[:, i]
+
     return mesh
 
 
