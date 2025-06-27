@@ -15,6 +15,7 @@ def get_preprocessing(
     param: Dict[str, Any],
     device: torch.device,
     use_edge_feature: bool = True,
+    remove_noise: bool = False,
     extra_node_features: Optional[
         Union[Callable[[Data], Data], List[Callable[[Data], Data]]]
     ] = None,
@@ -40,7 +41,8 @@ def get_preprocessing(
     preprocessing_params = param.get("transformations", {}).get("preprocessing", {})
     noise_scale = preprocessing_params.get("noise", 0)
     noise_parameters = None
-    if noise_scale != 0:
+
+    if noise_scale != 0 and not remove_noise:
         noise_parameters = {
             "noise_index_start": preprocessing_params.get("noise_index_start"),
             "noise_index_end": preprocessing_params.get("noise_index_end"),

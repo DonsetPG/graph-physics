@@ -97,7 +97,7 @@ def main(argv):
     seed_everything(FLAGS.seed, workers=True)
 
     # Build preprocessing function
-    preprocessing = get_preprocessing(
+    train_preprocessing = get_preprocessing(
         param=parameters,
         device=device,
         use_edge_feature=use_edge_feature,
@@ -107,14 +107,22 @@ def main(argv):
     # Get training and validation datasets
     train_dataset = get_dataset(
         param=parameters,
-        preprocessing=preprocessing,
+        preprocessing=train_preprocessing,
         use_edge_feature=use_edge_feature,
         use_previous_data=use_previous_data,
     )
 
+    val_preprocessing = get_preprocessing(
+        param=parameters,
+        device=device,
+        use_edge_feature=use_edge_feature,
+        remove_noise=True,
+        extra_node_features=build_features,
+    )
+
     val_dataset = get_dataset(
         param=parameters,
-        preprocessing=preprocessing,
+        preprocessing=val_preprocessing,
         use_edge_feature=use_edge_feature,
         use_previous_data=use_previous_data,
         switch_to_val=True,

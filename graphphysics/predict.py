@@ -57,6 +57,7 @@ def main(argv):
         param=parameters,
         device=device,
         use_edge_feature=use_edge_feature,
+        remove_noise=True,
         extra_node_features=build_features,
     )
 
