@@ -71,8 +71,8 @@ class XDMFDataset(BaseDataset):
         file_name = file_name.replace(".xdmf", ".npz")
 
         data_npz = np.load(file_name)
-        feats = data_npz["feats"]
-        coords = data_npz["coords"]
+        feats = data_npz["indices"]
+        coords = data_npz["patchtokens"]
 
         return feats, coords
 
