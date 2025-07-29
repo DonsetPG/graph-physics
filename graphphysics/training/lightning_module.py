@@ -1,5 +1,6 @@
 import os
 import shutil
+from typing import List
 
 import lightning as L
 import meshio
@@ -83,6 +84,8 @@ class LightningModule(L.LightningModule):
         self.num_steps = num_steps
         self.warmup = warmup
 
+        self.step_counter = 0
+        self.first_step_losses: List[torch.Tensor] = []
         self.val_step_outputs = []
         self.val_step_targets = []
         self.trajectory_length = trajectory_length
@@ -205,6 +208,7 @@ class LightningModule(L.LightningModule):
         # Determine if we need to reset the trajectory
         if batch.traj_index > self.current_val_trajectory:
             self._reset_validation_trajectory()
+            self.step_counter = 0
 
         (
             batch,
@@ -230,6 +234,9 @@ class LightningModule(L.LightningModule):
                 masks=self.loss_masks,
             )
             self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+            if self.step_counter == 0:
+                self.first_step_losses.append(val_loss.detach().cpu())
+            self.step_counter += 1
 
     def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
@@ -238,6 +245,8 @@ class LightningModule(L.LightningModule):
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
         self.trajectory_to_save.clear()
+        self.step_counter = 0
+        self.first_step_losses = []
 
     def on_validation_epoch_end(self):
         # Concatenate outputs and targets
@@ -255,6 +264,13 @@ class LightningModule(L.LightningModule):
             on_epoch=True,
             prog_bar=True,
         )
+
+        # Compute RMSE for the first step
+        if self.first_step_losses:
+            mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
+            self.log(
+                "val_loss_1_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+            )
 
         # Save trajectory graphs
         save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
