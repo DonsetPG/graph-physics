@@ -234,9 +234,13 @@ class LightningModule(L.LightningModule):
                 masks=self.loss_masks,
             )
             self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
-            if self.step_counter == 0:
-                self.first_step_losses.append(val_loss.detach().cpu())
-            self.step_counter += 1
+
+        # compute RMSE for the first step
+        if self.step_counter == 0:
+            squared_diff = (predicted_outputs - target) ** 2
+            rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
+            self.first_step_losses.append(rmse)
+        self.step_counter += 1
 
     def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
@@ -269,7 +273,7 @@ class LightningModule(L.LightningModule):
         if self.first_step_losses:
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
-                "val_loss_1_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
             )
 
         # Save trajectory graphs
