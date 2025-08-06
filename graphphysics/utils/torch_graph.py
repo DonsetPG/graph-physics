@@ -98,14 +98,6 @@ def compute_k_hop_graph(
             T.Cartesian(norm=False),
             T.Distance(norm=False),
         ]
-        if world_pos_index_start is not None and world_pos_index_end is not None:
-            transforms.append(
-                partial(
-                    add_world_pos_features,
-                    world_pos_index_start=world_pos_index_start,
-                    world_pos_index_end=world_pos_index_end,
-                )
-            )
         edge_feature_computer = T.Compose(transforms)
         khop_mesh_graph = edge_feature_computer(khop_mesh_graph).to(device)
 
