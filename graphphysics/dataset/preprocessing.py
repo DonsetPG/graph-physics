@@ -418,13 +418,6 @@ def build_preprocessing(
             ]
         )
         preprocessing.extend(add_edge_features())
-        preprocessing.append(
-            partial(
-                add_world_pos_features,
-                world_pos_index_start=world_pos_parameters["world_pos_index_start"],
-                world_pos_index_end=world_pos_parameters["world_pos_index_end"],
-            )
-        )
     else:
         preprocessing.append(T.FaceToEdge(remove_faces=False))
         if add_edges_features:
