@@ -104,6 +104,94 @@ def compute_k_hop_graph(
     return khop_mesh_graph
 
 
+def compute_gradient(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
+    """
+    Compute the gradient of a vector field on an unstructured graph.
+
+    Args:
+        graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
+        field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
+
+    Returns:
+        gradients (torch.Tensor): Tensor of shape (N, F, D) where N is the number of nodes,
+                                  F is the number of components of the vector field,
+                                  and D is the dimension of the spatial positions.
+    """
+    pos = graph.pos
+    edges = graph.edge_index
+    edges = torch.unique(torch.sort(edges.T, dim=1)[0], dim=0).T
+    u = field
+
+    N, D = pos.shape
+    _, F = u.shape
+
+    i, j = edges[0], edges[1]
+    dx = pos[j] - pos[i]
+    distances_squared = torch.linalg.norm(dx, dim=1) ** 2
+    du = u[j] - u[i]
+
+    counts = torch.zeros(N, device=device)
+    counts.index_add_(0, i, torch.ones(i.size(0), device=device))
+    counts.index_add_(0, j, torch.ones(j.size(0), device=device))
+
+    gradient_edges = torch.div(
+        torch.matmul(du.unsqueeze(2), dx.unsqueeze(1)),
+        distances_squared.unsqueeze(1).unsqueeze(1),
+    )
+
+    gradient = torch.zeros((N, F, D), device=device)
+    gradient.index_add_(0, i, gradient_edges)
+    gradient.index_add_(0, j, gradient_edges)
+
+    gradient = torch.div(gradient, counts.unsqueeze(1).unsqueeze(1))
+
+    return gradient
+
+
+def compute_vector_gradient_product(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
+    """
+    Compute the product of a vector field with its gradient (e.g., u * grad(u)).
+
+    Args:
+        graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
+        field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
+
+    Returns:
+        product (torch.Tensor): Tensor of shape (N, F) representing the product u * grad(u).
+    """
+    gradient = compute_gradient(graph, field, device)  # Shape: (N, F, D)
+    product = torch.einsum(
+        "nf,nfd->nf", field, gradient
+    )  # Element-wise product and sum over D
+    return product
+
+
+def compute_divergence(
+    graph: Data, field: torch.Tensor, device: str = "cpu"
+) -> torch.Tensor:
+    """
+    Compute the divergence of a vector field on an unstructured graph.
+
+    Args:
+        graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
+        field (torch.Tensor): Vector field (N, F).
+        device (str): Device to perform the computation on.
+
+    Returns:
+        divergence (torch.Tensor): Tensor of shape (N,) representing the divergence of the vector field.
+    """
+    gradient = compute_gradient(graph, field, device)  # (N, F, D)
+    # divergence = torch.einsum("nii->n", gradient)
+    divergence = gradient[:, 0, 0] + gradient[:, 1, 1]  # Assuming 2D field
+    return divergence
+
+
 def meshdata_to_graph(
     points: np.ndarray,
     cells: np.ndarray,

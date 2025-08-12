@@ -9,7 +9,11 @@ from loguru import logger
 from torch_geometric.data import Batch
 
 from graphphysics.training.parse_parameters import get_model, get_simulator
-from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
+from graphphysics.utils.loss import (
+    DiagonalGaussianMixtureNLLLoss,
+    L2Loss,
+    GradientL2Loss,
+)
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -80,6 +84,10 @@ class LightningModule(L.LightningModule):
             )
         self.loss_masks = masks
 
+        self.phy_loss = GradientL2Loss()
+        self.phy_loss_weight = 1
+        self.phy_loss_masks = masks
+
         self.learning_rate = learning_rate
         self.num_steps = num_steps
         self.warmup = warmup
@@ -114,14 +122,27 @@ class LightningModule(L.LightningModule):
     def training_step(self, batch: Batch):
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
+        network_output_physical = self.model.build_outputs(batch, network_output)
+        target_physical = self.model.build_outputs(batch, target_delta_normalized)
 
-        loss = self.loss(
+        data_loss = self.loss(
             target_delta_normalized,
             network_output,
             node_type,
             masks=self.loss_masks,
         )
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        phy_loss = self.phy_loss_weight * self.phy_loss(
+            batch,
+            target_physical,
+            network_output_physical,
+            node_type,
+            masks=self.phy_loss_masks,
+        )
+
+        loss = data_loss + phy_loss
+
+        self.log("train_loss", data_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("phy_loss", phy_loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def _save_trajectory_to_xdmf(
