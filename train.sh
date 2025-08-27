@@ -1,6 +1,6 @@
 python -m graphphysics.train \
             --training_parameters_path=training_config/coarse-aneurysm.json \
-            --num_epochs=40 \
+            --num_epochs=20 \
             --init_lr=0.001 \
             --batch_size=1 \
             --warmup=1500 \

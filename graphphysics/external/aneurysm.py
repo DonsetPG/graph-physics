@@ -50,7 +50,7 @@ def build_features(graph: Data) -> Data:
 
     graph.x = torch.cat(
         (
-            graph.x,
+            graph.x[:, 0:3],
             acceleration,
             graph.pos,
             mean_next_accel.unsqueeze(1),
