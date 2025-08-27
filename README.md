@@ -9,7 +9,7 @@ It is based on the work from different papers:
 - [Learning Mesh-Based Simulation with Graph Networks](https://arxiv.org/abs/2010.03409)
 - [Multi-Grid Graph Neural Networks with Self-Attention for Computational Mechanics](https://arxiv.org/pdf/2409.11899)
 - [MeshMask: Physics Simulations with Masked Graph Neural Networks](https://arxiv.org/pdf/2501.08738)
-- [Training Transformers to Simulate Complex Physics]()
+- [Training Transformers to Simulate Complex Physics](https://arxiv.org/abs/2508.18051)
 
 We offer a simple training script to:
 - Setup your model's architecture
