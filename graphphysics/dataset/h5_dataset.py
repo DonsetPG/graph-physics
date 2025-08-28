@@ -105,7 +105,7 @@ class H5Dataset(BaseDataset):
         graph = self._add_random_edges(graph)
         selected_indices = self._get_masked_indexes(graph)
 
-        graph.edge_index = graph.edge_index.long()
+        graph.edge_index = graph.edge_index.long() if graph.edge_index is not None else None
 
         del graph.previous_data
         graph.traj_index = traj_index
