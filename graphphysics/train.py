@@ -101,7 +101,7 @@ def main(argv):
         param=parameters,
         device=device,
         use_edge_feature=use_edge_feature,
-        extra_node_features=build_features,
+        extra_node_features=None,
     )
 
     # Get training and validation datasets
@@ -117,7 +117,7 @@ def main(argv):
         device=device,
         use_edge_feature=use_edge_feature,
         remove_noise=True,
-        extra_node_features=build_features,
+        extra_node_features=None,
     )
 
     val_dataset = get_dataset(

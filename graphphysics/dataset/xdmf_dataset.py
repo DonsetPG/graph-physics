@@ -171,6 +171,8 @@ class XDMFDataset(BaseDataset):
 
         graph = graph.to(self.device)
 
+        graph.pos = graph.pos[:,0:2]
+
         node_type = graph.x[:,0:1]
         velocity = graph.x[:,1:3]
 
