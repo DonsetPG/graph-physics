@@ -87,6 +87,7 @@ class LightningModule(L.LightningModule):
         self.phy_loss = GradientL2Loss()
         self.phy_loss_weight = 1
         self.phy_loss_masks = masks
+        self.gradient_method = "finite_diff"  # least_squares, green_gauss
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -137,6 +138,7 @@ class LightningModule(L.LightningModule):
             network_output_physical,
             node_type,
             masks=self.phy_loss_masks,
+            method=self.gradient_method,
         )
 
         loss = data_loss + phy_loss
@@ -179,9 +181,9 @@ class LightningModule(L.LightningModule):
         # The H5 archive is systematically created in cwd, we just need to move it
         shutil.move(
             src=os.path.join(
-                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf','h5')}")[1]
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
             ),
-            dst=f"{xdmf_filename.replace('xdmf','h5')}",
+            dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
         )
 
     def _reset_validation_trajectory(self):
