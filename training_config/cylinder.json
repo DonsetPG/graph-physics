@@ -1,14 +1,14 @@
 {
     "dataset": {
-        "extension": "h5",
-        "h5_path": "dataset/h5_dataset/cylinder_flow/train.h5",
+        "extension": "xdmf",
+        "xdmf_folder": "dataset/train",
         "meta_path": "dataset_config/cylinder_meta.json",
         "khop": 1
     },
     "model": {
         "type": "epd",
-        "message_passing_num": 5,
-        "hidden_size": 32,
+        "message_passing_num": 15,
+        "hidden_size": 128,
         "node_input_size": 2,
         "output_size": 2,
         "edge_input_size": 3

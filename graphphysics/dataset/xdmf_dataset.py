@@ -171,6 +171,17 @@ class XDMFDataset(BaseDataset):
 
         graph = graph.to(self.device)
 
+        node_type = graph.x[:,0:1]
+        velocity = graph.x[:,1:3]
+
+        graph.x = torch.cat(
+            (
+                velocity,
+                node_type,
+            ),
+            dim=1,
+        )
+
         graph = self._apply_preprocessing(graph)
         graph = self._apply_k_hop(graph, traj_index)
         graph = self._may_remove_edges_attr(graph)

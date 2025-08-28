@@ -29,7 +29,7 @@ torch.set_float32_matmul_precision("high")
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
+flags.DEFINE_string("project_name", "cylinder_mesh_size", "Name of the WandB project")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_float("init_lr", 0.001, "Initial learning rate")
@@ -47,12 +47,12 @@ flags.DEFINE_bool(
     "resume_training", False, "Whether to resume an unfinished training or not"
 )
 
-flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
+flags.DEFINE_bool("use_previous_data", False, "Whether to use previous data or not")
 flags.DEFINE_integer(
-    "previous_data_start", 4, "Index of the start of the previous data in the features"
+    "previous_data_start", 3, "Index of the start of the previous data in the features"
 )
 flags.DEFINE_integer(
-    "previous_data_end", 7, "Index of the end of the previous data in the features"
+    "previous_data_end", 6, "Index of the end of the previous data in the features"
 )
 flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
@@ -212,7 +212,11 @@ def main(argv):
     lightning_module.wandb_run_id = wandb_logger.experiment.id
     if model_save_name is not None:
         checkpoint_callback = ModelCheckpoint(
-            dirpath="checkpoints/", filename=model_save_name
+            dirpath="checkpoints/",
+            filename="coarse4_epoch{epoch:03d}",   # <-- make the name unique
+            save_top_k=-1,                                   # keep every checkpoint
+            every_n_epochs=1,                                # (explicit) save each epoch
+            save_on_train_epoch_end=True                     # save after the training part
         )
     else:
         checkpoint_callback = ModelCheckpoint(dirpath="checkpoints")
@@ -238,7 +242,6 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         log_every_n_steps=100,

@@ -1,10 +1,9 @@
 python -m graphphysics.train \
-            --training_parameters_path=mock_training.json \
-            --num_epochs=1 \
-            --init_lr=0.001 \
-            --batch_size=1 \
-            --warmup=500 \
-            --num_workers=0 \
-            --prefetch_factor=0 \
-            --model_save_name=model \
-            --no_edge_feature
+            --training_parameters_path=training_config/cylinder.json \
+            --num_epochs=12 \
+            --init_lr=0.0001 \
+            --batch_size=4 \
+            --warmup=1500 \
+            --num_workers=4 \
+            --prefetch_factor=4 \
+            --model_save_name=model
