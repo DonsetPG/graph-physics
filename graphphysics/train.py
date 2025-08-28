@@ -250,6 +250,7 @@ def main(argv):
     # Resuming training from a checkpoint
     if model_path and os.path.isfile(model_path) and resume_training:
         logger.success("Resuming training")
+        trainer.validate(model=lightning_module, dataloaders=valid_dataloader)
         trainer.fit(
             model=lightning_module,
             train_dataloaders=train_dataloader,
