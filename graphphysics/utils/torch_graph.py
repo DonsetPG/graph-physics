@@ -203,8 +203,8 @@ def compute_gradient_green_gauss(
     face_fields = 0.5 * (field[i] + field[j])  # (E, F)
     edge_vectors = pos[j] - pos[i]  # (E, D)
     if D == 2:
-        # For 2D: face normal is perpendicular to edge
-        face_normals = torch.stack([-edge_vectors[:, 1], edge_vectors[:, 0]], dim=1)
+        # For 2D: face normal is perpendicular to edge (ensure orientation is outward from i to j)
+        face_normals = torch.stack([edge_vectors[:, 1], -edge_vectors[:, 0]], dim=1)
         face_areas_computed = torch.norm(edge_vectors, dim=1)
     else:
         # For 3D: would need actual face normals from mesh topology
@@ -238,7 +238,9 @@ def compute_gradient_green_gauss(
         contrib = torch.outer(face_field, face_normal) * face_area  # (F, D)
 
         gradients[node_i] += contrib / cell_volumes[node_i]
-        gradients[node_j] -= contrib / cell_volumes[node_j]  # Opposite direction
+        gradients[node_j] += (
+            contrib / cell_volumes[node_j]
+        )  # Same direction for undirected edges
 
     return gradients
 

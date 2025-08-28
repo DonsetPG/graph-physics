@@ -139,9 +139,13 @@ def test_compute_gradient_linear_2d():
     )
 
     # Undirected edges of a square
-    edge_index = torch.tensor(
-        [[0, 1, 0, 2, 1, 3, 2, 3], [1, 0, 2, 0, 3, 1, 3, 2]], dtype=torch.long
-    )
+    # edge_index = torch.tensor(
+    #     [[0, 1, 0, 2, 1, 3, 2, 3], [1, 0, 2, 0, 3, 1, 3, 2]], dtype=torch.long
+    # )
+    # Directed edges of a square, one outgoing edge per node
+    edge_index = torch.tensor([[0, 1, 2, 3], [1, 3, 0, 2]], dtype=torch.long)
+
+    graph = Data(pos=pos, edge_index=edge_index)
 
     def vector_field(xy):
         x, y = xy
@@ -149,14 +153,25 @@ def test_compute_gradient_linear_2d():
 
     field = torch.stack([vector_field(p) for p in pos], dim=0)
 
-    graph = Data(pos=pos, edge_index=edge_index)
-
-    gradients = compute_gradient(graph, field)
     true_grad = torch.tensor([[0.5, 0.5], [1.0, -0.5]])  # shape (2,2)
 
-    for node_grad in gradients:
-        # node_grad shape => (2,2)
-        # we test if each node’s gradient is "close" to the analytic solution
-        assert torch.allclose(
-            node_grad, true_grad, atol=1e-1
-        ), f"Computed gradient {node_grad} not close to expected {true_grad}"
+    grad_methods = {
+        "finite_differences": lambda: compute_gradient(
+            graph, field, method="finite_diff"
+        ),
+        # "weighted_least_squares": lambda: compute_gradient(
+        #     graph, field, method="least_squares"
+        # ),
+        # "green_gauss": lambda: compute_gradient(
+        #     graph, field, method="green_gauss"
+        # ),
+    }
+
+    for name, method in grad_methods.items():
+        gradients = method()
+        for node_grad in gradients:
+            # node_grad shape => (2,2)
+            # we test if each node’s gradient is "close" to the analytic solution
+            assert torch.allclose(
+                node_grad, true_grad, atol=1e-1
+            ), f"Computed gradient (using {name} method) {node_grad} not close to expected {true_grad}"
