@@ -385,6 +385,22 @@ You will need to define:
 
 Examples can be found [here](https://github.com/DonsetPG/graph-physics/tree/main/dataset_config).
 
+# Citations
+
+If you use this repo, please use the following bibtex:
+
+```
+@misc{garnier2025trainingtransformersmeshbasedsimulations,
+      title={Training Transformers for Mesh-Based Simulations}, 
+      author={Paul Garnier and Vincent Lannelongue and Jonathan Viquerat and Elie Hachem},
+      year={2025},
+      eprint={2508.18051},
+      archivePrefix={arXiv},
+      primaryClass={cs.LG},
+      url={https://arxiv.org/abs/2508.18051}, 
+}
+```
+
 # TODOs
 
 ## Colab Wise
