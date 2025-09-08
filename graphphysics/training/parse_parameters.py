@@ -8,6 +8,7 @@ from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from graphphysics.models.processors import EncodeProcessDecode, EncodeTransformDecode
 from graphphysics.models.simulator import Simulator
+from graphphysics.utils.loss import LossType, MultiLoss
 from graphphysics.utils.nodetype import NodeType
 
 
@@ -227,3 +228,20 @@ def get_num_workers(param: Dict[str, Any], default_num_workers: int) -> int:
         return default_num_workers
     else:
         raise ValueError(f"Dataset extension '{extension}' not supported.")
+
+
+def get_loss(param: Dict[str, Any], **kwargs):
+    """
+    Parse parameters for loss function. If several loss types are specified, a weighted loss is used.
+    """
+    try:
+        _ = param["loss"]
+    except KeyError:
+        return LossType.L2LOSS.value(**kwargs)
+
+    if len(param["loss"]["type"]) > 1:
+        losses = [LossType[t.upper()].value(**kwargs) for t in param["loss"]["type"]]
+        weights = param["loss"]["weights"]
+        return MultiLoss(losses, weights)
+    else:
+        return LossType[param["loss"]["type"][0].upper()].value(**kwargs)

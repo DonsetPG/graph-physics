@@ -8,12 +8,8 @@ import torch
 from loguru import logger
 from torch_geometric.data import Batch
 
-from graphphysics.training.parse_parameters import get_model, get_simulator
-from graphphysics.utils.loss import (
-    DiagonalGaussianMixtureNLLLoss,
-    L2Loss,
-    GradientL2Loss,
-)
+from graphphysics.training.parse_parameters import get_model, get_simulator, get_loss
+from graphphysics.utils.loss import L2Loss, DiagonalGaussianMixtureNLLLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -74,8 +70,11 @@ class LightningModule(L.LightningModule):
         self.model = get_simulator(param=parameters, model=processor, device=device)
         self.K = processor.K
 
+        # TODO: maybe remove this condition
         if self.K == 0:
-            self.loss = L2Loss()
+            # TODO: beta smoothness parameter?
+
+            self.loss = get_loss(param=parameters)  # , d=processor.d, K=self.K, temperature=processor.temperature,)
         else:
             self.loss = DiagonalGaussianMixtureNLLLoss(
                 d=processor.d,
@@ -83,10 +82,9 @@ class LightningModule(L.LightningModule):
                 temperature=processor.temperature,
             )
         self.loss_masks = masks
+        self.val_loss = L2Loss()
 
-        self.phy_loss = GradientL2Loss()
-        self.phy_loss_weight = 1
-        self.phy_loss_masks = masks
+        # TODO: parse gradient_method from params
         self.gradient_method = "finite_diff"  # least_squares, green_gauss
 
         self.learning_rate = learning_rate
@@ -126,25 +124,19 @@ class LightningModule(L.LightningModule):
         network_output_physical = self.model.build_outputs(batch, network_output)
         target_physical = self.model.build_outputs(batch, target_delta_normalized)
 
-        data_loss = self.loss(
-            target_delta_normalized,
-            network_output,
-            node_type,
+        # TODO: see MultiLoss return for logging of all loss components
+        loss = self.loss(
+            graph=batch,
+            target=target_delta_normalized,
+            network_output=network_output,
+            node_type=node_type,
             masks=self.loss_masks,
-        )
-        phy_loss = self.phy_loss_weight * self.phy_loss(
-            batch,
-            target_physical,
-            network_output_physical,
-            node_type,
-            masks=self.phy_loss_masks,
-            method=self.gradient_method,
+            gradient_method=self.gradient_method,
+            network_output_physical=network_output_physical,
+            target_physical=target_physical,
         )
 
-        loss = data_loss + phy_loss
-
-        self.log("train_loss", data_loss, on_step=True, on_epoch=True, prog_bar=True)
-        self.log("phy_loss", phy_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def _save_trajectory_to_xdmf(
@@ -250,7 +242,7 @@ class LightningModule(L.LightningModule):
         self.val_step_outputs.append(predicted_outputs.cpu())
         self.val_step_targets.append(target.cpu())
         if self.K == 0:
-            val_loss = self.loss(
+            val_loss = self.val_loss(
                 target,
                 predicted_outputs,
                 node_type,
