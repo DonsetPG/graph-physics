@@ -1,10 +1,12 @@
+import enum
+
 import torch
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss
 from torch_geometric.data import Data
 
 from graphphysics.utils.nodetype import NodeType
-from graphphysics.utils.torch_graph import (
+from graphphysics.utils.vectorial_operators import (
     compute_gradient,
     compute_vector_gradient_product,
     compute_divergence,
@@ -46,6 +48,7 @@ class L2Loss(_Loss):
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
@@ -87,6 +90,7 @@ class L1SmoothLoss(_Loss):
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes L1Smooth loss for nodes of specific types.
@@ -114,6 +118,7 @@ class L1SmoothLoss(_Loss):
         return torch.mean(errors)
 
 
+# TODO: remove gradient computation from inside all loss functions, must be computed once and for all if possible
 class GradientL2Loss(_Loss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -125,20 +130,20 @@ class GradientL2Loss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        target_physical: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
         The loss is computed betwheen the spatial gradient of target and network_output.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            target_physical (torch.Tensor): The physical target values.
+            network_output (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -148,10 +153,10 @@ class GradientL2Loss(_Loss):
             torch.Tensor: The L2 loss for the specified node types.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
-        gradient = compute_gradient(graph, network_output, method=method, device=device)
-        true_gradient = compute_gradient(graph, target, method=method, device=device)
+        gradient = compute_gradient(graph, network_output_physical, method=gradient_method, device=device)
+        true_gradient = compute_gradient(graph, target_physical, method=gradient_method, device=device)
         errors = ((gradient - true_gradient) ** 2)[mask]
         return torch.mean(errors)
 
@@ -167,20 +172,21 @@ class ConvectionL2Loss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        target_physical: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
         The loss is computed betwheen the NS convection term ((u.grad)u) of target and network_output.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            target_physical (torch.Tensor): The physical target values.
+            network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -190,13 +196,13 @@ class ConvectionL2Loss(_Loss):
             torch.Tensor: The L2 loss for the specified node types.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
         convection = compute_vector_gradient_product(
-            graph, network_output, method=method, device=device
+            graph, network_output_physical, method=gradient_method, device=device
         )
         true_convection = compute_vector_gradient_product(
-            graph, target, method=method, device=device
+            graph, target_physical, method=gradient_method, device=device
         )
         errors = ((convection - true_convection) ** 2)[mask]
         return torch.mean(errors)
@@ -213,20 +219,19 @@ class DivergenceLoss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
         The loss is computed betwheen the spatial gradient of target and network_output.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -236,10 +241,10 @@ class DivergenceLoss(_Loss):
             torch.Tensor: The L2 loss for the specified node types.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
         divergence = compute_divergence(
-            graph, network_output, method=method, device=device
+            graph, network_output_physical, method=gradient_method, device=device
         )
         errors = (divergence**2)[mask]
         return torch.mean(errors)
@@ -256,19 +261,18 @@ class DivL1Loss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes divergence L1 loss for nodes of specific types.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -278,10 +282,10 @@ class DivL1Loss(_Loss):
             torch.Tensor: The L1 loss for the specified node types.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
         divergence = compute_divergence(
-            graph, network_output, method=method, device=device
+            graph, network_output_physical, method=gradient_method, device=device
         )
         errors = torch.abs(divergence)[mask]
         return torch.mean(errors)
@@ -299,19 +303,18 @@ class DivL1SmoothLoss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes Divergence L1Smooth loss for nodes of specific types.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -325,10 +328,10 @@ class DivL1SmoothLoss(_Loss):
             If 'selected_indexes' is provided, those nodes are excluded from the loss calculation.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
         divergence = compute_divergence(
-            graph, network_output, method=method, device=device
+            graph, network_output_physical, method=gradient_method, device=device
         )
         zeros = torch.zeros_like(divergence)
         errors = F.smooth_l1_loss(divergence, zeros, reduction="none", beta=self.beta)[
@@ -348,20 +351,19 @@ class DivL2Loss(_Loss):
     def forward(
         self,
         graph: Data,
-        target: torch.Tensor,
-        network_output: torch.Tensor,
+        network_output_physical: torch.Tensor,
         node_type: torch.Tensor,
         masks: list[NodeType],
         selected_indexes: torch.Tensor = None,
-        method: str = "finite_diff",
+        gradient_method: str = "finite_diff",
+        **kwargs
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
         The loss is computed betwheen the spatial gradient of target and network_output.
 
         Args:
-            target (torch.Tensor): The target values.
-            network_output (torch.Tensor): The predicted values from the network.
+            network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
@@ -371,10 +373,10 @@ class DivL2Loss(_Loss):
             torch.Tensor: The L2 loss for the specified node types.
         """
         mask = _prepare_mask_for_loss(
-            network_output, node_type, masks, selected_indexes
+            network_output_physical, node_type, masks, selected_indexes
         )
         divergence = compute_divergence(
-            graph, network_output, method=method, device=device
+            graph, network_output_physical, method=gradient_method, device=device
         )
         errors = (divergence**2)[mask]
         return torch.mean(errors)
@@ -410,6 +412,7 @@ class DiagonalGaussianMixtureNLLLoss(_Loss):
         node_type: torch.Tensor,
         masks: list,
         selected_indexes: torch.Tensor = None,
+        **kwargs
     ) -> torch.Tensor:
         device = network_output.device
 
@@ -499,6 +502,7 @@ class GaussianMixtureNLLLoss(_Loss):
         node_type: torch.Tensor,
         masks: list,  # same usage as L2Loss for which nodes to compute
         selected_indexes: torch.Tensor = None,
+        **kwargs
     ) -> torch.Tensor:
 
         # 1) Mask out nodes we don't want
@@ -597,3 +601,37 @@ class GaussianMixtureNLLLoss(_Loss):
         # Negative log-likelihood
         nll = -torch.mean(log_prob_x)
         return nll
+
+
+class MultiLoss(_Loss):
+    def __init__(self, losses, weights, **kwargs):
+        super().__init__(**kwargs)
+        self.losses = losses
+        self.weights = weights
+
+    @property
+    def __name__(self):
+        return "MultiLoss"
+
+    def forward(
+        self,
+        **kwargs
+    ) -> torch.Tensor:
+        # TODO: finish function, see if return all losses for logging, and write description
+        """ """
+        losses = [w * loss(**kwargs) for w, loss in zip(self.weights, self.losses)]
+        errors = sum(losses)
+        return errors
+
+
+class LossType(enum.Enum):
+    L2LOSS = L2Loss
+    L1SMOOTHLOSS = L1SmoothLoss
+    GRADIENTL2LOSS = GradientL2Loss
+    CONVECTIONL2LOSS = ConvectionL2Loss
+    DIVERGENCELOSS = DivergenceLoss
+    DIVL1LOSS = DivL1Loss
+    DIVL1SMOOTHLOSS = DivL1SmoothLoss
+    DIVL2LOSS = DivL2Loss
+    DIAGONALGAUSSIANMIXTURENLLLOSS = DiagonalGaussianMixtureNLLLoss
+    GAUSSIANMIXTURENLLLOSS = GaussianMixtureNLLLoss
