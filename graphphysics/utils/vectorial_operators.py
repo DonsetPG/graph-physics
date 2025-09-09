@@ -225,7 +225,11 @@ def compute_gradient(
 
 
 def compute_vector_gradient_product(
-    graph: Data, field: torch.Tensor, method: str = "finite_diff", device: str = "cpu"
+    graph: Data,
+    field: torch.Tensor,
+    gradient: torch.Tensor = None,
+    method: str = "finite_diff",
+    device: str = "cpu",
 ) -> torch.Tensor:
     """
     Compute the product of a vector field with its gradient (e.g., u * grad(u)).
@@ -233,15 +237,17 @@ def compute_vector_gradient_product(
     Args:
         graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
         field (torch.Tensor): Vector field (N, F).
+        gradient (torch.Tensor, optional): Gradient of field (N, F, D).
         method (str): Method to compute the gradient.
         device (str): Device to perform the computation on.
 
     Returns:
         product (torch.Tensor): Tensor of shape (N, F) representing the product u * grad(u).
     """
-    gradient = compute_gradient(
-        graph, field, method=method, device=device
-    )  # Shape: (N, F, D)
+    if gradient is None:
+        gradient = compute_gradient(
+            graph, field, method=method, device=device
+        )  # Shape: (N, F, D)
     product = torch.einsum(
         "nf,nfd->nf", field, gradient
     )  # Element-wise product and sum over D
@@ -249,7 +255,11 @@ def compute_vector_gradient_product(
 
 
 def compute_divergence(
-    graph: Data, field: torch.Tensor, method: str = "finite_diff", device: str = "cpu"
+    graph: Data,
+    field: torch.Tensor,
+    gradient: torch.Tensor = None,
+    method: str = "finite_diff",
+    device: str = "cpu",
 ) -> torch.Tensor:
     """
     Compute the divergence of a vector field on an unstructured graph.
@@ -257,13 +267,17 @@ def compute_divergence(
     Args:
         graph (Data): Data object, should have 'pos' and 'edge_index' attributes.
         field (torch.Tensor): Vector field (N, F).
+        gradient (torch.Tensor, optional): Gradient of field (N, F, D).
         method (str): Method to compute the gradient.
         device (str): Device to perform the computation on.
 
     Returns:
         divergence (torch.Tensor): Tensor of shape (N,) representing the divergence of the vector field.
     """
-    gradient = compute_gradient(graph, field, method=method, device=device)  # (N, F, D)
-    # divergence = torch.einsum("nii->n", gradient)
-    divergence = gradient[:, 0, 0] + gradient[:, 1, 1]  # Assuming 2D field
+    if gradient is None:
+        gradient = compute_gradient(
+            graph, field, method=method, device=device
+        )  # (N, F, D)
+
+    divergence = gradient.diagonal(dim1=1, dim2=2).sum(dim=-1)
     return divergence

@@ -245,3 +245,14 @@ def get_loss(param: Dict[str, Any], **kwargs):
         return MultiLoss(losses, weights)
     else:
         return LossType[param["loss"]["type"][0].upper()].value(**kwargs)
+
+
+def get_gradient_method(param: Dict[str, Any], **kwargs):
+    """
+    Parse parameters for gradient computation method. If not specified, returns None.
+    """
+    try:
+        gradient_method = param["loss"]["gradient_method"]
+    except KeyError:
+        gradient_method = None
+    return gradient_method

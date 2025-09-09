@@ -8,8 +8,13 @@ import torch
 from loguru import logger
 from torch_geometric.data import Batch
 
-from graphphysics.training.parse_parameters import get_model, get_simulator, get_loss
-from graphphysics.utils.loss import L2Loss, DiagonalGaussianMixtureNLLLoss
+from graphphysics.training.parse_parameters import (
+    get_gradient_method,
+    get_loss,
+    get_model,
+    get_simulator,
+)
+from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -74,7 +79,9 @@ class LightningModule(L.LightningModule):
         if self.K == 0:
             # TODO: beta smoothness parameter?
 
-            self.loss = get_loss(param=parameters)  # , d=processor.d, K=self.K, temperature=processor.temperature,)
+            self.loss = get_loss(
+                param=parameters
+            )  # , d=processor.d, K=self.K, temperature=processor.temperature,)
         else:
             self.loss = DiagonalGaussianMixtureNLLLoss(
                 d=processor.d,
@@ -83,9 +90,9 @@ class LightningModule(L.LightningModule):
             )
         self.loss_masks = masks
         self.val_loss = L2Loss()
-
-        # TODO: parse gradient_method from params
-        self.gradient_method = "finite_diff"  # least_squares, green_gauss
+        self.gradient_method = get_gradient_method(
+            param=parameters
+        )  # finite_diff, least_squares, green_gauss
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -134,6 +141,7 @@ class LightningModule(L.LightningModule):
             gradient_method=self.gradient_method,
             network_output_physical=network_output_physical,
             target_physical=target_physical,
+            gradient_method=self.gradient_method,
         )
 
         self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
