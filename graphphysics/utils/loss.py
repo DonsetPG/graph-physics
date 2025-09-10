@@ -688,9 +688,12 @@ class MultiLoss(_Loss):
         losses = [
             w
             * loss(
+                graph=graph,
+                network_output_physical=network_output_physical,
+                target_physical=target_physical,
+                gradient_method=gradient_method,
                 network_output_gradient=network_output_gradient,
                 target_gradient=target_gradient,
-                gradient_method=gradient_method,
                 **kwargs
             )
             for w, loss in zip(self.weights, self.losses)

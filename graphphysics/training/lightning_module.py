@@ -138,7 +138,6 @@ class LightningModule(L.LightningModule):
             network_output=network_output,
             node_type=node_type,
             masks=self.loss_masks,
-            gradient_method=self.gradient_method,
             network_output_physical=network_output_physical,
             target_physical=target_physical,
             gradient_method=self.gradient_method,

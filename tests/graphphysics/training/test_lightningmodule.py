@@ -258,7 +258,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertTrue(os.path.exists(xdmf_path))
             self.assertTrue(os.path.exists(h5_path))
 
-            reader = meshio.xdmf.TimeSeriesReader(xdmf_path)
+            _ = meshio.xdmf.TimeSeriesReader(xdmf_path)
 
         def test_validation_step_resets_trajectory(self):
             # Create mock batches

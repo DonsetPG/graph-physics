@@ -28,13 +28,11 @@ def compute_gradient_weighted_least_squares(
     if field.ndim == 1:
         field = field.unsqueeze(1)
 
+    dim_x = points.shape[1]
     dim_u = field.shape[1]  # field dimension
 
     # Get element connectivity
-    if hasattr(graph, "face"):  # 2D triangular mesh
-        elements = graph.face.T.to(device)  # (M, 3)
-    else:  # assume tetrahedral mesh in 3D
-        elements = graph.cells.to(device)  # (M, 4)
+    elements = graph.face.T.to(device)  # (M, D+1)
 
     D = elements.shape[1] - 1  # 2 for triangle, 3 for tetrahedron
     N = points.shape[0]
@@ -56,15 +54,20 @@ def compute_gradient_weighted_least_squares(
     if D == 2:  # triangle area
         v1 = A[:, 0, :]  # (M, 3)
         v2 = A[:, 1, :]  # (M, 3)
-        cross = torch.cross(v1, v2, dim=1)  # (M, 3)
-        volume = 0.5 * torch.norm(cross, dim=1)  # (M,)
+        # TODO: 2nd option works both ways no?
+        if v1.shape[1] == 3:
+            cross = torch.cross(v1, v2, dim=1)  # (M, 3)
+            volume = 0.5 * torch.norm(cross, dim=1)  # (M,)
+        if v1.shape[1] == 2:
+            cross = v1[:, 0] * v2[:, 1] - v1[:, 1] * v2[:, 0]
+            volume = 0.5 * torch.abs(cross)
     elif D == 3:  # tetrahedron volume
         volume = torch.abs(torch.linalg.det(A)) / 6.0  # (M,)
     else:
         raise ValueError(f"Unsupported element dimension D={D}")
 
     # Accumulate contributions to nodes
-    gradients = torch.zeros((N, dim_u, 3), device=device)
+    gradients = torch.zeros((N, dim_u, dim_x), device=device)
     weights = torch.zeros((N, 1), device=device)
 
     for i in range(D + 1):
