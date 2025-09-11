@@ -233,23 +233,36 @@ def get_num_workers(param: Dict[str, Any], default_num_workers: int) -> int:
 def get_loss(param: Dict[str, Any], **kwargs):
     """
     Parse parameters for loss function. If several loss types are specified, a weighted loss is used.
+    Args:
+        param (Dict[str, Any]): Dictionary containing configuration parameters.
+
+    Returns:
+        Loss: Initialised loss object.
+        Union[str, List[str]]: loss name if single loss, list of loss name if MultiLoss.
     """
     try:
         _ = param["loss"]
     except KeyError:
-        return LossType.L2LOSS.value(**kwargs)
+        return LossType.L2LOSS.value(**kwargs), LossType.L2LOSS.name
 
     if len(param["loss"]["type"]) > 1:
         losses = [LossType[t.upper()].value(**kwargs) for t in param["loss"]["type"]]
+        losses_names = [LossType[t.upper()].name for t in param["loss"]["type"]]
         weights = param["loss"]["weights"]
-        return MultiLoss(losses, weights)
+        return MultiLoss(losses, weights), losses_names
     else:
-        return LossType[param["loss"]["type"][0].upper()].value(**kwargs)
+        loss = LossType[param["loss"]["type"][0].upper()]
+        return loss.value(**kwargs), loss.name
 
 
-def get_gradient_method(param: Dict[str, Any], **kwargs):
+def get_gradient_method(param: Dict[str, Any], **kwargs) -> str:
     """
     Parse parameters for gradient computation method. If not specified, returns None.
+    Args:
+        param (Dict[str, Any]): Dictionary containing configuration parameters.
+
+    Returns:
+        str: Name of gradient method.
     """
     try:
         gradient_method = param["loss"]["gradient_method"]

@@ -17,8 +17,6 @@ from graphphysics.utils.loss import (
     MultiLoss,
 )
 
-# TODO: test all loss functions
-
 
 class TestGaussianMixtureNLLLossDiagonal(unittest.TestCase):
     def setUp(self):

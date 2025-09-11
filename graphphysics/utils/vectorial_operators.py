@@ -54,7 +54,6 @@ def compute_gradient_weighted_least_squares(
     if D == 2:  # triangle area
         v1 = A[:, 0, :]  # (M, 3)
         v2 = A[:, 1, :]  # (M, 3)
-        # TODO: 2nd option works both ways no?
         if v1.shape[1] == 3:
             cross = torch.cross(v1, v2, dim=1)  # (M, 3)
             volume = 0.5 * torch.norm(cross, dim=1)  # (M,)

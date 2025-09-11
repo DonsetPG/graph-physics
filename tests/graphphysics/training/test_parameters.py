@@ -153,20 +153,23 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
             self.assertIsNone(gradient_method_wo_loss)
 
         def test_get_loss(self):
-            multi_loss = get_loss(param=self.param)
+            multi_loss, loss_name = get_loss(param=self.param)
             self.assertIsInstance(multi_loss, MultiLoss)
+            self.assertEqual(len(loss_name), len(self.param["loss"]["type"]))
 
             self.param["loss"]["type"] = ["divergenceloss"]
-            single_loss = get_loss(param=self.param)
+            single_loss, loss_name = get_loss(param=self.param)
             self.assertIsInstance(single_loss, DivergenceLoss)
+            self.assertEqual(loss_name, "DIVERGENCELOSS")
 
             # Assert that with no loss parameters, default loss is L2Loss
             param_wo_loss = deepcopy(self.param)
             del param_wo_loss["loss"]
 
-            l2_loss = get_loss(param=param_wo_loss)
+            l2_loss, loss_name = get_loss(param=param_wo_loss)
             multi_loss = get_loss(param=self.param)
             self.assertIsInstance(l2_loss, L2Loss)
+            self.assertEqual(loss_name, "L2LOSS")
 
     if __name__ == "__main__":
         unittest.main()

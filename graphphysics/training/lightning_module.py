@@ -14,7 +14,7 @@ from graphphysics.training.parse_parameters import (
     get_model,
     get_simulator,
 )
-from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
+from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss, MultiLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -75,19 +75,21 @@ class LightningModule(L.LightningModule):
         self.model = get_simulator(param=parameters, model=processor, device=device)
         self.K = processor.K
 
-        # TODO: maybe remove this condition
+        self.is_multiloss = False
+        # TODO: can we remove this condition?
         if self.K == 0:
-            # TODO: beta smoothness parameter?
-
-            self.loss = get_loss(
+            self.loss, self.loss_name = get_loss(
                 param=parameters
             )  # , d=processor.d, K=self.K, temperature=processor.temperature,)
+            if isinstance(self.loss, MultiLoss):
+                self.is_multiloss = True
         else:
             self.loss = DiagonalGaussianMixtureNLLLoss(
                 d=processor.d,
                 K=self.K,
                 temperature=processor.temperature,
             )
+            self.loss_name = "DIAGONALGAUSSIANMIXTURENLLLOSS"
         self.loss_masks = masks
         self.val_loss = L2Loss()
         self.gradient_method = get_gradient_method(
@@ -131,19 +133,35 @@ class LightningModule(L.LightningModule):
         network_output_physical = self.model.build_outputs(batch, network_output)
         target_physical = self.model.build_outputs(batch, target_delta_normalized)
 
-        # TODO: see MultiLoss return for logging of all loss components
-        loss = self.loss(
-            graph=batch,
-            target=target_delta_normalized,
-            network_output=network_output,
-            node_type=node_type,
-            masks=self.loss_masks,
-            network_output_physical=network_output_physical,
-            target_physical=target_physical,
-            gradient_method=self.gradient_method,
-        )
+        if self.is_multiloss:
+            loss, train_losses = self.loss(
+                graph=batch,
+                target=target_delta_normalized,
+                network_output=network_output,
+                node_type=node_type,
+                masks=self.loss_masks,
+                network_output_physical=network_output_physical,
+                target_physical=target_physical,
+                gradient_method=self.gradient_method,
+                return_all_losses=True,
+            )
+            for train_loss, loss_name in zip(train_losses, self.loss_name):
+                self.log(f"train_loss - {loss_name}", train_loss, on_step=True, on_epoch=True, prog_bar=False)
+            self.log("train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True)
 
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        else:
+            loss = self.loss(
+                graph=batch,
+                target=target_delta_normalized,
+                network_output=network_output,
+                node_type=node_type,
+                masks=self.loss_masks,
+                network_output_physical=network_output_physical,
+                target_physical=target_physical,
+                gradient_method=self.gradient_method,
+            )
+
+            self.log(f"train_{self.loss_name}", loss, on_step=True, on_epoch=True, prog_bar=True)
         return loss
 
     def _save_trajectory_to_xdmf(

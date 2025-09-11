@@ -118,7 +118,6 @@ class L1SmoothLoss(_Loss):
         return torch.mean(errors)
 
 
-# TODO: remove default value for gradient method? needs to be specified
 class GradientL2Loss(_Loss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
@@ -667,10 +666,12 @@ class MultiLoss(_Loss):
         network_output_physical: torch.Tensor = None,
         target_physical: torch.Tensor = None,
         gradient_method: str = None,
+        return_all_losses: bool = False,
         **kwargs
     ) -> torch.Tensor:
-        # TODO: finish function, see if return all losses for logging, and write description
-        """ """
+        """
+        Combines multiple loss, weighted with fixed weights.
+        """
         if gradient_method is not None:
             network_output_gradient = compute_gradient(
                 graph=graph,
@@ -699,7 +700,10 @@ class MultiLoss(_Loss):
             for w, loss in zip(self.weights, self.losses)
         ]
         errors = sum(losses)
-        return errors
+        if return_all_losses:
+            return errors, losses
+        else:
+            return errors
 
 
 class LossType(enum.Enum):

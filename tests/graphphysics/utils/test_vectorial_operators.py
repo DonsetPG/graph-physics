@@ -10,9 +10,6 @@ from graphphysics.utils.vectorial_operators import (
 )
 
 
-# TODO: test gradient functions on 3D case
-
-
 class TestComputeAllGradients(unittest.TestCase):
 
     def test_compute_gradients_2d(self):
