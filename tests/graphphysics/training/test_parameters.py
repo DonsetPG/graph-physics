@@ -1,4 +1,6 @@
 import unittest
+
+from copy import deepcopy
 import torch
 from unittest.mock import MagicMock, patch
 
@@ -7,8 +9,11 @@ from graphphysics.training.parse_parameters import (
     get_model,
     get_simulator,
     get_dataset,
+    get_loss,
+    get_gradient_method,
 )
 from graphphysics.utils.nodetype import NodeType
+from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceLoss
 
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
@@ -68,6 +73,11 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                     "h5_path": MOCK_H5_SAVE_PATH,
                     "meta_path": MOCK_H5_META_SAVE_PATH,
                     "khop": 2,
+                },
+                "loss": {
+                    "type": ["l2loss", "gradientl2loss", "divergenceloss"],
+                    "weights": [0.5, 0.5, 0.5],
+                    "gradient_method": "finite_diff",
                 },
             }
 
@@ -131,6 +141,32 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                 "Dataset extension 'invalid_extension' not supported",
                 str(context.exception),
             )
+
+        def test_get_gradient_method(self):
+            param_wo_loss = deepcopy(self.param)
+            del param_wo_loss["loss"]
+
+            gradient_method = get_gradient_method(param=self.param)
+            self.assertEqual(gradient_method, "finite_diff")
+
+            gradient_method_wo_loss = get_gradient_method(param=param_wo_loss)
+            self.assertIsNone(gradient_method_wo_loss)
+
+        def test_get_loss(self):
+            multi_loss = get_loss(param=self.param)
+            self.assertIsInstance(multi_loss, MultiLoss)
+
+            self.param["loss"]["type"] = ["divergenceloss"]
+            single_loss = get_loss(param=self.param)
+            self.assertIsInstance(single_loss, DivergenceLoss)
+
+            # Assert that with no loss parameters, default loss is L2Loss
+            param_wo_loss = deepcopy(self.param)
+            del param_wo_loss["loss"]
+
+            l2_loss = get_loss(param=param_wo_loss)
+            multi_loss = get_loss(param=self.param)
+            self.assertIsInstance(l2_loss, L2Loss)
 
     if __name__ == "__main__":
         unittest.main()
