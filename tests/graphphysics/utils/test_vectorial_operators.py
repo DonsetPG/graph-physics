@@ -40,7 +40,6 @@ class TestComputeAllGradients(unittest.TestCase):
             "weighted_least_squares": lambda: compute_gradient(
                 graph, field, method="least_squares"
             ),
-            "green_gauss": lambda: compute_gradient(graph, field, method="green_gauss"),
         }
 
         for name, method in grad_methods.items():
@@ -75,7 +74,6 @@ class TestComputeAllGradients(unittest.TestCase):
             "weighted_least_squares": lambda: compute_gradient(
                 graph, field, method="least_squares"
             ),
-            "green_gauss": lambda: compute_gradient(graph, field, method="green_gauss"),
         }
 
         for name, method in grad_methods.items():
@@ -110,7 +108,6 @@ class TestComputeAllGradients(unittest.TestCase):
             "weighted_least_squares": lambda: compute_gradient(
                 graph, field, method="least_squares"
             ),
-            "green_gauss": lambda: compute_gradient(graph, field, method="green_gauss"),
         }
 
         for name, method in grad_methods.items():

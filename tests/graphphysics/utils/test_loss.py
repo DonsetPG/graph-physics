@@ -11,7 +11,6 @@ from graphphysics.utils.loss import (
     DivergenceLoss,
     DivL1Loss,
     DivL1SmoothLoss,
-    DivL2Loss,
     MultiLoss,
 )
 
@@ -26,7 +25,6 @@ class TestLossFunctions(unittest.TestCase):
             DivergenceLoss(),
             DivL1Loss(),
             DivL1SmoothLoss(),
-            DivL2Loss(),
         ]
         # Mock 2D graph
         pos = torch.tensor(

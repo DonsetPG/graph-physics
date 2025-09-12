@@ -18,10 +18,9 @@ def compute_gradient_weighted_least_squares(
     Returns:
         gradients: Tensor of shape (N, F, D)
     """
-    device = torch.device(device)
 
     # Move inputs to device
-    points = graph.pos.to(device)  # (N, 3)
+    points = graph.pos.to(device)  # (N,2) or (N, 3)
     field = field.to(device)  # (N,), (N,2), or (N,3)
 
     # Ensure field is at least 2D: (N, dim_u)
@@ -37,13 +36,13 @@ def compute_gradient_weighted_least_squares(
     D = elements.shape[1] - 1  # 2 for triangle, 3 for tetrahedron
     N = points.shape[0]
 
-    # Coordinates of element nodes (M, D+1, 3)
+    # Coordinates of element nodes (M, D+1, 2) or (M, D+1, 3)
     elem_points = points[elements]
     # Field values at element nodes (M, D+1, dim_u)
     elem_field = field[elements]
 
     # Build difference matrices relative to first vertex
-    A = elem_points[:, 1:, :] - elem_points[:, 0:1, :]  # (M, D, 3)
+    A = elem_points[:, 1:, :] - elem_points[:, 0:1, :]  # (M, D, 2) or (M, D, 3)
     B = elem_field[:, 1:, :] - elem_field[:, 0:1, :]  # (M, D, dim_u)
 
     # Solve A @ grad^T ≈ B  => grad ≈ B^T @ A⁺
@@ -79,77 +78,6 @@ def compute_gradient_weighted_least_squares(
     return gradients
 
 
-def compute_gradient_green_gauss(
-    graph: Data,
-    field: torch.Tensor,
-    device: str = "cpu",
-) -> torch.Tensor:
-    """
-    Green-Gauss gradient computation (cell-based, similar to what is used in CIMLIB).
-    Requires face information or cell connectivity.
-
-    Args:
-        graph: Graph data with pos and edge_index
-        field: Vector field (N, F)
-        device: Computation device
-
-    Returns:
-        gradients: Tensor of shape (N, F, D)
-    """
-    pos = graph.pos
-    edge_index = graph.edge_index
-    N, D = pos.shape
-    _, F = field.shape
-
-    # Remove duplicate edges
-    edges = torch.unique(torch.sort(edge_index.T, dim=1)[0], dim=0).T
-    i, j = edges[0], edges[1]
-
-    # Create cell info: face fields and face vectors
-    face_fields = 0.5 * (field[i] + field[j])  # (E, F)
-    edge_vectors = pos[j] - pos[i]  # (E, D)
-    # TODO: compute for real face_areas
-    if D == 2:
-        # For 2D: face normal is perpendicular to edge (ensure orientation is outward from i to j)
-        face_normals = torch.stack([edge_vectors[:, 1], -edge_vectors[:, 0]], dim=1)
-        face_areas_computed = torch.norm(edge_vectors, dim=1)
-    else:
-        # For 3D: would need actual face normals from mesh topology
-        face_normals = edge_vectors / (
-            torch.norm(edge_vectors, dim=1, keepdim=True) + 1e-8
-        )
-        face_areas_computed = torch.ones(edges.shape[1], device=device)
-
-    # Compute cell volumes (approximate using Voronoi cells)
-    cell_volumes = torch.zeros(N, device=device)
-    for node in range(N):
-        connected_edges = (i == node) | (j == node)
-        if connected_edges.any():
-            # Approximate cell volume as sum of connected edge contributions
-            cell_volumes[node] = face_areas_computed[connected_edges].sum() / 2.0
-
-    cell_volumes = torch.clamp(cell_volumes, min=1e-8)
-
-    # Green-Gauss: grad(phi) = (1/V) sum( phi_face * n_face * A_face)
-    gradients = torch.zeros((N, F, D), device=device)
-
-    for e in range(edges.shape[1]):
-        node_i, node_j = i[e], j[e]
-        face_area = face_areas_computed[e]
-        face_normal = face_normals[e]
-        face_field = face_fields[e]  # (F,)
-
-        # Contribution to each adjacent cell
-        contrib = torch.outer(face_field, face_normal) * face_area  # (F, D)
-
-        gradients[node_i] += contrib / cell_volumes[node_i]
-        gradients[node_j] += (
-            contrib / cell_volumes[node_j]
-        )  # Same direction for undirected edges
-
-    return gradients
-
-
 def compute_gradient_finite_differences(
     graph: Data, field: torch.Tensor, device: str = "cpu"
 ) -> torch.Tensor:
@@ -163,9 +91,10 @@ def compute_gradient_finite_differences(
     Returns:
         gradients: Tensor of shape (N, F, D)
     """
-    pos = graph.pos
-    edges = graph.edge_index
+    pos = graph.pos.to(device)
+    edges = graph.edge_index.to(device)
     edges = torch.unique(torch.sort(edges.T, dim=1)[0], dim=0).T
+    field = field.to(device)
 
     N, D = pos.shape
     _, F = field.shape
@@ -189,8 +118,8 @@ def compute_gradient_finite_differences(
     gradient = torch.zeros((N, F, D), device=device)
     weight_sums = torch.zeros((N, F, D), device=device)
 
-    gradient.index_add_(0, i, gradient_edges * weights.view(-1, 1, 1))
-    gradient.index_add_(0, j, gradient_edges * weights.view(-1, 1, 1))
+    gradient.index_add_(0, i, gradient_edges)
+    gradient.index_add_(0, j, gradient_edges)
     weight_sums.index_add_(0, i, weights.view(-1, 1, 1).expand(-1, F, D))
     weight_sums.index_add_(0, j, weights.view(-1, 1, 1).expand(-1, F, D))
 
@@ -210,7 +139,7 @@ def compute_gradient(
     Args:
         graph: Graph data with pos and edge_index
         field: Vector field (N, F)
-        method: "least_squares", "green_gauss", or "finite_diff"
+        method: "least_squares", or "finite_diff"
         device: Computation device
 
     Returns:
@@ -218,8 +147,6 @@ def compute_gradient(
     """
     if method == "least_squares":
         return compute_gradient_weighted_least_squares(graph, field, device=device)
-    elif method == "green_gauss":
-        return compute_gradient_green_gauss(graph, field, device=device)
     elif method == "finite_diff":
         return compute_gradient_finite_differences(graph, field, device=device)
     else:
@@ -246,10 +173,14 @@ def compute_vector_gradient_product(
     Returns:
         product (torch.Tensor): Tensor of shape (N, F) representing the product u * grad(u).
     """
+    field = field.to(device)
     if gradient is None:
         gradient = compute_gradient(
             graph, field, method=method, device=device
         )  # Shape: (N, F, D)
+    else:
+        gradient.to(device)
+
     product = torch.einsum(
         "nf,nfd->nf", field, gradient
     )  # Element-wise product and sum over D

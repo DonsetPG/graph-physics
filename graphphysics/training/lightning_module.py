@@ -73,7 +73,6 @@ class LightningModule(L.LightningModule):
         print(processor)
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
-        self.K = processor.K
 
         self.loss, self.loss_name = get_loss(param=parameters)
         logger.info(f"Using loss {self.loss_name}")
@@ -85,7 +84,7 @@ class LightningModule(L.LightningModule):
         self.val_loss = L2Loss()
         self.gradient_method = get_gradient_method(
             param=parameters
-        )  # finite_diff, least_squares, green_gauss
+        )  # finite_diff, least_squares
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -121,8 +120,10 @@ class LightningModule(L.LightningModule):
     def training_step(self, batch: Batch):
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
-        network_output_physical = self.model.build_outputs(batch, network_output)
-        target_physical = self.model.build_outputs(batch, target_delta_normalized)
+        network_output_physical, target_physical = None, None
+        if self.is_multiloss:
+            network_output_physical = self.model.build_outputs(batch, network_output)
+            target_physical = self.model.build_outputs(batch, target_delta_normalized)
 
         if self.is_multiloss:
             loss, train_losses = self.loss(

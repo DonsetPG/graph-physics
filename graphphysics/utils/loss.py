@@ -141,7 +141,7 @@ class GradientL2Loss(_Loss):
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
-        The loss is computed betwheen the spatial gradient of target and network_output.
+        The loss is computed between the spatial gradient of target and network_output.
 
         Args:
             target_physical (torch.Tensor): The physical target values.
@@ -149,7 +149,7 @@ class GradientL2Loss(_Loss):
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss")
+            gradient_method (str): Method to compute the gradient ("finite_diff","least_square")
             target_gradient (torch.Tensor, optional): Gradient of the physical target.
             network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
 
@@ -195,7 +195,7 @@ class ConvectionL2Loss(_Loss):
     ) -> torch.Tensor:
         """
         Computes L2 loss for nodes of specific types.
-        The loss is computed betwheen the NS convection term ((u.grad)u) of target and network_output.
+        The loss is computed between the NS convection term ((u.grad)u) of target and network_output.
 
         Args:
             target_physical (torch.Tensor): The physical target values.
@@ -203,7 +203,7 @@ class ConvectionL2Loss(_Loss):
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss").
+            gradient_method (str): Method to compute the gradient ("finite_diff","least_square").
             target_gradient (torch.Tensor, optional): Gradient of the physical target.
             network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
 
@@ -251,15 +251,14 @@ class DivergenceLoss(_Loss):
         **kwargs
     ) -> torch.Tensor:
         """
-        Computes L2 loss for nodes of specific types.
-        The loss is computed betwheen the spatial gradient of target and network_output.
+        Computes L2 norm of the divergence of the network physical output.
 
         Args:
             network_output_physical (torch.Tensor): The predicted physical values from the network.
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss").
+            gradient_method (str): Method to compute the gradient ("finite_diff","least_square").
             network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
 
         Returns:
@@ -306,7 +305,7 @@ class DivL1Loss(_Loss):
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss").
+            gradient_method (str): Method to compute the gradient ("finite_diff","least_square").
             network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
 
         Returns:
@@ -354,7 +353,7 @@ class DivL1SmoothLoss(_Loss):
             node_type (torch.Tensor): Tensor containing the type of each node.
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss").
+            gradient_method (str): Method to compute the gradient ("finite_diff","least_square").
             network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
 
         Returns:
@@ -378,54 +377,6 @@ class DivL1SmoothLoss(_Loss):
         errors = F.smooth_l1_loss(divergence, zeros, reduction="none", beta=self.beta)[
             mask
         ]
-        return torch.mean(errors)
-
-
-class DivL2Loss(_Loss):
-    def __init__(self, **kwargs):
-        super().__init__(**kwargs)
-
-    @property
-    def __name__(self):
-        return "DivergenceLoss"
-
-    def forward(
-        self,
-        graph: Data,
-        network_output_physical: torch.Tensor,
-        node_type: torch.Tensor,
-        masks: list[NodeType],
-        selected_indexes: torch.Tensor = None,
-        gradient_method: str = "finite_diff",
-        network_output_gradient: torch.Tensor = None,
-        **kwargs
-    ) -> torch.Tensor:
-        """
-        Computes L2 loss for nodes of specific types.
-        The loss is computed betwheen the spatial gradient of target and network_output.
-
-        Args:
-            network_output_physical (torch.Tensor): The predicted physical values from the network.
-            node_type (torch.Tensor): Tensor containing the type of each node.
-            masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
-            selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
-            gradient_method (str): Method to compute the gradient ("finite_diff","least_square","green_gauss").
-            network_output_gradient (torch.Tensor, optional): Gradient of the physical network output.
-
-        Returns:
-            torch.Tensor: The L2 loss for the specified node types.
-        """
-        mask = _prepare_mask_for_loss(
-            network_output_physical, node_type, masks, selected_indexes
-        )
-        divergence = compute_divergence(
-            graph,
-            network_output_physical,
-            gradient=network_output_gradient,
-            method=gradient_method,
-            device=device,
-        )
-        errors = (divergence**2)[mask]
         return torch.mean(errors)
 
 
@@ -493,4 +444,3 @@ class LossType(enum.Enum):
     DIVERGENCELOSS = DivergenceLoss
     DIVL1LOSS = DivL1Loss
     DIVL1SMOOTHLOSS = DivL1SmoothLoss
-    DIVL2LOSS = DivL2Loss
