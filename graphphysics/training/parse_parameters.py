@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
+from loguru import logger
 from torch_geometric.data import Data
 
 from graphphysics.dataset.h5_dataset import H5Dataset
@@ -86,9 +87,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     model_type = param.get("model", {}).get("type", "")
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
 
-    num_mixture_components = param["model"].get("num_mixture_components", 0)
-    temperature = param["model"].get("temperature")
-
     if model_type == "epd":
         return EncodeProcessDecode(
             message_passing_num=param["model"]["message_passing_num"],
@@ -97,8 +95,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
             only_processor=only_processor,
-            num_mixture_components=num_mixture_components,
-            temperature=temperature,
         )
     elif model_type == "transformer":
         return EncodeTransformDecode(
@@ -108,8 +104,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
-            num_mixture_components=num_mixture_components,
-            temperature=temperature,
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
@@ -243,6 +237,7 @@ def get_loss(param: Dict[str, Any], **kwargs):
     try:
         _ = param["loss"]
     except KeyError:
+        logger.info("No loss specified, fall back to default loss L2Loss")
         return LossType.L2LOSS.value(**kwargs), LossType.L2LOSS.name
 
     if len(param["loss"]["type"]) > 1:
@@ -267,5 +262,6 @@ def get_gradient_method(param: Dict[str, Any], **kwargs) -> str:
     try:
         gradient_method = param["loss"]["gradient_method"]
     except KeyError:
+        logger.info("No gradient method specified.")
         gradient_method = None
     return gradient_method

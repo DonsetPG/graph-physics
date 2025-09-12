@@ -13,8 +13,6 @@ from graphphysics.models.layers import (
     Attention,
     Transformer,
     GraphNetBlock,
-    GMMHead,
-    DiagonalGMMHead,
 )
 
 try:
@@ -43,48 +41,6 @@ class TestTransformerComponents(unittest.TestCase):
         x = torch.randn(3, in_size)
         output = mlp(x)
         self.assertEqual(output.shape, (3, out_size))
-
-    def test_gmm_head_diagonal(self):
-        d = 4
-        K = 3
-        hidden_size = 16
-        N = 5
-        per_comp = 2 * d + 1  # diagonal => means(d) + logstd(d) + logit(1)
-        expected_dim = K * per_comp
-
-        head = DiagonalGMMHead(
-            input_dim=hidden_size, d=d, num_components=K, temperature=1.0
-        )
-        x = torch.randn(N, hidden_size)
-        out = head(x)
-        self.assertEqual(out.shape, (N, expected_dim))
-        self.assertFalse(torch.isnan(out).any(), "GMMHead output has NaNs.")
-
-    def test_gmm_head(self):
-        """
-        Test the GMMHead to ensure it outputs [N, K * per_component].
-        """
-        N = 5  # number of nodes
-        d = 4  # dimension of velocity or output
-        K = 3  # mixture components
-        hidden_size = 16  # embedding size
-
-        # per_component = d + d(d+1)//2 + 1
-        per_comp = d + (d * (d + 1)) // 2 + 1
-        expected_out_dim = K * per_comp
-
-        gmm_head = GMMHead(
-            input_dim=hidden_size, d=d, num_components=K, temperature=1.0
-        )
-
-        x = torch.randn(N, hidden_size)  # node embeddings
-        out = gmm_head(x)
-
-        # Check shape
-        self.assertEqual(out.shape, (N, expected_out_dim))
-
-        # Simple check that the result has no NaNs
-        self.assertFalse(torch.isnan(out).any(), "GMMHead output has NaNs.")
 
     def test_gated_mlp(self):
         in_size = 10

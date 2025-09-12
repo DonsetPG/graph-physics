@@ -14,7 +14,7 @@ from graphphysics.training.parse_parameters import (
     get_model,
     get_simulator,
 )
-from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss, MultiLoss
+from graphphysics.utils.loss import L2Loss, MultiLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -75,21 +75,12 @@ class LightningModule(L.LightningModule):
         self.model = get_simulator(param=parameters, model=processor, device=device)
         self.K = processor.K
 
+        self.loss, self.loss_name = get_loss(param=parameters)
+        logger.info(f"Using loss {self.loss_name}")
         self.is_multiloss = False
-        # TODO: can we remove this condition?
-        if self.K == 0:
-            self.loss, self.loss_name = get_loss(
-                param=parameters
-            )  # , d=processor.d, K=self.K, temperature=processor.temperature,)
-            if isinstance(self.loss, MultiLoss):
-                self.is_multiloss = True
-        else:
-            self.loss = DiagonalGaussianMixtureNLLLoss(
-                d=processor.d,
-                K=self.K,
-                temperature=processor.temperature,
-            )
-            self.loss_name = "DIAGONALGAUSSIANMIXTURENLLLOSS"
+        if isinstance(self.loss, MultiLoss):
+            self.is_multiloss = True
+
         self.loss_masks = masks
         self.val_loss = L2Loss()
         self.gradient_method = get_gradient_method(
@@ -146,8 +137,16 @@ class LightningModule(L.LightningModule):
                 return_all_losses=True,
             )
             for train_loss, loss_name in zip(train_losses, self.loss_name):
-                self.log(f"train_loss - {loss_name}", train_loss, on_step=True, on_epoch=True, prog_bar=False)
-            self.log("train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True)
+                self.log(
+                    f"train_loss - {loss_name}",
+                    train_loss,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+            self.log(
+                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
+            )
 
         else:
             loss = self.loss(
@@ -161,7 +160,13 @@ class LightningModule(L.LightningModule):
                 gradient_method=self.gradient_method,
             )
 
-            self.log(f"train_{self.loss_name}", loss, on_step=True, on_epoch=True, prog_bar=True)
+            self.log(
+                f"train_{self.loss_name}",
+                loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+            )
         return loss
 
     def _save_trajectory_to_xdmf(
@@ -266,14 +271,13 @@ class LightningModule(L.LightningModule):
 
         self.val_step_outputs.append(predicted_outputs.cpu())
         self.val_step_targets.append(target.cpu())
-        if self.K == 0:
-            val_loss = self.val_loss(
-                target,
-                predicted_outputs,
-                node_type,
-                masks=self.loss_masks,
-            )
-            self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        val_loss = self.val_loss(
+            target,
+            predicted_outputs,
+            node_type,
+            masks=self.loss_masks,
+        )
+        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
 
         # compute RMSE for the first step
         if self.step_counter == 0:
