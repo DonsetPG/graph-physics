@@ -167,7 +167,6 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
             del param_wo_loss["loss"]
 
             l2_loss, loss_name = get_loss(param=param_wo_loss)
-            multi_loss = get_loss(param=self.param)
             self.assertIsInstance(l2_loss, L2Loss)
             self.assertEqual(loss_name, "L2LOSS")
 
