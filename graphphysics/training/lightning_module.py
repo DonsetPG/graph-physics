@@ -120,12 +120,10 @@ class LightningModule(L.LightningModule):
     def training_step(self, batch: Batch):
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
-        network_output_physical, target_physical = None, None
+
         if self.is_multiloss:
             network_output_physical = self.model.build_outputs(batch, network_output)
             target_physical = self.model.build_outputs(batch, target_delta_normalized)
-
-        if self.is_multiloss:
             loss, train_losses = self.loss(
                 graph=batch,
                 target=target_delta_normalized,
@@ -149,15 +147,13 @@ class LightningModule(L.LightningModule):
                 "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
             )
 
-        else:
+        else:  # Will raise an error if the single loss needs physical outputs.
             loss = self.loss(
                 graph=batch,
                 target=target_delta_normalized,
                 network_output=network_output,
                 node_type=node_type,
                 masks=self.loss_masks,
-                network_output_physical=network_output_physical,
-                target_physical=target_physical,
                 gradient_method=self.gradient_method,
             )
 
