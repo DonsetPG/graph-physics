@@ -8,8 +8,13 @@ import torch
 from loguru import logger
 from torch_geometric.data import Batch
 
-from graphphysics.training.parse_parameters import get_model, get_simulator
-from graphphysics.utils.loss import DiagonalGaussianMixtureNLLLoss, L2Loss
+from graphphysics.training.parse_parameters import (
+    get_gradient_method,
+    get_loss,
+    get_model,
+    get_simulator,
+)
+from graphphysics.utils.loss import L2Loss, MultiLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -68,17 +73,18 @@ class LightningModule(L.LightningModule):
         print(processor)
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
-        self.K = processor.K
 
-        if self.K == 0:
-            self.loss = L2Loss()
-        else:
-            self.loss = DiagonalGaussianMixtureNLLLoss(
-                d=processor.d,
-                K=self.K,
-                temperature=processor.temperature,
-            )
+        self.loss, self.loss_name = get_loss(param=parameters)
+        logger.info(f"Using loss {self.loss_name}")
+        self.is_multiloss = False
+        if isinstance(self.loss, MultiLoss):
+            self.is_multiloss = True
+
         self.loss_masks = masks
+        self.val_loss = L2Loss()
+        self.gradient_method = get_gradient_method(
+            param=parameters
+        )  # finite_diff, least_squares
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -115,13 +121,49 @@ class LightningModule(L.LightningModule):
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
 
-        loss = self.loss(
-            target_delta_normalized,
-            network_output,
-            node_type,
-            masks=self.loss_masks,
-        )
-        self.log("train_loss", loss, on_step=True, on_epoch=True, prog_bar=True)
+        if self.is_multiloss:
+            network_output_physical = self.model.build_outputs(batch, network_output)
+            target_physical = self.model.build_outputs(batch, target_delta_normalized)
+            loss, train_losses = self.loss(
+                graph=batch,
+                target=target_delta_normalized,
+                network_output=network_output,
+                node_type=node_type,
+                masks=self.loss_masks,
+                network_output_physical=network_output_physical,
+                target_physical=target_physical,
+                gradient_method=self.gradient_method,
+                return_all_losses=True,
+            )
+            for train_loss, loss_name in zip(train_losses, self.loss_name):
+                self.log(
+                    f"train_loss - {loss_name}",
+                    train_loss,
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                )
+            self.log(
+                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
+            )
+
+        else:  # Will raise an error if the single loss needs physical outputs.
+            loss = self.loss(
+                graph=batch,
+                target=target_delta_normalized,
+                network_output=network_output,
+                node_type=node_type,
+                masks=self.loss_masks,
+                gradient_method=self.gradient_method,
+            )
+
+            self.log(
+                f"train_{self.loss_name}",
+                loss,
+                on_step=True,
+                on_epoch=True,
+                prog_bar=True,
+            )
         return loss
 
     def _save_trajectory_to_xdmf(
@@ -158,9 +200,9 @@ class LightningModule(L.LightningModule):
         # The H5 archive is systematically created in cwd, we just need to move it
         shutil.move(
             src=os.path.join(
-                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf','h5')}")[1]
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
             ),
-            dst=f"{xdmf_filename.replace('xdmf','h5')}",
+            dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
         )
 
     def _reset_validation_trajectory(self):
@@ -226,14 +268,13 @@ class LightningModule(L.LightningModule):
 
         self.val_step_outputs.append(predicted_outputs.cpu())
         self.val_step_targets.append(target.cpu())
-        if self.K == 0:
-            val_loss = self.loss(
-                target,
-                predicted_outputs,
-                node_type,
-                masks=self.loss_masks,
-            )
-            self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        val_loss = self.val_loss(
+            target,
+            predicted_outputs,
+            node_type,
+            masks=self.loss_masks,
+        )
+        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
 
         # compute RMSE for the first step
         if self.step_counter == 0:

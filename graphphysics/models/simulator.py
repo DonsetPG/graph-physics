@@ -10,121 +10,6 @@ from graphphysics.models.layers import Normalizer
 from graphphysics.utils.nodetype import NodeType
 
 
-def sample_gmm_diagonal(
-    network_output: torch.Tensor, d: int, K: int, temperature: float = 1.0
-) -> torch.Tensor:
-    """
-    For diagonal-cov GMM:
-      - means: d
-      - log_std: d
-      - mixture logit: 1
-    total = 2d + 1
-    network_output shape: [N, K*(2d + 1)]
-    Returns [N, d] velocity samples
-    """
-    device = network_output.device
-    N = network_output.shape[0]
-    per_comp = 2 * d + 1
-
-    # reshape => [N, K, 2d + 1]
-    net_3d = network_output.view(N, K, per_comp)
-
-    logit = net_3d[..., 0]  # [N,K]
-    alpha = torch.softmax(logit, dim=-1)  # [N,K]
-
-    means = net_3d[..., 1 : 1 + d]  # [N,K,d]
-    log_std = net_3d[..., 1 + d : 1 + 2 * d]  # [N,K,d]
-
-    # pick component for each node
-    comp_ids = torch.multinomial(alpha, 1).squeeze(-1)  # [N]
-    # gather means, log_std
-    chosen_means = torch.zeros(N, d, device=device)
-    chosen_log_std = torch.zeros(N, d, device=device)
-
-    for k_idx in range(K):
-        mask_k = comp_ids == k_idx
-        if mask_k.any():
-            chosen_means[mask_k] = means[mask_k, k_idx, :]
-            chosen_log_std[mask_k] = log_std[mask_k, k_idx, :]
-
-    # convert log_std => std => apply temperature
-    chosen_std = torch.exp(chosen_log_std) * temperature  # [N,d]
-
-    # sample from Normal(means, diag(std^2))
-    # => means + std * z
-    z = torch.randn(N, d, device=device)
-    velocities = chosen_means + chosen_std * z
-    return velocities
-
-
-def sample_gmm(
-    network_output: torch.Tensor, d: int, K: int, temperature: float = 1.0
-) -> torch.Tensor:
-    """
-    Convert the per-node GMM parameters (with full covariance in L) to a velocity sample.
-
-    Args:
-        network_output (torch.Tensor): shape [N, K * per_component]
-          where per_component = 1 (logit) + d (mean) + d(d+1)/2 (lower-tri factors).
-        d (int): dimension of velocity.
-        K (int): number of mixture components.
-        temperature (float): scale factor for the covariance.
-
-    Returns:
-        velocities (torch.Tensor): shape [N, d], one random sample per node.
-    """
-    device = network_output.device
-    N = network_output.shape[0]
-
-    # Parse network_output
-    per_comp = d + (d * (d + 1)) // 2 + 1  # 1=logit, d=mean, d(d+1)/2=L
-    net_3d = network_output.view(N, K, per_comp)  # shape [N, K, per_comp]
-
-    logit = net_3d[..., 0]  # [N, K]
-    alpha = torch.softmax(logit, dim=-1)  # [N, K]
-
-    idx_start = 1
-    idx_end = 1 + d
-    means = net_3d[..., idx_start:idx_end]  # [N, K, d]
-
-    # L factors
-    L_len = (d * (d + 1)) // 2
-    idx2_start = idx_end
-    idx2_end = idx_end + L_len
-    L_flat = net_3d[..., idx2_start:idx2_end]  # [N, K, L_len]
-
-    # create lower-tri matrix
-    L_mat = torch.zeros(N, K, d, d, device=device)
-    tril_indices = torch.tril_indices(row=d, col=d, offset=0)
-    L_mat[..., tril_indices[0], tril_indices[1]] = L_flat
-    # apply temperature scaling
-    L_mat = L_mat * temperature
-
-    # sample mixture component k for each node
-    # alpha[i] is the distribution over K components for node i
-    # => we do a random draw from that cat distribution
-    comp_ids = torch.multinomial(alpha, num_samples=1).squeeze(-1)  # [N]
-
-    # gather the chosen means, L, for each node
-    # shape [N, d] and [N, d, d]
-    chosen_means = torch.zeros(N, d, device=device)
-    chosen_L = torch.zeros(N, d, d, device=device)
-    for k_idx in range(K):
-        mask_k = comp_ids == k_idx
-        if mask_k.any():
-            chosen_means[mask_k] = means[mask_k, k_idx, :]
-            chosen_L[mask_k] = L_mat[mask_k, k_idx, :, :]
-
-    # sample from N(mu, Sigma = L L^T)
-    # for each node, we draw a standard normal z => shape [N, d]
-    z = torch.randn(N, d, device=device)
-    # L * z => shape [N, d]
-    # we can do a batched matmul
-    Lz = torch.einsum("nij,nj->ni", chosen_L, z)
-    velocities = chosen_means + Lz
-    return velocities
-
-
 class Simulator(nn.Module):
     """
     A simulator module that wraps a neural network model for graph data,
@@ -160,7 +45,8 @@ class Simulator(nn.Module):
             batch_size (int): Batch size for processing.
             model (nn.Module): The neural network model to be used.
             device (torch.device): The device to run the model on.
-            model_dir (str, optional): Directory to save/load the model checkpoint. Defaults to "checkpoint/simulator.pth".
+            model_dir (str, optional): Directory to save/load the model checkpoint.
+            Defaults to "checkpoint/simulator.pth".
         """
         super(Simulator, self).__init__()
 
@@ -289,9 +175,7 @@ class Simulator(nn.Module):
 
         return graph, target_delta_normalized
 
-    def _build_outputs(
-        self, inputs: Data, network_output: torch.Tensor
-    ) -> torch.Tensor:
+    def build_outputs(self, inputs: Data, network_output: torch.Tensor) -> torch.Tensor:
         """
         Reconstructs the outputs by inverting normalization and adding the pre-target.
 
@@ -329,22 +213,8 @@ class Simulator(nn.Module):
         if self.training:
             return network_output, target_delta_normalized, None
         else:
-            if self.model.K == 0:
-                outputs = self._build_outputs(
-                    inputs=inputs, network_output=network_output
-                )
-                return network_output, target_delta_normalized, outputs
-            else:
-                network_output = sample_gmm_diagonal(
-                    network_output,
-                    d=self.model.d,
-                    K=self.model.K,
-                    temperature=self.model.temperature,
-                )
-                outputs = self._build_outputs(
-                    inputs=inputs, network_output=network_output
-                )
-                return network_output, target_delta_normalized, outputs
+            outputs = self.build_outputs(inputs=inputs, network_output=network_output)
+            return network_output, target_delta_normalized, outputs
 
     def freeze_all(self) -> None:
         """

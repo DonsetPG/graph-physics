@@ -5,8 +5,6 @@ from torch_geometric.data import Data
 from torch_geometric.nn import TransformerConv
 
 from graphphysics.models.layers import (
-    DiagonalGMMHead,
-    GMMHead,
     GraphNetBlock,
     Transformer,
     build_mlp,
@@ -42,9 +40,6 @@ class EncodeProcessDecode(nn.Module):
         output_size: int,
         hidden_size: int = 128,
         only_processor: bool = False,
-        num_mixture_components: int = 0,  # e.g., K=3
-        temperature: float = None,
-        use_diagonal: bool = True,
     ):
         """
         Initializes the EncodeProcessDecode model.
@@ -56,17 +51,11 @@ class EncodeProcessDecode(nn.Module):
             output_size (int): Size of the output features.
             hidden_size (int, optional): Size of the hidden representations. Defaults to 128.
             only_processor (bool, optional): If True, only the processor is used (no encoding or decoding). Defaults to False.
-            GMM parameters: if num_mixture_components is set to 0, we use a regular decoder.
-                num_components (int): Number of mixture components K.
-                temperature (float): Global temperature scaling factor for covariance.
         """
         super().__init__()
         self.only_processor = only_processor
         self.hidden_size = hidden_size
-        self.use_diagonal = use_diagonal
         self.d = output_size
-        self.K = num_mixture_components
-        self.temperature = temperature
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -81,28 +70,12 @@ class EncodeProcessDecode(nn.Module):
                 out_size=hidden_size,
             )
 
-            if num_mixture_components == 0:
-                self.decode_module = build_mlp(
-                    in_size=hidden_size,
-                    hidden_size=hidden_size,
-                    out_size=output_size,
-                    layer_norm=False,
-                )
-            else:
-                if use_diagonal:
-                    self.decode_module = DiagonalGMMHead(
-                        input_dim=hidden_size,
-                        d=output_size,
-                        num_components=num_mixture_components,
-                        temperature=temperature,
-                    )
-                else:
-                    self.decode_module = GMMHead(
-                        input_dim=hidden_size,
-                        d=output_size,
-                        num_components=num_mixture_components,
-                        temperature=temperature,
-                    )
+            self.decode_module = build_mlp(
+                in_size=hidden_size,
+                hidden_size=hidden_size,
+                out_size=output_size,
+                layer_norm=False,
+            )
 
         self.processor_list = nn.ModuleList(
             [GraphNetBlock(hidden_size=hidden_size) for _ in range(message_passing_num)]
@@ -157,9 +130,6 @@ class EncodeTransformDecode(nn.Module):
         only_processor: bool = False,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
-        num_mixture_components: int = 0,  # e.g., K=3
-        temperature: float = None,
-        use_diagonal: bool = True,
     ):
         """
         Initializes the EncodeTransformDecode model.
@@ -174,18 +144,12 @@ class EncodeTransformDecode(nn.Module):
             use_proj_bias (bool, optional): Whether to use bias in the projection layers of the Transformer blocks. Defaults to True.
             use_separate_proj_weight (bool, optional): Whether to use separate weights for Q, K, V projections in the Transformer blocks.
                 If False, weights are shared. Defaults to True.
-            GMM parameters: if num_mixture_components is set to 0, we use a regular decoder.
-                num_components (int): Number of mixture components K.
-                temperature (float): Global temperature scaling factor for covariance.
         """
 
         super(EncodeTransformDecode, self).__init__()
         self.hidden_size = hidden_size
         self.only_processor = only_processor
-        self.use_diagonal = use_diagonal
         self.d = output_size
-        self.K = num_mixture_components
-        self.temperature = temperature
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -194,28 +158,12 @@ class EncodeTransformDecode(nn.Module):
                 out_size=hidden_size,
             )
 
-            if num_mixture_components == 0:
-                self.decode_module = build_mlp(
-                    in_size=hidden_size,
-                    hidden_size=hidden_size,
-                    out_size=output_size,
-                    layer_norm=False,
-                )
-            else:
-                if use_diagonal:
-                    self.decode_module = DiagonalGMMHead(
-                        input_dim=hidden_size,
-                        d=output_size,
-                        num_components=num_mixture_components,
-                        temperature=temperature,
-                    )
-                else:
-                    self.decode_module = GMMHead(
-                        input_dim=hidden_size,
-                        d=output_size,
-                        num_components=num_mixture_components,
-                        temperature=temperature,
-                    )
+            self.decode_module = build_mlp(
+                in_size=hidden_size,
+                hidden_size=hidden_size,
+                out_size=output_size,
+                layer_norm=False,
+            )
 
         self.processor_list = (
             nn.ModuleList(

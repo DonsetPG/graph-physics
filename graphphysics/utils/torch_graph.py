@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Dict, List, Optional, Union
 
 import meshio
@@ -7,8 +6,6 @@ import torch
 import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
-
-from graphphysics.dataset.preprocessing import add_world_pos_features
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 

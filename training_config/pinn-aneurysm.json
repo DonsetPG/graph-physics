@@ -13,9 +13,7 @@
         "node_input_size": 14,
         "output_size": 3,
         "edge_input_size": 0,
-        "num_heads": 4,
-        "num_mixture_components": 3,
-        "temperature": 1
+        "num_heads": 4
     },
     "index": {
         "feature_index_start": 0,
@@ -23,6 +21,11 @@
         "output_index_start": 0,
         "output_index_end": 3,
         "node_type_index": 14
+    },
+    "loss": {
+        "type": ["l2loss", "gradientl2loss", "divergencel2loss"],
+        "weights": [0.5, 0.5, 0.5],
+        "gradient_method": "finite_diff"
     },
     "transformations": {
         "preprocessing": {

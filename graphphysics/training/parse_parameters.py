@@ -1,6 +1,7 @@
 from typing import Any, Callable, Dict, List, Optional, Union
 
 import torch
+from loguru import logger
 from torch_geometric.data import Data
 
 from graphphysics.dataset.h5_dataset import H5Dataset
@@ -8,6 +9,7 @@ from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from graphphysics.models.processors import EncodeProcessDecode, EncodeTransformDecode
 from graphphysics.models.simulator import Simulator
+from graphphysics.utils.loss import LossType, MultiLoss
 from graphphysics.utils.nodetype import NodeType
 
 
@@ -85,9 +87,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     model_type = param.get("model", {}).get("type", "")
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
 
-    num_mixture_components = param["model"].get("num_mixture_components", 0)
-    temperature = param["model"].get("temperature")
-
     if model_type == "epd":
         return EncodeProcessDecode(
             message_passing_num=param["model"]["message_passing_num"],
@@ -96,8 +95,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
             only_processor=only_processor,
-            num_mixture_components=num_mixture_components,
-            temperature=temperature,
         )
     elif model_type == "transformer":
         return EncodeTransformDecode(
@@ -107,8 +104,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
-            num_mixture_components=num_mixture_components,
-            temperature=temperature,
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
@@ -227,3 +222,46 @@ def get_num_workers(param: Dict[str, Any], default_num_workers: int) -> int:
         return default_num_workers
     else:
         raise ValueError(f"Dataset extension '{extension}' not supported.")
+
+
+def get_loss(param: Dict[str, Any], **kwargs):
+    """
+    Parse parameters for loss function. If several loss types are specified, a weighted loss is used.
+    Args:
+        param (Dict[str, Any]): Dictionary containing configuration parameters.
+
+    Returns:
+        Loss: Initialised loss object.
+        Union[str, List[str]]: loss name if single loss, list of loss name if MultiLoss.
+    """
+    try:
+        _ = param["loss"]
+    except KeyError:
+        logger.info("No loss specified, fall back to default loss L2Loss")
+        return LossType.L2LOSS.value(**kwargs), LossType.L2LOSS.name
+
+    if len(param["loss"]["type"]) > 1:
+        losses = [LossType[t.upper()].value(**kwargs) for t in param["loss"]["type"]]
+        losses_names = [LossType[t.upper()].name for t in param["loss"]["type"]]
+        weights = param["loss"]["weights"]
+        return MultiLoss(losses, weights), losses_names
+    else:
+        loss = LossType[param["loss"]["type"][0].upper()]
+        return loss.value(**kwargs), loss.name
+
+
+def get_gradient_method(param: Dict[str, Any], **kwargs) -> str:
+    """
+    Parse parameters for gradient computation method. If not specified, returns None.
+    Args:
+        param (Dict[str, Any]): Dictionary containing configuration parameters.
+
+    Returns:
+        str: Name of gradient method.
+    """
+    try:
+        gradient_method = param["loss"]["gradient_method"]
+    except KeyError:
+        logger.info("No gradient method specified.")
+        gradient_method = None
+    return gradient_method
