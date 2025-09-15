@@ -82,7 +82,8 @@ def compute_gradient_finite_differences(
     graph: Data, field: torch.Tensor, device: str = "cpu"
 ) -> torch.Tensor:
     """
-    Finite difference gradient computation (original one we have in graphphysics).
+    Weighted finite difference gradient computation. Gradient contributions (du.dx/dx²) are computed on edges.
+    Then summed on graph nodes and multiplied by distance-based weight.
     Args:
         graph: Graph data with pos and edge_index
         field: Vector field (N, F)
@@ -100,30 +101,30 @@ def compute_gradient_finite_differences(
     _, F = field.shape
     i, j = edges[0], edges[1]
 
+    eps = 1e-8
+
     # Coordinate and field differences
     dx = pos[j] - pos[i]
     du = field[j] - field[i]
     distances = torch.norm(dx, dim=1)
 
-    # VTK-style weighting: inverse distance squared
-    weights = 1.0 / (distances**2 + 1e-8)
-
-    # Weighted gradient computation
-    gradient_edges = torch.matmul(du.unsqueeze(2), dx.unsqueeze(1)) * weights.view(
-        -1, 1, 1
+    gradient_edges = torch.matmul(du.unsqueeze(2), dx.unsqueeze(1)) / (
+        distances.view(-1, 1, 1) ** 2 + eps
     )
-    gradient_edges = gradient_edges / (distances.view(-1, 1, 1) ** 2 + 1e-8)
 
-    # Accumulate and normalize
-    gradient = torch.zeros((N, F, D), device=device)
+    # Weighted gradient computation, balanced by weights_sums
+    weight_edges = 1.0 / (distances**2 + eps)
     weight_sums = torch.zeros((N, F, D), device=device)
+    weight_sums.index_add_(0, i, weight_edges.view(-1, 1, 1).expand(-1, F, D))
+    weight_sums.index_add_(0, j, weight_edges.view(-1, 1, 1).expand(-1, F, D))
 
+    # Accumulate and apply distance-based weight
+    gradient_edges = gradient_edges * weight_edges.view(-1, 1, 1)
+    gradient = torch.zeros((N, F, D), device=device)
     gradient.index_add_(0, i, gradient_edges)
     gradient.index_add_(0, j, gradient_edges)
-    weight_sums.index_add_(0, i, weights.view(-1, 1, 1).expand(-1, F, D))
-    weight_sums.index_add_(0, j, weights.view(-1, 1, 1).expand(-1, F, D))
 
-    gradient = gradient / (weight_sums + 1e-8)
+    gradient = gradient / (weight_sums + eps)
     return gradient
 
 
