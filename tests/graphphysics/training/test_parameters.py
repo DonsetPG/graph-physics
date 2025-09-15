@@ -13,7 +13,7 @@ from graphphysics.training.parse_parameters import (
     get_gradient_method,
 )
 from graphphysics.utils.nodetype import NodeType
-from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceLoss
+from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceL2Loss
 
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
@@ -75,7 +75,7 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                     "khop": 2,
                 },
                 "loss": {
-                    "type": ["l2loss", "gradientl2loss", "divergenceloss"],
+                    "type": ["l2loss", "gradientl2loss", "divergencel2loss"],
                     "weights": [0.5, 0.5, 0.5],
                     "gradient_method": "finite_diff",
                 },
@@ -157,10 +157,10 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
             self.assertIsInstance(multi_loss, MultiLoss)
             self.assertEqual(len(loss_name), len(self.param["loss"]["type"]))
 
-            self.param["loss"]["type"] = ["divergenceloss"]
+            self.param["loss"]["type"] = ["divergencel2loss"]
             single_loss, loss_name = get_loss(param=self.param)
-            self.assertIsInstance(single_loss, DivergenceLoss)
-            self.assertEqual(loss_name, "DIVERGENCELOSS")
+            self.assertIsInstance(single_loss, DivergenceL2Loss)
+            self.assertEqual(loss_name, "DIVERGENCEL2LOSS")
 
             # Assert that with no loss parameters, default loss is L2Loss
             param_wo_loss = deepcopy(self.param)

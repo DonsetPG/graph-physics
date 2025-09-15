@@ -231,13 +231,13 @@ class ConvectionL2Loss(_Loss):
         return torch.mean(errors)
 
 
-class DivergenceLoss(_Loss):
+class DivergenceL2Loss(_Loss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @property
     def __name__(self):
-        return "DivergenceLoss"
+        return "DivergenceL2Loss"
 
     def forward(
         self,
@@ -278,13 +278,13 @@ class DivergenceLoss(_Loss):
         return torch.mean(errors)
 
 
-class DivL1Loss(_Loss):
+class DivergenceL1Loss(_Loss):
     def __init__(self, **kwargs):
         super().__init__(**kwargs)
 
     @property
     def __name__(self):
-        return "DivL1Loss"
+        return "DivergenceL1Loss"
 
     def forward(
         self,
@@ -325,14 +325,14 @@ class DivL1Loss(_Loss):
         return torch.mean(errors)
 
 
-class DivL1SmoothLoss(_Loss):
+class DivergenceL1SmoothLoss(_Loss):
     def __init__(self, beta: float = 1.0, **kwargs):
         super().__init__(**kwargs)
         self.beta = beta
 
     @property
     def __name__(self):
-        return "DivL1Smooth"
+        return "DivergenceL1Smooth"
 
     def forward(
         self,
@@ -441,6 +441,6 @@ class LossType(enum.Enum):
     L1SMOOTHLOSS = L1SmoothLoss
     GRADIENTL2LOSS = GradientL2Loss
     CONVECTIONL2LOSS = ConvectionL2Loss
-    DIVERGENCELOSS = DivergenceLoss
-    DIVL1LOSS = DivL1Loss
-    DIVL1SMOOTHLOSS = DivL1SmoothLoss
+    DIVERGENCEL2LOSS = DivergenceL2Loss
+    DIVERGENCEL1LOSS = DivergenceL1Loss
+    DIVERGENCEL1SMOOTHLOSS = DivergenceL1SmoothLoss

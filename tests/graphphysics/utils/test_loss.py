@@ -8,9 +8,9 @@ from graphphysics.utils.loss import (
     L1SmoothLoss,
     GradientL2Loss,
     ConvectionL2Loss,
-    DivergenceLoss,
-    DivL1Loss,
-    DivL1SmoothLoss,
+    DivergenceL2Loss,
+    DivergenceL1Loss,
+    DivergenceL1SmoothLoss,
     MultiLoss,
 )
 
@@ -22,9 +22,9 @@ class TestLossFunctions(unittest.TestCase):
             L1SmoothLoss(),
             GradientL2Loss(),
             ConvectionL2Loss(),
-            DivergenceLoss(),
-            DivL1Loss(),
-            DivL1SmoothLoss(),
+            DivergenceL2Loss(),
+            DivergenceL1Loss(),
+            DivergenceL1SmoothLoss(),
         ]
         # Mock 2D graph
         pos = torch.tensor(
@@ -108,7 +108,7 @@ class TestLossFunctions(unittest.TestCase):
 
 class TestMultiLoss(unittest.TestCase):
     def setUp(self):
-        self.losses = [L2Loss(), GradientL2Loss(), DivergenceLoss()]
+        self.losses = [L2Loss(), GradientL2Loss(), DivergenceL2Loss()]
         self.weights = [0.5, 0.3, 0.1]
         self.multiloss = MultiLoss(losses=self.losses, weights=self.weights)
 
