@@ -1,3 +1,4 @@
+import os
 import torch
 import torch.nn as nn
 from loguru import logger
@@ -9,6 +10,9 @@ from graphphysics.models.layers import (
     Transformer,
     build_mlp,
 )
+import graphphysics.models.transolver as tp
+from graphphysics.models.bsms import MLP, BSGMP
+from graphphysics.utils.bsms_wrappers import load_multi_mesh
 
 try:
     import dgl.sparse as dglsp
@@ -223,3 +227,142 @@ class EncodeTransformDecode(nn.Module):
         else:
             x_decoded = self.decode_module(x)
             return x_decoded
+
+
+# Make a safe dummy for dist_nn.all_reduce if distributed not initialized.
+class _DummyDistNN:
+    class ReduceOp:
+        SUM = "sum"
+
+    @staticmethod
+    def all_reduce(tensor, op=None):
+        # no-op: return the tensor (in-place ops in Transolver may expect side-effects)
+        return tensor
+
+
+def _ensure_safe_dist():
+    """If torch.distributed.process_group isn't initialized, override tp.dist_nn with a no-op."""
+    try:
+        if (
+            not torch.distributed.is_available()
+            or not torch.distributed.is_initialized()
+        ):
+            tp.dist_nn = _DummyDistNN
+    except Exception:
+        # If anything weird happens, fall back to dummy
+        tp.dist_nn = _DummyDistNN
+
+
+class TransolverProcessor(nn.Module):
+    """
+    Wrapper that adapts Transolver++ Model to your Encode*Decode processors' interface.
+    Usage: instantiate with node_input_size etc. Then call forward(graph: torch_geometric.data.Data)
+    It expects graph.x to be node features (num_nodes, in_dim).
+    If graph.pos exists, it will be used as 'pos' (num_nodes, 3). Otherwise zeros are used.
+    If graph.u or graph.condition exists, it will be used as the 'condition' (global vector).
+    """
+
+    def __init__(
+        self,
+        message_passing_num: int,
+        node_input_size: int,
+        output_size: int,
+        hidden_size: int = 64,
+        num_heads: int = 2,
+        num_mixture_components: int = 0,
+        dropout: float = 0.0,
+        mlp_ratio: int = 1,
+        slice_num: int = 32,
+        ref: int = 8,
+        unified_pos: bool = False,
+        device: torch.device = None,
+    ):
+        super().__init__()
+
+        _ensure_safe_dist()
+
+        self.hidden_size = hidden_size
+        self.device = device or torch.device(
+            "cuda" if torch.cuda.is_available() else "cpu"
+        )
+
+        n_layers = message_passing_num
+        out_dim = output_size
+
+        self.model = tp.Model(
+            space_dim=0,
+            n_layers=n_layers,
+            n_hidden=hidden_size,
+            dropout=dropout,
+            n_head=num_heads,
+            act="gelu",
+            mlp_ratio=mlp_ratio,
+            fun_dim=node_input_size,
+            out_dim=out_dim,
+            slice_num=slice_num,
+            ref=ref,
+            unified_pos=unified_pos,
+        ).to(self.device)
+
+    def forward(self, graph: Data) -> torch.Tensor:
+        """
+        graph.x: node features (num_nodes, in_dim)
+        graph.pos (optional): (num_nodes, 3) positions
+        graph.u or graph.condition (optional): (global_dim,) or (batch, global_dim)
+        returns: tensor of shape (num_nodes, output_size)
+        """
+        x = graph.x.to(self.device)  # (N, in_dim)
+        pos = graph.pos.to(self.device)  # (N, 3)
+
+        # Transolver expects B dimension:
+        x_batched = x.unsqueeze(0)  # (1, N, C)
+        pos_batched = pos.unsqueeze(0)  # (1, N, 3)
+        condition = None  # Condition / global features (optional)
+
+        out = self.model.forward(x_batched, pos_batched, condition)
+        out = out.squeeze(0)  # (N, out_dim)
+        return out
+
+
+class BSMSProcessor(torch.nn.Module):
+    def __init__(
+        self,
+        message_passing_num: int,
+        node_input_size: int,
+        output_size: int,
+        hidden_size: int = 64,
+        num_mixture_components: int = 0,
+        hidden_layer: int = 2,
+        pos_dim: int = 3,
+        device: torch.device = None,
+        data_dir: str = "",
+    ):
+        super(BSMSProcessor, self).__init__()
+        self.encode = MLP(node_input_size, hidden_size, hidden_size, hidden_layer, True)
+        self.process = BSGMP(message_passing_num, hidden_size, hidden_layer, pos_dim)
+        self.decode = MLP(hidden_size, hidden_size, output_size, hidden_layer, False)
+        self.pos_dim = pos_dim
+        if device is None:
+            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+        self.message_passing_num = message_passing_num
+        self.data_dir = data_dir
+        self.mm_layer_dir = os.path.join(
+            self.data_dir, f"mm_layers_{self.message_passing_num}"
+        )
+
+    def forward(self, graph: Data, mesh_id: str = None) -> torch.Tensor:
+        if mesh_id is not None:
+            m_gs, m_ids = load_multi_mesh(
+                mm_layer_dir=self.mm_layer_dir,
+                mesh_id=mesh_id,
+                device=self.device,
+            )
+        else:
+            raise ValueError("mesh_id must be provided.")
+        x = graph.x.to(self.device)
+        pos = graph.pos.to(self.device)
+        x = self.encode(x)
+        x = self.process(x, m_ids, m_gs, pos)
+        x = self.decode(x)
+        return x
