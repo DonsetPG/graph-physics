@@ -198,12 +198,12 @@ class LightningModule(L.LightningModule):
             f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
         )
         # The H5 archive is systematically created in cwd, we just need to move it
-        # shutil.move(
-        #     src=os.path.join(
-        #         os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
-        #     ),
-        #     dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
-        # )
+        shutil.move(
+            src=os.path.join(
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
+            ),
+            dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
+        )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
