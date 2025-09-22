@@ -117,11 +117,11 @@ class XDMFDataset(BaseDataset):
                 )
 
             points, cells = reader.read_points_cells()
-            time, point_data, _, _ = reader.read_data(frame)
-            _, target_point_data, _, _ = reader.read_data(frame + _target_data_index)
+            time, point_data, _ = reader.read_data(frame)
+            _, target_point_data, _ = reader.read_data(frame + _target_data_index)
 
             if self.use_previous_data:
-                _, previous_data, _, _ = reader.read_data(frame - _previous_data_index)
+                _, previous_data, _ = reader.read_data(frame - _previous_data_index)
 
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
