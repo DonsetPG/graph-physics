@@ -2,7 +2,7 @@
     "dataset": {
         "extension": "xdmf",
         "xdmf_folder": "dataset/train",
-        "meta_path": "dataset/meta.json",
+        "meta_path": "dataset_config/panels_meta.json",
         "khop": 1,
         "new_edges_ratio": 0
     },
@@ -10,21 +10,26 @@
         "type": "transformer",
         "message_passing_num": 15,
         "hidden_size": 128,
-        "node_input_size": 2,
-        "output_size": 3,
+        "node_input_size": 7,
+        "output_size": 2,
         "edge_input_size": 0,
         "num_heads": 4
     },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 2,
+        "feature_index_end": 7,
         "output_index_start": 0,
-        "output_index_end": 3,
-        "node_type_index": 3
+        "output_index_end": 2,
+        "node_type_index": 7
+    },
+    "loss": {
+        "type": ["l2loss", "gradientl2loss", "convectionl2loss", "divergencel1loss"],
+        "weights": [1, 1e-2, 1e-4, 1e-1],
+        "gradient_method": "least_squares"
     },
     "transformations": {
         "preprocessing": {
-            "noise": 0.02,
+            "noise": [0.01],
             "noise_index_start": [0],
             "noise_index_end": [2],
             "masking": 0
