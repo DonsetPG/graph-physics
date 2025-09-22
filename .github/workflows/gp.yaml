@@ -38,6 +38,8 @@ jobs:
         pip install absl-py
         pip install "wandb[media]"
         pip install panel
+        pip install timm
+        pip install einops
     - name: Linting code
       run: |
         make lint
