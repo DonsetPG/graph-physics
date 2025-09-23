@@ -1,50 +1,68 @@
 {
-    "simulator": "cimlib",
-    "dt": 0.05,
-    "collision_radius": null,
-    "features": {
-      "cells": {
-        "type": "static",
-        "shape": [
-          2999,
-          -1,
-          3
-        ],
-        "dtype": "int32"
-      },
-      "mesh_pos": {
-        "type": "static",
-        "shape": [
-          2999,
-          -1,
-          2
-        ],
-        "dtype": "float32"
-      },
-      "NodeTypeCoarse": {
-        "type": "static",
-        "shape": [
-          2999,
-          -1,
-          1
-        ],
-        "dtype": "int32"
-      },
-      "VitesseCoarse": {
-        "type": "dynamic",
-        "shape": [
-          2999,
-          -1,
-          3
-        ],
-        "dtype": "float32"
-      }
+  "dt": 0.2,
+  "features": {
+    "cells": {
+      "type": "static",
+      "shape": [
+        600,
+        -1,
+        3
+      ],
+      "dtype": "int32"
     },
-    "field_names": [
-      "cells",
-      "mesh_pos",
-      "NodeTypeCoarse",
-      "VitesseCoarse"
-    ],
-    "trajectory_length": 2999
-  }
+    "mesh_pos": {
+      "type": "static",
+      "shape": [
+        600,
+        -1,
+        3
+      ],
+      "dtype": "float32"
+    },
+    "Vitesse": {
+      "type": "dynamic",
+      "shape": [
+        600,
+        -1,
+        3
+      ],
+      "dtype": "float32"
+    },
+    "Pression": {
+      "type": "dynamic",
+      "shape": [
+        600,
+        -1,
+        1
+      ],
+      "dtype": "float32"
+    },
+    "LevelSetObject": {
+      "type": "static",
+      "shape": [
+        600,
+        -1,
+        1
+      ],
+      "dtype": "float32"
+    },
+    "NodeType": {
+      "type": "static",
+      "shape": [
+        600,
+        -1,
+        1
+      ],
+      "dtype": "float32"
+    }
+  },
+  "field_names": [
+    "cells",
+    "mesh_pos",
+    "Vitesse",
+    "Pression",
+    "LevelSetObject",
+    "NodeType"
+  ],
+  "trajectory_length": 600
+}
