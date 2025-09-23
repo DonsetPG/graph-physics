@@ -363,8 +363,8 @@ We also allow the customization of the loss function by combining physics-based 
 
 > [!NOTE]
 > Gradients of the discrete vector fields are approximated on the graph nodes using the following formulations, implemented in [vectorial_operators.py](https://github.com/DonsetPG/graph-physics/tree/main/graphphysics/utils/vectorial_operators.py):
-> - `finite_diff` is a weighted finite differences scheme on 1-hope neighborhood of each node, using weights based on the inverse distance between nodes.
-> - `least_squares` solves a weighted least squares problem on 1-hope neighborhood of each node, and uses the same weights.
+> - `finite_diff` is a weighted finite differences scheme on 1-hop neighborhood of each node, using weights based on the inverse distance between nodes.
+> - `least_squares` solves a weighted least squares problem on 1-hop neighborhood of each node, and uses the same weights.
 
 > [!NOTE]
 > Physics-based losses use gradients computed on output and target fields that are mapped back to physical values.
