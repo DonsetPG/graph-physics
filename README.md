@@ -345,6 +345,30 @@ preprocessing = get_preprocessing(
 )
 ```
 
+### Custom Loss Functions
+
+We also allow the customization of the loss function by combining physics-based loss terms scaled by user-defined weights ($L=w_1 L_1 + \dots + w_n L_n$). By default, if no `loss` is provided in the training parameters, only a data loss (L2 between output and target) is used.
+
+```json
+"loss": {
+    "type": ["l2loss", "gradientl2loss", "divergencel1loss"],
+    "weights": [1, 1e-2, 0.5],
+    "gradient_method": "finite_diff"
+}
+```
+
+- `type`: List of loss types used. Implemented losses include `l2loss` (default), `l1smoothloss`, `gradientl2loss`, `convectionl2loss`, `divergencel2loss`, `divergencel1loss`, and `divergencel1smoothloss`. See [loss.py](https://github.com/DonsetPG/graph-physics/tree/main/graphphysics/utils/loss.py) for details or if you wish to implement other losses.
+- `weights`: Weights of the respective loss terms.
+- `gradient_method`: method used to approximate gradients on graph nodes. Implementations include `finite_diff` (default) and `least_squares`.
+
+> [!NOTE]
+> Gradients of the discrete vector fields are approximated on the graph nodes using the following formulations, implemented in [vectorial_operators.py](https://github.com/DonsetPG/graph-physics/tree/main/graphphysics/utils/vectorial_operators.py):
+> - `finite_diff` is a weighted finite differences scheme on 1-hop neighborhood of each node, using weights based on the inverse distance between nodes.
+> - `least_squares` solves a weighted least squares problem on 1-hop neighborhood of each node, and uses the same weights.
+
+> [!NOTE]
+> Physics-based losses use gradients computed on output and target fields that are mapped back to physical values.
+> The latter are then used to compute either L2 differences between output and target gradients, or to compute a residual norm such as for the divergence losses.
 
 ### Architecture
 
@@ -371,7 +395,7 @@ preprocessing = get_preprocessing(
 - `edge_input_size`: Size of the edge features. 3 in 2D and 4 in 3D. 0 for transformer based model.
 - `output_size`: Size of the output
 - `num_heads`: Number of heads for transformer based model.
-
+  
 ### Dataset Settings
 
 You will also need to design a .json to define the dataset details. Those `meta.json` files are inspired from [Meshgraphnet](https://github.com/google-deepmind/deepmind-research/tree/master/meshgraphnets).
