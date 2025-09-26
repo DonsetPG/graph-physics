@@ -74,7 +74,9 @@ class TestTransformerComponents(unittest.TestCase):
         q = torch.randn(5, 10)
         k = torch.randn(5, 10)
         if HAS_DGL_SPARSE:
-            adj = dglsp.from_coo(torch.tensor([0, 1, 2]), torch.tensor([1, 2, 3]))
+            adj = dglsp.from_coo(
+                torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
+            )
             attn = scaled_query_key_softmax(q, k, adj)
         else:
             attn = scaled_query_key_softmax(q, k, None)
@@ -85,7 +87,9 @@ class TestTransformerComponents(unittest.TestCase):
         k = torch.randn(5, 10)
         v = torch.randn(5, 15)
         if HAS_DGL_SPARSE:
-            adj = dglsp.from_coo(torch.tensor([0, 1, 2]), torch.tensor([1, 2, 3]))
+            adj = dglsp.from_coo(
+                torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
+            )
             y = scaled_dot_product_attention(q, k, v, adj)
         else:
             y = scaled_dot_product_attention(q, k, v)
@@ -99,7 +103,9 @@ class TestTransformerComponents(unittest.TestCase):
         attention = Attention(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
         if HAS_DGL_SPARSE:
-            adj = dglsp.from_coo(torch.tensor([0, 1, 2]), torch.tensor([1, 2, 3]))
+            adj = dglsp.from_coo(
+                torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
+            )
             output = attention(x, adj)
         else:
             output = attention(x, None)
@@ -112,7 +118,9 @@ class TestTransformerComponents(unittest.TestCase):
         transformer = Transformer(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
         if HAS_DGL_SPARSE:
-            adj = dglsp.from_coo(torch.tensor([0, 1, 2]), torch.tensor([1, 2, 3]))
+            adj = dglsp.from_coo(
+                torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
+            )
             output = transformer(x, adj)
         else:
             output = transformer(x, None)
@@ -125,7 +133,9 @@ class TestTransformerComponents(unittest.TestCase):
         transformer = Transformer(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
         if HAS_DGL_SPARSE:
-            adj = dglsp.from_coo(torch.tensor([0, 1, 2]), torch.tensor([1, 2, 3]))
+            adj = dglsp.from_coo(
+                torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
+            )
             output, attn = transformer(x, adj, return_attention=True)
         else:
             output, attn = transformer(x, None, return_attention=True)
