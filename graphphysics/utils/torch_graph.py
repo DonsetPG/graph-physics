@@ -172,7 +172,7 @@ def meshdata_to_graph(
             dim=1,
         )
     if cells.shape[0] == 3:
-        face = torch.tensor(cells)
+        face = cells
 
     return Data(
         x=node_features,
