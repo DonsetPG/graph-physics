@@ -1,26 +1,19 @@
+# --------------------------------------------------------------------------------------
+# DISCLAIMER:
+# This file is adapted from the TransolverPlusPlus GitHub repository:
+# https://github.com/thuml/Transolver_plus/tree/main
+# Retrieved on September 17, 2025.
+# --------------------------------------------------------------------------------------
+
 import torch
 import numpy as np
 import torch.nn as nn
-from timm.layers import trunc_normal_
 from einops import rearrange
 import torch.distributed.nn as dist_nn
 from torch.utils.checkpoint import checkpoint
 import torch.nn.functional as F
 
-ACTIVATION = {
-    "gelu": nn.GELU,
-    "tanh": nn.Tanh,
-    "sigmoid": nn.Sigmoid,
-    "relu": nn.ReLU,
-    "leaky_relu": nn.LeakyReLU(0.1),
-    "softplus": nn.Softplus,
-    "ELU": nn.ELU,
-    "silu": nn.SiLU,
-}
-
-
-def matmul_single(fx_mid, slice_weights):
-    return fx_mid.T @ slice_weights
+from graphphysics.models.layers import build_mlp
 
 
 def gumbel_softmax(logits, tau=1, hard=False):
@@ -79,9 +72,17 @@ class Physics_Attention_1D_Eidetic(nn.Module):
         temperature = torch.clamp(temperature, min=0.01)
         slice_weights = gumbel_softmax(self.in_project_slice(x_mid), temperature)
         slice_norm = slice_weights.sum(2)  # B H G
-        dist_nn.all_reduce(slice_norm, op=dist_nn.ReduceOp.SUM)
+        if (
+            torch.distributed.is_initialized()
+            and torch.distributed.get_world_size() > 1
+        ):
+            dist_nn.all_reduce(slice_norm, op=dist_nn.ReduceOp.SUM)
         slice_token = torch.einsum("bhnc,bhng->bhgc", x_mid, slice_weights).contiguous()
-        dist_nn.all_reduce(slice_token, op=dist_nn.ReduceOp.SUM)
+        if (
+            torch.distributed.is_initialized()
+            and torch.distributed.get_world_size() > 1
+        ):
+            dist_nn.all_reduce(slice_token, op=dist_nn.ReduceOp.SUM)
         slice_token = slice_token / (
             (slice_norm + 1e-5)[:, :, :, None].repeat(1, 1, 1, self.dim_head)
         )
@@ -96,39 +97,6 @@ class Physics_Attention_1D_Eidetic(nn.Module):
         out_x = torch.einsum("bhgc,bhng->bhnc", out_slice_token, slice_weights)
         out_x = rearrange(out_x, "b h n d -> b n (h d)")
         return self.to_out(out_x)
-
-
-class MLP(nn.Module):
-    def __init__(self, n_input, n_hidden, n_output, n_layers=1, act="gelu", res=True):
-        super(MLP, self).__init__()
-
-        if act in ACTIVATION.keys():
-            act = ACTIVATION[act]
-        else:
-            raise NotImplementedError
-        self.n_input = n_input
-        self.n_hidden = n_hidden
-        self.n_output = n_output
-        self.n_layers = n_layers
-        self.res = res
-        self.linear_pre = nn.Sequential(nn.Linear(n_input, n_hidden), act())
-        self.linear_post = nn.Linear(n_hidden, n_output)
-        self.linears = nn.ModuleList(
-            [
-                nn.Sequential(nn.Linear(n_hidden, n_hidden), act())
-                for _ in range(n_layers)
-            ]
-        )
-
-    def forward(self, x):
-        x = self.linear_pre(x)
-        for i in range(self.n_layers):
-            if self.res:
-                x = self.linears[i](x) + x
-            else:
-                x = self.linears[i](x)
-        x = self.linear_post(x)
-        return x
 
 
 class Transolver_plus_block(nn.Module):
@@ -154,13 +122,14 @@ class Transolver_plus_block(nn.Module):
             slice_num=slice_num,
         )
         self.ln_2 = nn.LayerNorm(hidden_dim)
-        self.mlp = MLP(
-            hidden_dim,
-            hidden_dim * mlp_ratio,
-            hidden_dim,
-            n_layers=0,
-            res=False,
+        self.mlp = build_mlp(
+            in_size=hidden_dim,
+            hidden_size=hidden_dim * mlp_ratio,
+            out_size=hidden_dim,
+            nb_of_layers=2,
+            layer_norm=False,
             act=act,
+            res=False,
         )
         if self.last_layer:
             self.ln_3 = nn.LayerNorm(hidden_dim)
@@ -202,22 +171,24 @@ class Model(nn.Module):
         self.ref = ref
         self.unified_pos = unified_pos
         if self.unified_pos:
-            self.preprocess = MLP(
-                fun_dim + self.ref * self.ref * self.ref,
-                n_hidden * 2,
-                n_hidden,
-                n_layers=0,
-                res=False,
+            self.preprocess = build_mlp(
+                in_size=fun_dim + self.ref * self.ref * self.ref,
+                hidden_size=n_hidden * 2,
+                out_size=n_hidden,
+                nb_of_layers=2,
+                layer_norm=False,
                 act=act,
+                res=False,
             )
         else:
-            self.preprocess = MLP(
-                fun_dim + space_dim,
-                n_hidden * 2,
-                n_hidden,
-                n_layers=0,
-                res=False,
+            self.preprocess = build_mlp(
+                in_size=fun_dim + space_dim,
+                hidden_size=n_hidden * 2,
+                out_size=n_hidden,
+                nb_of_layers=2,
+                layer_norm=False,
                 act=act,
+                res=False,
             )
 
         self.n_hidden = n_hidden
@@ -238,22 +209,9 @@ class Model(nn.Module):
                 for _ in range(n_layers)
             ]
         )
-        self.initialize_weights()
         self.placeholder = nn.Parameter(
             (1 / (n_hidden)) * torch.rand(n_hidden, dtype=torch.float)
         )
-
-    def initialize_weights(self):
-        self.apply(self._init_weights)
-
-    def _init_weights(self, m):
-        if isinstance(m, nn.Linear):
-            trunc_normal_(m.weight, std=0.02)
-            if isinstance(m, nn.Linear) and m.bias is not None:
-                nn.init.constant_(m.bias, 0)
-        elif isinstance(m, (nn.LayerNorm, nn.BatchNorm1d)):
-            nn.init.constant_(m.bias, 0)
-            nn.init.constant_(m.weight, 1.0)
 
     def get_grid(self, my_pos):
         batchsize = my_pos.shape[0]
@@ -289,7 +247,7 @@ class Model(nn.Module):
 
     def forward(self, x, pos, condition):
         fx, _ = None, None
-        if self.unified_pos:
+        if pos is not None and self.unified_pos:
             new_pos = self.get_grid(pos)
             x = torch.cat((x, new_pos), dim=-1)
 

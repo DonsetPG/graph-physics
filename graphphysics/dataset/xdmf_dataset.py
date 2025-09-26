@@ -10,7 +10,6 @@ from torch_geometric.data import Data
 
 from graphphysics.dataset.dataset import BaseDataset
 from graphphysics.utils.torch_graph import meshdata_to_graph
-from graphphysics.utils.bsms_wrappers import calculate_multi_mesh
 
 
 class XDMFDataset(BaseDataset):
@@ -24,8 +23,6 @@ class XDMFDataset(BaseDataset):
         new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
-        model_type: str = None,
-        message_passing_num: int = 0,
         switch_to_val: bool = False,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
@@ -49,19 +46,10 @@ class XDMFDataset(BaseDataset):
         self.random_next = random_next
         self.random_prev = random_prev
 
-        self.model_type = model_type
-        self.message_passing_num = message_passing_num
-
-        self.data_dir = xdmf_folder.replace("train", "")
         if switch_to_val:
             xdmf_folder = xdmf_folder.replace("train", "test")
             self.random_next = 1
             self.random_prev = 1
-
-        self.mm_layer_dir = os.path.join(
-            self.data_dir, f"mm_layers_{self.message_passing_num}"
-        )
-        os.makedirs(self.mm_layer_dir, exist_ok=True)
 
         self.xdmf_folder = xdmf_folder
         self.meta_path = meta_path
@@ -129,26 +117,8 @@ class XDMFDataset(BaseDataset):
         # Get faces or cells
         if "triangle" in mesh.cells_dict:
             cells = mesh.cells_dict["triangle"]
-            if self.model_type == "bsms" and self.message_passing_num > 0:
-                calculate_multi_mesh(
-                    mesh_pos=points,
-                    cells=cells,
-                    mesh_type="triangle",
-                    message_passing_num=self.message_passing_num,
-                    mm_layer_dir=self.mm_layer_dir,
-                    mesh_id=mesh_id,
-                )
         elif "tetra" in mesh.cells_dict:
             cells = torch.tensor(mesh.cells_dict["tetra"], dtype=torch.long)
-            if self.model_type == "bsms" and self.message_passing_num > 0:
-                calculate_multi_mesh(
-                    mesh_pos=points,
-                    cells=cells,
-                    mesh_type="tetra",
-                    message_passing_num=self.message_passing_num,
-                    mm_layer_dir=self.mm_layer_dir,
-                    mesh_id=mesh_id,
-                )
         else:
             raise ValueError(
                 "Unsupported cell type. Only 'triangle' and 'tetra' cells are supported."

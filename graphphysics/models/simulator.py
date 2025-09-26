@@ -27,7 +27,6 @@ class Simulator(nn.Module):
         output_index_end: int,
         node_type_index: int,
         model: nn.Module,
-        model_type: str,
         device: torch.device,
         model_dir: str = "checkpoint/simulator.pth",
     ):
@@ -75,8 +74,6 @@ class Simulator(nn.Module):
             if self.edge_input_size is not None
             else None
         )
-
-        self.model_type = model_type
 
         self.device = device
 
@@ -211,10 +208,7 @@ class Simulator(nn.Module):
         graph, target_delta_normalized = self._build_input_graph(
             inputs=inputs, is_training=self.training
         )
-        if self.model_type == "bsms":
-            network_output = self.model(graph, mesh_id=inputs.id[0])
-        else:
-            network_output = self.model(graph)
+        network_output = self.model(graph)
 
         if self.training:
             return network_output, target_delta_normalized, None

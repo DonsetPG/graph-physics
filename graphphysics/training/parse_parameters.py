@@ -11,7 +11,6 @@ from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
     TransolverProcessor,
-    BSMSProcessor,
 )
 from graphphysics.models.simulator import Simulator
 from graphphysics.utils.loss import LossType, MultiLoss
@@ -118,18 +117,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
         )
-    elif model_type == "bsms":
-        return BSMSProcessor(
-            message_passing_num=param["model"]["message_passing_num"],
-            node_input_size=node_input_size,
-            output_size=param["model"]["output_size"],
-            hidden_size=param["model"]["hidden_size"],
-            hidden_layer=param["model"]["hidden_layer"],
-            pos_dim=param["model"]["pos_dim"],
-            data_dir=param.get("dataset", {})
-            .get("xdmf_folder", "")
-            .replace("train", ""),
-        )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
 
@@ -158,7 +145,6 @@ def get_simulator(param: Dict[str, Any], model, device: torch.device) -> Simulat
         output_index_end=param["index"]["output_index_end"],
         node_type_index=param["index"]["node_type_index"],
         model=model,
-        model_type=param["model"]["type"],
         device=device,
     )
 
@@ -223,8 +209,6 @@ def get_dataset(
             new_edges_ratio=new_edges_ratio,
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
-            model_type=param.get("model", {}).get("type", None),
-            message_passing_num=param.get("model", {}).get("message_passing_num", 0),
             switch_to_val=switch_to_val,
         )
     else:
