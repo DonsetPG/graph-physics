@@ -1,7 +1,11 @@
 import unittest
 import torch
 from torch_geometric.data import Data
-from graphphysics.models.processors import EncodeProcessDecode, EncodeTransformDecode
+from graphphysics.models.processors import (
+    EncodeProcessDecode,
+    EncodeTransformDecode,
+    TransolverProcessor,
+)
 
 
 class TestEncodeProcessDecode(unittest.TestCase):
@@ -140,6 +144,58 @@ class TestEncodeTransformDecode(unittest.TestCase):
             hidden_size=self.hidden_size,
             num_heads=self.num_heads,
             only_processor=False,
+        )
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+
+class TestTransolverProcessor(unittest.TestCase):
+    def setUp(self):
+        self.num_nodes = 5
+        self.node_input_size = 8
+        self.output_size = 3
+        self.hidden_size = 16
+        self.num_heads = 4
+        self.message_passing_num = 3
+
+        x = torch.randn(self.num_nodes, self.node_input_size)
+        edge_index = torch.randint(0, self.num_nodes, (2, self.num_nodes * 2))
+        self.graph = Data(x=x, edge_index=edge_index)
+
+    def test_transolver_forward(self):
+        model = TransolverProcessor(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+        )
+        x_decoded = model(self.graph)
+        # x_decoded should have shape [num_nodes, output_size]
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_gradients(self):
+        model = TransolverProcessor(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+        )
+        x_decoded = model(self.graph)
+        loss = x_decoded.sum()
+        loss.backward()
+        # Check that gradients are computed
+        params = [p for p in model.parameters() if p.grad is not None]
+        self.assertTrue(len(params) > 0)
+
+    def test_multiple_message_passing_steps(self):
+        model = TransolverProcessor(
+            message_passing_num=5,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
         )
         x_decoded = model(self.graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))

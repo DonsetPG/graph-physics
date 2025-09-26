@@ -17,3 +17,4 @@ wandb==0.19.8
 absl-py==2.2.0
 wandb[media]==0.19.8
 panel==1.6.1
+einops==0.8.1

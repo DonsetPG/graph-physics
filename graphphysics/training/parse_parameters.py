@@ -7,7 +7,11 @@ from torch_geometric.data import Data
 from graphphysics.dataset.h5_dataset import H5Dataset
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
-from graphphysics.models.processors import EncodeProcessDecode, EncodeTransformDecode
+from graphphysics.models.processors import (
+    EncodeProcessDecode,
+    EncodeTransformDecode,
+    TransolverProcessor,
+)
 from graphphysics.models.simulator import Simulator
 from graphphysics.utils.loss import LossType, MultiLoss
 from graphphysics.utils.nodetype import NodeType
@@ -104,6 +108,14 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
+        )
+    elif model_type == "transolver":
+        return TransolverProcessor(
+            message_passing_num=param["model"]["message_passing_num"],
+            node_input_size=node_input_size,
+            output_size=param["model"]["output_size"],
+            hidden_size=param["model"]["hidden_size"],
+            num_heads=param["model"]["num_heads"],
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
