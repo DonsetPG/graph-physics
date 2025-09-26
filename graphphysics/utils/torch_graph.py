@@ -1,4 +1,3 @@
-from functools import partial
 from typing import Dict, List, Optional, Union
 
 import meshio
@@ -7,8 +6,6 @@ import torch
 import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
-
-from graphphysics.dataset.preprocessing import add_world_pos_features
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -162,6 +159,7 @@ def meshdata_to_graph(
     # Get tetrahedras and triangles from cells
     tetra = None
     cells = cells.T
+    cells = torch.tensor(cells)
     if cells.shape[0] == 4:
         tetra = cells
         face = torch.cat(
@@ -174,7 +172,7 @@ def meshdata_to_graph(
             dim=1,
         )
     if cells.shape[0] == 3:
-            face = torch.as_tensor(cells, dtype=torch.long)
+        face = cells
 
     return Data(
         x=node_features,
