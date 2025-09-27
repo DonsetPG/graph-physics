@@ -10,7 +10,6 @@ from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
-    TransolverProcessor,
     BSMSProcessor,
 )
 from graphphysics.models.simulator import Simulator
@@ -109,14 +108,6 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
-        )
-    elif model_type == "transolver":
-        return TransolverProcessor(
-            message_passing_num=param["model"]["message_passing_num"],
-            node_input_size=node_input_size,
-            output_size=param["model"]["output_size"],
-            hidden_size=param["model"]["hidden_size"],
-            num_heads=param["model"]["num_heads"],
         )
     elif model_type == "bsms":
         return BSMSProcessor(
