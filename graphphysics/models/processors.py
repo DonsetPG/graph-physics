@@ -228,10 +228,10 @@ class EncodeTransformDecode(nn.Module):
 
 class TransolverProcessor(nn.Module):
     """
-    Wrapper that adapts Transolver++ Model to your Encode*Decode processors' interface.
+    Wrapper that adapts Transolver++ Model.
     Usage: instantiate with node_input_size etc. Then call forward(graph: torch_geometric.data.Data)
-    It expects graph.x to be node features (num_nodes, in_dim).
-    If graph.pos exists, it will be used as 'pos' (num_nodes, 3). Otherwise zeros are used.
+    graph.x: node features (num_nodes, in_dim).
+    If graph.pos exists, it will be used as 'pos' (num_nodes, 3).
     If graph.u or graph.condition exists, it will be used as the 'condition' (global vector).
     """
 
@@ -278,7 +278,9 @@ class TransolverProcessor(nn.Module):
         """
         # Transolver expects B dimension:
         x_batched = graph.x.unsqueeze(0)  # (1, N, C)
-        pos_batched = graph.pos.unsqueeze(0) if graph.pos is not None else None  # (1, N, 3)
+        pos_batched = (
+            graph.pos.unsqueeze(0) if graph.pos is not None else None
+        )  # (1, N, 3)
         condition = None  # Condition / global features (optional)
 
         out = self.model.forward(x_batched, pos_batched, condition)
