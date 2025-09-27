@@ -212,7 +212,8 @@ class Simulator(nn.Module):
             inputs=inputs, is_training=self.training
         )
         if self.model_type == "bsms":
-            network_output = self.model(graph, mesh_id=inputs.id[0])
+            mesh_id = inputs.id[0] if isinstance(inputs.id, list) else inputs.id
+            network_output = self.model(graph, mesh_id=mesh_id)
         else:
             network_output = self.model(graph)
 
