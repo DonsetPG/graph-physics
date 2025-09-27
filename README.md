@@ -411,6 +411,8 @@ Examples can be found [here](https://github.com/DonsetPG/graph-physics/tree/main
 
 ### Pooling
 
+Implementation of Multigrid method described in [Multi-grid graph neural networks with self-attention for computational mechanics](https://pubs.aip.org/aip/pof/article-abstract/37/8/087140/3358185/Multi-grid-graph-neural-networks-with-self?redirectedFrom=fulltext) (Physics of Fluids, 2025).
+
 Simply add the following two attributes in the processor class:
 ```python
 self.down_sampler = DownSampler(64,128)
