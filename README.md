@@ -409,6 +409,61 @@ You will need to define:
 
 Examples can be found [here](https://github.com/DonsetPG/graph-physics/tree/main/dataset_config).
 
+### Pooling
+
+Implementation of Multigrid method described in [Multi-grid graph neural networks with self-attention for computational mechanics](https://pubs.aip.org/aip/pof/article-abstract/37/8/087140/3358185/Multi-grid-graph-neural-networks-with-self?redirectedFrom=fulltext) (Physics of Fluids, 2025).
+
+Simply add the following two attributes in the processor class:
+```python
+self.down_sampler = DownSampler(64,128)
+self.up_sampler = UpSampler(128,64)
+```
+if for example you use a model embedding size of 64, and you reduce the amount of processed nodes by 50%.
+
+In the processor forward method, you can then coarsen the mesh using:
+```python
+coarse_graph = self.down_sampler(
+     x=x,
+     pos=graph.pos,
+     batch=graph.batch,
+     edge_index=edge_index,
+)
+
+edge_index_c = coarse_graph.edge_index
+x_c = coarse_graph.x
+adj_c = dglsp.spmatrix(indices=edge_index_c, shape=(x_c.shape[0], x_c.shape[0]))
+pos_c = coarse_graph.pos
+```
+and after processing it, you can interpolate it back to the original mesh using:
+```python
+x = x + self.up_sampler(
+      x_coarse=x_c,
+      pos_coarse=coarse_graph.pos,
+      pos_fine=graph.pos,
+      batch_coarse=coarse_graph.batch,
+      batch_fine=graph.batch,
+)
+```
+
+
+### TransolverPlusPlus
+
+The possibility exists to test another Transformer-based model from literature: [TransolverPlusPlus](https://github.com/thuml/Transolver_plus/tree/main) (Retrieved on September 17, 2025). Default arguments have been set to match the ones of our Transformer-based GNN model and allow simple comparisons.
+
+
+`transolver` is available as `type` of `model` and can be used in the same way as the other two models:
+```json
+"model": {
+    "type": "transolver",
+    "message_passing_num": 5,
+    "hidden_size": 32,
+    "node_input_size": 2,
+    "output_size": 2,
+    "edge_input_size": 0,
+    "num_heads": 4
+}
+```
+
 # Citations
 
 If you use this repo, please use the following bibtex:
