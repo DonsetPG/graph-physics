@@ -67,7 +67,7 @@ class RMSNorm(nn.Module):
             norm_x = partial_x.norm(2, dim=-1, keepdim=True)
             d_x = partial_size
 
-        rms_x = norm_x * d_x ** (-0.5)
+        rms_x = norm_x / math.sqrt(d_x)
         x_normed = x / (rms_x + self.eps)
 
         if self.bias:
