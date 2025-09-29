@@ -12,6 +12,7 @@ from graphphysics.models.layers import (
     scaled_dot_product_attention,
     Attention,
     Transformer,
+    TemporalAttention,
     GraphNetBlock,
 )
 
@@ -207,6 +208,74 @@ class TestGraphNetBlock(unittest.TestCase):
         # Check that outputs are computed
         self.assertEqual(x_updated.shape, self.x.shape)
         self.assertEqual(edge_attr_updated.shape, self.edge_attr.shape)
+
+
+class TestTemporalAttention(unittest.TestCase):
+    def _zero_linear(self, layer: torch.nn.Linear):
+        layer.weight.data.zero_()
+        if layer.bias is not None:
+            layer.bias.data.zero_()
+
+    def _set_linear_identity(self, layer: torch.nn.Linear):
+        eye = torch.eye(
+            layer.out_features,
+            layer.in_features,
+            dtype=layer.weight.dtype,
+            device=layer.weight.device,
+        )
+        layer.weight.data.copy_(eye)
+        if layer.bias is not None:
+            layer.bias.data.zero_()
+
+    def _zero_sequential_linears(self, seq: torch.nn.Sequential):
+        for module in seq:
+            if isinstance(module, torch.nn.Linear):
+                self._zero_linear(module)
+
+    def test_zero_attention_weights_preserve_previous_state(self):
+        attn = TemporalAttention(hidden_size=4, num_heads=2, use_gate=False)
+        attn.eval()
+
+        for proj in (attn.q_proj, attn.k_proj, attn.v_proj, attn.out_proj):
+            self._zero_linear(proj)
+        self._zero_sequential_linears(attn.mixer)
+
+        h_prev = torch.randn(3, 4)
+        h_pred = torch.randn(3, 4)
+
+        out = attn(h_prev, h_pred, None)
+
+        self.assertTrue(torch.allclose(out, h_prev, atol=1e-6))
+
+    def test_gate_scales_attention_correction(self):
+        hidden_size = 2
+        num_heads = 1
+
+        base = TemporalAttention(hidden_size=hidden_size, num_heads=num_heads, use_gate=False)
+        gated = TemporalAttention(hidden_size=hidden_size, num_heads=num_heads, use_gate=True)
+
+        base.eval()
+        gated.eval()
+
+        for module in (base, gated):
+            for proj in (module.q_proj, module.k_proj, module.v_proj, module.out_proj):
+                self._set_linear_identity(proj)
+            self._zero_sequential_linears(module.mixer)
+
+        # Force the gate to output 0.5 everywhere by zeroing the linear layers
+        for module in gated.gate:
+            if isinstance(module, torch.nn.Linear):
+                self._zero_linear(module)
+
+        h_prev = torch.tensor([[1.0, -1.0]])
+        h_pred = torch.tensor([[0.5, 0.1]])
+
+        base_out = base(h_prev, h_pred, None)
+        gated_out = gated(h_prev, h_pred, None)
+
+        expected = h_prev + 0.5 * (base_out - h_prev)
+
+        self.assertTrue(torch.allclose(gated_out, expected, atol=1e-6))
 
 
 if __name__ == "__main__":
