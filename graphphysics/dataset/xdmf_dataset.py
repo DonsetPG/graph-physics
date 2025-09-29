@@ -187,6 +187,22 @@ class XDMFDataset(BaseDataset):
 
             graph.target_dt = target_delta * self.dt
 
+            if self.use_previous_data:
+                prev_frame = trajectory["point_data"][frame - previous_delta]
+                previous = {
+                    k: np.array(prev_frame[k]).astype(self.meta["features"][k]["dtype"])
+                    for k in self.meta["features"]
+                    if k in prev_frame.keys()
+                    and self.meta["features"][k]["type"] == "dynamic"
+                }
+
+                for k, v in previous.items():
+                    if v.ndim == 1:
+                        previous[k] = v.reshape(-1, 1)
+
+                graph.previous_data = previous
+                graph.previous_dt = -previous_delta * self.dt
+
             graph = self._apply_preprocessing(graph)
             graph = self._apply_k_hop(graph, traj_index)
             graph = self._may_remove_edges_attr(graph)
@@ -249,22 +265,6 @@ class XDMFDataset(BaseDataset):
             trajectory=trajectory,
             mesh_id=mesh_id,
         )
-
-        if self.use_previous_data:
-            prev_frame = trajectory["point_data"][frame - _previous_data_index]
-            previous = {
-                k: np.array(prev_frame[k]).astype(self.meta["features"][k]["dtype"])
-                for k in self.meta["features"]
-                if k in prev_frame.keys()
-                and self.meta["features"][k]["type"] == "dynamic"
-            }
-
-            for k, v in previous.items():
-                if v.ndim == 1:
-                    previous[k] = v.reshape(-1, 1)
-
-            graph.previous_data = previous
-            graph.previous_dt = -_previous_data_index * self.dt
 
         graph.traj_index = traj_index
 
