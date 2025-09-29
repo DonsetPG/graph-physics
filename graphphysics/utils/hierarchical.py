@@ -8,6 +8,20 @@ from torch_geometric.data import Data
 from graphphysics.utils.torch_graph import meshdata_to_graph
 
 
+def read_h5_metadata(
+    dataset_path: str, meta_path: str
+) -> Tuple[List[str], int, Dict[str, Any]]:
+    """Reads trajectory indices and metadata without keeping the file open."""
+
+    with h5py.File(dataset_path, "r") as file_handle:
+        datasets_index = list(file_handle.keys())
+
+    with open(meta_path, "r") as fp:
+        meta = json.load(fp)
+
+    return datasets_index, len(datasets_index), meta
+
+
 def get_h5_dataset(
     dataset_path: str, meta_path: str
 ) -> Tuple[h5py.File, List[str], int, Dict[str, Any]]:

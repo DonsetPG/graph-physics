@@ -3,6 +3,7 @@ import os
 import warnings
 
 import torch
+import wandb
 from absl import app, flags
 from lightning.pytorch import Trainer, seed_everything
 from lightning.pytorch.callbacks import LearningRateMonitor, ModelCheckpoint
@@ -10,7 +11,6 @@ from lightning.pytorch.loggers import WandbLogger
 from loguru import logger
 from torch_geometric.loader import DataLoader
 
-import wandb
 from graphphysics.external.aneurysm import build_features
 from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
@@ -136,6 +136,7 @@ def main(argv):
         "batch_size": batch_size,
         "num_workers": num_workers,
         "exclude_keys": ["tetra"],
+        "pin_memory": device.type == "cuda",
     }
 
     valid_dataloader_kwargs = {
@@ -143,6 +144,7 @@ def main(argv):
         "shuffle": False,
         "batch_size": 1,
         "num_workers": num_workers,
+        "pin_memory": device.type == "cuda",
     }
 
     # Update arguments if num_workers > 0

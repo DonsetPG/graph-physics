@@ -229,7 +229,7 @@ def get_num_workers(param: Dict[str, Any], default_num_workers: int) -> int:
     dataset_params = param.get("dataset", {})
     extension = dataset_params.get("extension", "")
     if extension == "h5":
-        return 0
+        return default_num_workers
     elif extension == "xdmf":
         return default_num_workers
     else:

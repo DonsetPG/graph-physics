@@ -1,6 +1,7 @@
 import os
 import random
-from typing import Callable, List, Optional, Tuple, Union
+from collections import OrderedDict
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import meshio
 import numpy as np
@@ -26,6 +27,7 @@ class XDMFDataset(BaseDataset):
         switch_to_val: bool = False,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
+        cache_size: int = 8,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -53,6 +55,7 @@ class XDMFDataset(BaseDataset):
 
         self.xdmf_folder = xdmf_folder
         self.meta_path = meta_path
+        self.cache_size = cache_size
 
         # Get list of XDMF files in the folder
         self.file_paths: List[str] = [
@@ -61,11 +64,146 @@ class XDMFDataset(BaseDataset):
             if os.path.isfile(os.path.join(xdmf_folder, f)) and f.endswith(".xdmf")
         ]
         self._size_dataset: int = len(self.file_paths)
+        self._trajectory_cache: OrderedDict[str, Dict[str, np.ndarray]] = OrderedDict()
+        self._frame_cache: OrderedDict[
+            tuple[str, int, int, int], Tuple[Data, Optional[torch.Tensor]]
+        ] = OrderedDict()
 
     @property
     def size_dataset(self) -> int:
         """Returns the number of trajectories in the dataset."""
         return self._size_dataset
+
+    def _load_trajectory(self, traj_index: int) -> Dict[str, np.ndarray]:
+        path = self.file_paths[traj_index]
+        cached = self._trajectory_cache.get(path)
+        if cached is not None:
+            self._trajectory_cache.move_to_end(path)
+            return cached
+
+        with meshio.xdmf.TimeSeriesReader(path) as reader:
+            points, cells = reader.read_points_cells()
+            point_data = []
+            times = []
+            for step in range(reader.num_steps):
+                time, frame_point_data, _ = reader.read_data(step)
+                times.append(time)
+                frame_dict = {
+                    k: np.array(frame_point_data[k]) for k in frame_point_data.keys()
+                }
+                point_data.append(frame_dict)
+
+        trajectory = {
+            "points": points.astype(np.float32),
+            "cells": cells,
+            "point_data": point_data,
+            "num_steps": len(point_data),
+            "times": times,
+        }
+
+        self._trajectory_cache[path] = trajectory
+        if len(self._trajectory_cache) > self.cache_size:
+            self._trajectory_cache.popitem(last=False)
+
+        return trajectory
+
+    def _cache_graph(
+        self,
+        cache_key: tuple[str, int, int, int],
+        graph: Data,
+        selected_indices: Optional[torch.Tensor],
+    ) -> None:
+        self._frame_cache[cache_key] = (graph, selected_indices)
+        self._frame_cache.move_to_end(cache_key)
+        if len(self._frame_cache) > self.cache_size * 2:
+            self._frame_cache.popitem(last=False)
+        return None
+
+    def _get_processed_graph(
+        self,
+        traj_index: int,
+        frame: int,
+        target_delta: int,
+        previous_delta: int,
+        trajectory: Dict[str, np.ndarray],
+        mesh_id: str,
+    ) -> Tuple[Data, Optional[torch.Tensor]]:
+        xdmf_file = self.file_paths[traj_index]
+        cache_key = (xdmf_file, frame, target_delta, previous_delta)
+
+        cached = self._frame_cache.get(cache_key)
+        if cached is not None:
+            self._frame_cache.move_to_end(cache_key)
+            graph, selected_indices = cached
+        else:
+            mesh = meshio.Mesh(
+                trajectory["points"],
+                trajectory["cells"],
+                point_data=trajectory["point_data"][frame],
+            )
+
+            if "triangle" in mesh.cells_dict:
+                cells = mesh.cells_dict["triangle"]
+            elif "tetra" in mesh.cells_dict:
+                cells = torch.tensor(mesh.cells_dict["tetra"], dtype=torch.long)
+            else:
+                raise ValueError(
+                    "Unsupported cell type. Only 'triangle' and 'tetra' cells are supported."
+                )
+
+            point_data = {
+                k: np.array(mesh.point_data[k]).astype(
+                    self.meta["features"][k]["dtype"]
+                )
+                for k in self.meta["features"]
+                if k in mesh.point_data.keys()
+            }
+
+            target_frame = trajectory["point_data"][frame + target_delta]
+            target_data = {
+                k: np.array(target_frame[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in target_frame.keys()
+                and self.meta["features"][k]["type"] == "dynamic"
+            }
+
+            def _reshape_array(a: dict):
+                for k, v in a.items():
+                    if v.ndim == 1:
+                        a[k] = v.reshape(-1, 1)
+
+            _reshape_array(point_data)
+            _reshape_array(target_data)
+
+            points = trajectory["points"]
+            graph = meshdata_to_graph(
+                points=points.astype(np.float32),
+                cells=cells,
+                point_data=point_data,
+                time=trajectory["times"][frame],
+                target=target_data,
+                id=mesh_id,
+            )
+
+            graph.target_dt = target_delta * self.dt
+
+            graph = self._apply_preprocessing(graph)
+            graph = self._apply_k_hop(graph, traj_index)
+            graph = self._may_remove_edges_attr(graph)
+            graph = self._add_random_edges(graph)
+            selected_indices = self._get_masked_indexes(graph)
+
+            graph.edge_index = (
+                graph.edge_index.long() if graph.edge_index is not None else None
+            )
+
+            self._cache_graph(cache_key, graph, selected_indices)
+
+        graph_out = graph.clone()
+        selected_out = (
+            selected_indices.clone() if selected_indices is not None else None
+        )
+        return graph_out, selected_out
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.
@@ -90,98 +228,44 @@ class XDMFDataset(BaseDataset):
         _target_data_index = random.randint(1, self.random_next)
         _previous_data_index = random.randint(1, self.random_prev)
 
-        # Read XDMF file
-        with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
-            num_steps = reader.num_steps
+        trajectory = self._load_trajectory(traj_index)
+        num_steps = trajectory["num_steps"]
 
-            if frame - _previous_data_index < 0:
-                _previous_data_index = 1
-            if frame + _target_data_index > num_steps - 1:
-                _target_data_index = 1
+        if frame - _previous_data_index < 0:
+            _previous_data_index = 1
+        if frame + _target_data_index > num_steps - 1:
+            _target_data_index = 1
 
-            if frame >= num_steps - 1:
-                raise IndexError(
-                    f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
-                )
-
-            points, cells = reader.read_points_cells()
-            time, point_data, _ = reader.read_data(frame)
-            _, target_point_data, _ = reader.read_data(frame + _target_data_index)
-
-            if self.use_previous_data:
-                _, previous_data, _ = reader.read_data(frame - _previous_data_index)
-
-        # Prepare the mesh data
-        mesh = meshio.Mesh(points, cells, point_data=point_data)
-
-        # Get faces or cells
-        if "triangle" in mesh.cells_dict:
-            cells = mesh.cells_dict["triangle"]
-        elif "tetra" in mesh.cells_dict:
-            cells = torch.tensor(mesh.cells_dict["tetra"], dtype=torch.long)
-        else:
-            raise ValueError(
-                "Unsupported cell type. Only 'triangle' and 'tetra' cells are supported."
+        if frame >= num_steps - 1:
+            raise IndexError(
+                f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
             )
 
-        # Process point data and target data
-        point_data = {
-            k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in mesh.point_data.keys()
-        }
-
-        target_data = {
-            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
-        }
-
-        def _reshape_array(a: dict):
-            for k, v in a.items():
-                if v.ndim == 1:
-                    a[k] = v.reshape(-1, 1)
-
-        _reshape_array(point_data)
-        _reshape_array(target_data)
-
-        # Create graph from mesh data
-        graph = meshdata_to_graph(
-            points=points.astype(np.float32),
-            cells=cells,
-            point_data=point_data,
-            time=time,
-            target=target_data,
-            id=mesh_id,
+        graph, selected_indices = self._get_processed_graph(
+            traj_index=traj_index,
+            frame=frame,
+            target_delta=_target_data_index,
+            previous_delta=_previous_data_index,
+            trajectory=trajectory,
+            mesh_id=mesh_id,
         )
-        # TODO: add target_dt and previous_dt as features per node.
-        graph.target_dt = _target_data_index * self.dt
 
         if self.use_previous_data:
+            prev_frame = trajectory["point_data"][frame - _previous_data_index]
             previous = {
-                k: np.array(previous_data[k]).astype(self.meta["features"][k]["dtype"])
+                k: np.array(prev_frame[k]).astype(self.meta["features"][k]["dtype"])
                 for k in self.meta["features"]
-                if k in previous_data.keys()
+                if k in prev_frame.keys()
                 and self.meta["features"][k]["type"] == "dynamic"
             }
-            _reshape_array(previous)
+
+            for k, v in previous.items():
+                if v.ndim == 1:
+                    previous[k] = v.reshape(-1, 1)
+
             graph.previous_data = previous
             graph.previous_dt = -_previous_data_index * self.dt
 
-        graph = graph.to(self.device)
-
-        graph = self._apply_preprocessing(graph)
-        graph = self._apply_k_hop(graph, traj_index)
-        graph = self._may_remove_edges_attr(graph)
-        graph = self._add_random_edges(graph)
-        selected_indices = self._get_masked_indexes(graph)
-
-        graph.edge_index = (
-            graph.edge_index.long() if graph.edge_index is not None else None
-        )
-
-        del graph.previous_data
         graph.traj_index = traj_index
 
         if selected_indices is not None:

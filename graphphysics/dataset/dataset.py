@@ -30,7 +30,8 @@ class BaseDataset(Dataset, ABC):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
 
-        self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+        # Dataset preprocessing stays on CPU to let DataLoader handle device transfers lazily.
+        self.device = torch.device("cpu")
 
         self.meta: Dict[str, Any] = meta
 
