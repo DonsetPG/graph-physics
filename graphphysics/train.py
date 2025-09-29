@@ -242,6 +242,7 @@ def main(argv):
             lr_monitor,
         ],
         log_every_n_steps=100,
+        gradient_clip_val=1.0,
     )
 
     # Resuming training from a checkpoint
