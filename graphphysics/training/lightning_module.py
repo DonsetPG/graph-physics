@@ -5,16 +5,18 @@ from typing import List
 import lightning as L
 import meshio
 import torch
+import torch.nn as nn
 from loguru import logger
 from torch_geometric.data import Batch
 
+from graphphysics.models.spatial_mtp_1hop import SpatialMTP1Hop
 from graphphysics.training.parse_parameters import (
     get_gradient_method,
     get_loss,
     get_model,
     get_simulator,
 )
-from graphphysics.utils.loss import L2Loss, MultiLoss
+from graphphysics.utils.loss import CosineLoss, L2Loss, MultiLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
@@ -74,7 +76,12 @@ class LightningModule(L.LightningModule):
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
 
+        if device != "cpu":
+            self.model = torch.compile(self.model, dynamic=True)
+
         self.loss, self.loss_name = get_loss(param=parameters)
+        self.cosine_loss = CosineLoss()
+
         logger.info(f"Using loss {self.loss_name}")
         self.is_multiloss = False
         if isinstance(self.loss, MultiLoss):
@@ -113,6 +120,54 @@ class LightningModule(L.LightningModule):
         self.prediction_trajectory: list[Batch] = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
+
+        self.use_spatial_mtp: bool = True  # turn on/off
+        self.spatial_mtp_alpha: float = 0.20  # weight for the aux loss
+        self.spatial_mtp_centers_per_step: int = (
+            256  # how many centers to sample per batch step
+        )
+
+        out_head = getattr(processor, "decode_module", None)
+        assert (
+            out_head is not None
+        ), "Could not find output head (expected self.decode_module or self.model.decode_module)."
+        self.output_head = out_head
+
+        node_encoder = getattr(processor, "nodes_encoder", None)
+        assert (
+            node_encoder is not None
+        ), "Could not find node_encoder (expected self.node_encoder or self.model.node_encoder)."
+        self.node_encoder = node_encoder
+
+        assert isinstance(
+            out_head.linear_post[0], nn.Linear
+        ), "Expected a linear output head for shape inference."
+        d_model = out_head.linear_post[0].in_features
+        self.spatial_mtp = SpatialMTP1Hop(
+            d_model=d_model,
+            num_heads=4,
+            num_layers=1,
+        )
+
+        if device != "cpu":
+            self.spatial_mtp = torch.compile(self.spatial_mtp, dynamic=True)
+
+        # 3) Register a pre-hook on the head to capture its input activations (last hidden H)
+        self._penultimate_hidden = None
+
+        def _capture_head_input(module, inputs):
+            # inputs is a tuple; we want the tensor going into the head
+            self._penultimate_hidden = inputs[0]  # [N, d_model]
+
+        self._head_hook = out_head.register_forward_pre_hook(_capture_head_input)
+
+        self._H_nodeenc = None
+
+        def _capture_nodeenc_output(module, inputs, outputs):
+            # outputs is typically the [N, d_neigh] embeddings from node_encoder
+            self._H_nodeenc = outputs
+
+        self._nodeenc_hook = node_encoder.register_forward_hook(_capture_nodeenc_output)
 
     def forward(self, graph: Batch):
         return self.model(graph)
@@ -164,6 +219,62 @@ class LightningModule(L.LightningModule):
                 on_epoch=True,
                 prog_bar=True,
             )
+
+        cosine_loss = self.cosine_loss(
+            graph=batch,
+            target=target_delta_normalized,
+            network_output=network_output,
+            node_type=node_type,
+            masks=self.loss_masks,
+            gradient_method=self.gradient_method,
+        )
+        self.log(
+            f"train_cosineloss",
+            cosine_loss,
+            on_step=True,
+            on_epoch=True,
+            prog_bar=True,
+        )
+
+        loss += cosine_loss
+
+        if self.use_spatial_mtp:
+            H = self._penultimate_hidden  # captured last hidden [N, d_model]
+            H_neigh = self._H_nodeenc
+            edge_index = getattr(batch, "edge_index", None)
+            target = target_delta_normalized
+
+            if (H is not None) and (edge_index is not None) and (target is not None):
+                N = H.size(0)
+                # Sample centers uniformly across nodes (handles variable degree naturally)
+                B = min(N, self.spatial_mtp_centers_per_step)
+                # If you batch multiple graphs, this still works on the concatenated graph
+                centers = torch.randperm(N, device=H.device)[:B]
+
+                aux_loss, _ = self.spatial_mtp(
+                    H=H,  # [N, d_model], from the hook
+                    edge_index=edge_index,  # [2, M] LongTensor
+                    centers=centers,  # [B] LongTensor
+                    out_head=(
+                        self.output_head
+                        if hasattr(self, "output_head")
+                        else self.model.output_head
+                    ),
+                    target=target,  # [N, y_dim]
+                    H_neigh=H_neigh,
+                )
+                loss = loss + self.spatial_mtp_alpha * aux_loss
+
+                self.log_dict(
+                    {
+                        "sp_mtp/aux_loss": aux_loss.detach(),
+                    },
+                    on_step=True,
+                    on_epoch=True,
+                    prog_bar=False,
+                    logger=True,
+                )
+
         return loss
 
     def _save_trajectory_to_xdmf(
@@ -292,6 +403,7 @@ class LightningModule(L.LightningModule):
         self.trajectory_to_save.clear()
         self.step_counter = 0
         self.first_step_losses = []
+        torch.cuda.empty_cache()
 
     def on_validation_epoch_end(self):
         # Concatenate outputs and targets

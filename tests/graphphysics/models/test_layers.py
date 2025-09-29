@@ -99,46 +99,49 @@ class TestTransformerComponents(unittest.TestCase):
     def test_attention(self):
         input_dim = 16
         output_dim = 16
-        num_heads = 4
+        num_heads = 2
         attention = Attention(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
+        pos = torch.randn(5, 3)
         if HAS_DGL_SPARSE:
             adj = dglsp.from_coo(
                 torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
             )
-            output = attention(x, adj)
+            output = attention(x, pos, adj)
         else:
-            output = attention(x, None)
+            output = attention(x, pos, None)
         self.assertEqual(output.shape, (5, output_dim))
 
     def test_transformer(self):
         input_dim = 16
         output_dim = 16
-        num_heads = 4
+        num_heads = 2
         transformer = Transformer(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
+        pos = torch.randn(5, 3)
         if HAS_DGL_SPARSE:
             adj = dglsp.from_coo(
                 torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
             )
-            output = transformer(x, adj)
+            output = transformer(x, pos, adj)
         else:
-            output = transformer(x, None)
+            output = transformer(x, pos, None)
         self.assertEqual(output.shape, (5, output_dim))
 
     def test_transformer_with_attention_output(self):
         input_dim = 16
         output_dim = 16
-        num_heads = 4
+        num_heads = 2
         transformer = Transformer(input_dim, output_dim, num_heads)
         x = torch.randn(5, input_dim)
+        pos = torch.randn(5, 3)
         if HAS_DGL_SPARSE:
             adj = dglsp.from_coo(
                 torch.tensor([0, 1, 2, 3]), torch.tensor([1, 2, 3, 4]), shape=(5, 5)
             )
-            output, attn = transformer(x, adj, return_attention=True)
+            output, attn = transformer(x, pos, adj, return_attention=True)
         else:
-            output, attn = transformer(x, None, return_attention=True)
+            output, attn = transformer(x, pos, None, return_attention=True)
         self.assertEqual(output.shape, (5, output_dim))
         self.assertIsNotNone(attn)
 

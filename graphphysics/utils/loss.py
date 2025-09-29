@@ -1,6 +1,7 @@
 import enum
 
 import torch
+import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.modules.loss import _Loss
 from torch_geometric.data import Data
@@ -31,6 +32,48 @@ def _prepare_mask_for_loss(
         mask = torch.logical_and(nodes_mask, mask)
 
     return mask
+
+
+class CosineLoss(_Loss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cos = nn.CosineEmbeddingLoss(reduction="none")
+
+    @property
+    def __name__(self):
+        return "Cosine"
+
+    def forward(
+        self,
+        target: torch.Tensor,
+        network_output: torch.Tensor,
+        node_type: torch.Tensor,
+        masks: list[NodeType],
+        selected_indexes: torch.Tensor = None,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Computes a cosine loss for nodes of specific types.
+        Args:
+            target (torch.Tensor): The target values.
+            network_output (torch.Tensor): The predicted values from the network.
+            node_type (torch.Tensor): Tensor containing the type of each node.
+            masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
+            selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
+        Returns:
+            torch.Tensor: The mean squared error for the specified node types.
+        Note:
+            This method calculates the cosine loss only for nodes of the types specified in 'masks'.
+            If 'selected_indexes' is provided, those nodes are excluded from the loss calculation.
+        """
+        mask = _prepare_mask_for_loss(
+            network_output, node_type, masks, selected_indexes
+        )
+
+        errors = self.cos(
+            network_output, target, torch.ones(target.shape[0]).to(mask.device)
+        )[mask]
+        return torch.mean(errors)
 
 
 class L2Loss(_Loss):

@@ -4,12 +4,13 @@ from loguru import logger
 from torch_geometric.data import Data
 from torch_geometric.nn import TransformerConv
 
+import graphphysics.models.transolver as Transolver
 from graphphysics.models.layers import (
     GraphNetBlock,
+    TemporalAttention,
     Transformer,
     build_mlp,
 )
-import graphphysics.models.transolver as Transolver
 
 try:
     import dgl.sparse as dglsp
@@ -128,6 +129,7 @@ class EncodeTransformDecode(nn.Module):
         output_size: int,
         hidden_size: int = 128,
         num_heads: int = 4,
+        pos_dimension: int = 3,
         only_processor: bool = False,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
@@ -151,6 +153,7 @@ class EncodeTransformDecode(nn.Module):
         self.hidden_size = hidden_size
         self.only_processor = only_processor
         self.d = output_size
+        self.pos_dimension = pos_dimension
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -174,6 +177,7 @@ class EncodeTransformDecode(nn.Module):
                         output_dim=hidden_size,
                         num_heads=num_heads,
                         use_proj_bias=use_proj_bias,
+                        pos_dimension=self.pos_dimension,
                         use_separate_proj_weight=use_separate_proj_weight,
                     )
                     for _ in range(message_passing_num)
@@ -194,6 +198,10 @@ class EncodeTransformDecode(nn.Module):
             )
         )
 
+        self.temporal_block = TemporalAttention(
+            hidden_size=hidden_size, num_heads=num_heads
+        )
+
     def forward(self, graph: Data) -> torch.Tensor:
         """
         Forward pass of the EncodeTransformDecode model.
@@ -205,19 +213,26 @@ class EncodeTransformDecode(nn.Module):
             torch.Tensor: Output node features after processing and decoding (if 'only_processor' is False).
         """
         edge_index = graph.edge_index
+        pos = graph.pos
 
         if self.only_processor:
             x = graph.x
         else:
             x = self.nodes_encoder(graph.x)
-
+        adj = None
         if HAS_DGL_SPARSE:
             adj = dglsp.spmatrix(indices=edge_index, shape=(x.shape[0], x.shape[0]))
             for block in self.processor_list:
-                x = block(x, adj)
+                prev_x = x
+                x_pred = block(prev_x, pos, adj)
+                x = x_pred
         else:
             for block in self.processor_list:
-                x = block(x, edge_index)
+                prev_x = x
+                x_pred = block(prev_x, edge_index)
+                x = x_pred
+
+        x = self.temporal_block(prev_x, x_pred, adj)
 
         if self.only_processor:
             return x

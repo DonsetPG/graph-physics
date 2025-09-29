@@ -14,6 +14,8 @@ except ImportError:
     dglsp = None
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
 
 class RMSNorm(nn.Module):
     """
@@ -77,6 +79,7 @@ class RMSNorm(nn.Module):
 ACTIVATION = {
     "relu": nn.ReLU,
     "gelu": nn.GELU,
+    "silu": nn.SiLU,
 }
 
 
@@ -88,7 +91,7 @@ class MLP(nn.Module):
         out_size: int,
         nb_of_layers: int = 4,
         layer_norm: bool = True,
-        act: str = "relu",
+        act: str = "silu",
         res: bool = False,
     ):
         super().__init__()
@@ -133,7 +136,7 @@ def build_mlp(
     out_size: int,
     nb_of_layers: int = 4,
     layer_norm: bool = True,
-    act: str = "relu",
+    act: str = "silu",
     res: bool = False,
 ) -> nn.Module:
     """
@@ -171,7 +174,7 @@ class GatedMLP(nn.Module):
         self.linear1 = nn.Linear(in_size, expansion_factor * hidden_size)
         self.linear2 = nn.Linear(in_size, expansion_factor * hidden_size)
 
-        self.activation = nn.GELU()
+        self.activation = nn.SiLU()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -347,6 +350,7 @@ class Normalizer(nn.Module):
         }
 
 
+@torch.compiler.disable
 def scaled_query_key_softmax(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -354,16 +358,14 @@ def scaled_query_key_softmax(
 ) -> torch.Tensor:
     """
     Computes the scaled query-key softmax for attention.
-
     Args:
         q (torch.Tensor): Query tensor of shape (N, d_k).
         k (torch.Tensor): Key tensor of shape (N, d_k).
         att_mask (Optional[SparseMatrix]): Optional attention mask.
-
     Returns:
         torch.Tensor: Attention scores.
     """
-    scaling_factor = k.size(-1) ** 0.5
+    scaling_factor = math.sqrt(k.size(1))
     q = q / scaling_factor
 
     if att_mask is not None and HAS_DGL_SPARSE:
@@ -376,6 +378,7 @@ def scaled_query_key_softmax(
     return attn
 
 
+@torch.compiler.disable
 def scaled_dot_product_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -385,7 +388,6 @@ def scaled_dot_product_attention(
 ) -> Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
     """
     Computes the scaled dot-product attention.
-
     Args:
         q (torch.Tensor): Query tensor of shape (N, d_k).
         k (torch.Tensor): Key tensor of shape (N, d_k).
@@ -393,7 +395,6 @@ def scaled_dot_product_attention(
         att_mask (Optional[SparseMatrix], optional): Optional attention mask.
         return_attention (bool, optional): Whether to return attention weights.
             Defaults to False.
-
     Returns:
         Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
             The output tensor, and optionally the attention weights.
@@ -412,6 +413,93 @@ def scaled_dot_product_attention(
         return y
 
 
+import math
+
+
+def _make_inv_freq(m: int, base: float, device):
+    # stored in float32 for more stable trig
+    step = math.log(base) / max(m, 1)
+    return torch.exp(-torch.arange(m, device=device, dtype=torch.float32) * step)
+
+
+@staticmethod
+def _apply_rope_3d_with_inv(
+    q: torch.Tensor, k: torch.Tensor, pos: torch.Tensor, inv: torch.Tensor
+):
+    """
+    Fast GPU version: vectorized across axes and heads, single sincos, cached inv_freq.
+    Shapes:
+        q, k : (N, D, H)
+        pos  : (N, 2 or 3)
+    """
+
+    N, D, H = q.shape
+    pos_dimension = pos.shape[1]
+    m = D // (pos_dimension * 2)
+
+    if m == 0:
+        return q, k
+
+    d_rope = pos_dimension * 2 * m  # number of dims rotated
+    q_dtype = q.dtype  # target dtype for outputs
+
+    # Build/cached inv_freq in f32 (better trig stability), shape (m,)
+    inv_freq_f32 = inv
+
+    # Angles for all axes at once: (N, 2 or 3, m)
+    pos_f32 = pos[:, :pos_dimension].to(torch.float32)  # (N, 2 or 3)
+    angles = pos_f32.unsqueeze(-1) * inv_freq_f32.view(1, 1, m)  # (N, 2 or 3, m)
+
+    # Fused sin/cos (1 kernel); cast once to q/k dtype
+    if hasattr(torch, "sincos"):
+        sin_f32, cos_f32 = torch.sincos(angles)  # (N, 3, m)
+    else:
+        cos_f32, sin_f32 = torch.cos(angles), torch.sin(angles)
+    sin = sin_f32.to(q_dtype)
+    cos = cos_f32.to(q_dtype)
+
+    def apply_one(x: torch.Tensor) -> torch.Tensor:
+        # Slice the RoPE part and reshape to group by axis & pairs:
+        # part: (N, d_rope, H) -> (N, 2 or 3, 2*m, H) -> (N, 2 or 3, m, 2, H)
+        part = (
+            x[:, :d_rope, :]
+            .contiguous()
+            .view(N, pos_dimension, 2 * m, H)
+            .view(N, pos_dimension, m, 2, H)
+        )
+        rest = x[:, d_rope:, :]
+
+        # Even/odd pairs along the "2" dimension
+        even = part[..., 0, :]  # (N, 2 or 3, m, H)
+        odd = part[..., 1, :]  # (N, 2 or 3, m, H)
+
+        # Broadcast sin/cos: (N, 2 or 3, m) -> (N, 2 or 3, m, H)
+        cos_b = cos.unsqueeze(-1)
+        sin_b = sin.unsqueeze(-1)
+
+        # Complex-like rotation (but without view_as_complex to avoid extra permutes):
+        rot_even = even * cos_b - odd * sin_b
+        rot_odd = even * sin_b + odd * cos_b
+
+        # Pack back and reshape to original layout
+        rot = (
+            torch.stack((rot_even, rot_odd), dim=3)
+            .reshape(N, 3, 2 * m, H)
+            .reshape(N, d_rope, H)
+        )
+
+        # Write into a fresh output to avoid in-place autograd issues
+        out = torch.empty_like(x)
+        out[:, :d_rope, :] = rot
+        if D > d_rope:
+            out[:, d_rope:, :] = rest
+        return out
+
+    q_out = apply_one(q)
+    k_out = apply_one(k)
+    return q_out, k_out
+
+
 class Attention(nn.Module):
 
     def __init__(
@@ -419,12 +507,12 @@ class Attention(nn.Module):
         input_dim=512,
         output_dim=512,
         num_heads=4,
+        pos_dimension: int = 3,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
     ):
         """
         Initializes the Attention module.
-
         Args:
             input_dim (int): Dimension of the input features.
             output_dim (int): Dimension of the output features.
@@ -444,10 +532,20 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = output_dim // num_heads
 
+        self.base = 10000.0
+        self.pos_dimension = pos_dimension
+        self.m = self.head_dim // (pos_dimension * 2)
+
+        if self.m > 0:
+            inv = _make_inv_freq(self.m, self.base, device)
+            self.register_buffer("rope_inv_freq", inv, persistent=True)
+
         self.q_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.k_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.v_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.proj = nn.Linear(output_dim, output_dim, bias=use_proj_bias)
+
+        self.gate_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
 
         if not use_separate_proj_weight:
             # Compute optimization used at times, share the parameters in between Q/K/V
@@ -455,21 +553,21 @@ class Attention(nn.Module):
                 self.k_proj.weight = self.q_proj.weight
                 self.v_proj.weight = self.q_proj.weight
 
+    @torch.compiler.disable
     def forward(
         self,
         x: torch.Tensor,
+        pos,
         adj,
         return_attention: bool = False,
     ):
         """
         Forward pass of the Attention module.
-
         Args:
             x (torch.Tensor): Input tensor of shape (N, input_dim).
             adj (Optional[SparseMatrix]): Optional adjacency matrix for sparse attention.
             return_attention (bool, optional): Whether to return attention weights.
                 Defaults to False.
-
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
                 The output tensor, and optionally the attention weights.
@@ -487,10 +585,22 @@ class Attention(nn.Module):
         k = k.reshape(N, self.head_dim, self.num_heads)
         v = v.reshape(N, self.head_dim, self.num_heads)
 
+        inv_freq = self.rope_inv_freq
+        if inv_freq.device != q.device:
+            inv_freq = inv_freq.to(q.device)
+
+        q, k = _apply_rope_3d_with_inv(q, k, pos, inv_freq)
+
         if return_attention:
             y, attn = scaled_dot_product_attention(q, k, v, adj, return_attention=True)
         else:
             y = scaled_dot_product_attention(q, k, v, adj)
+
+        gate = torch.sigmoid(self.gate_proj(x)).reshape(
+            N, self.head_dim, self.num_heads
+        )
+        gate = gate.to(dtype=y.dtype, device=y.device)
+        y = y * gate
 
         out = self.proj(y.reshape(N, -1))
 
@@ -503,7 +613,6 @@ class Attention(nn.Module):
 class Transformer(nn.Module):
     """
     A single transformer block for graph neural networks.
-
     This module implements a transformer block with optional sparse attention.
     """
 
@@ -512,13 +621,12 @@ class Transformer(nn.Module):
         input_dim: int,
         output_dim: int,
         num_heads: int,
-        activation_layer: torch.nn.Module = nn.ReLU,
+        pos_dimension: int = 3,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
     ):
         """
         Initializes the Transformer module.
-
         Args:
             input_dim (int): Dimension of the input features.
             output_dim (int): Dimension of the output features.
@@ -531,17 +639,18 @@ class Transformer(nn.Module):
                 for Q, K, V projections. If False, weights are shared. Defaults to True.
         """
         super().__init__()
+        self.pos_dimension = pos_dimension
 
         self.attention = Attention(
             input_dim=input_dim,
             output_dim=output_dim,
             num_heads=num_heads,
             use_proj_bias=use_proj_bias,
+            pos_dimension=pos_dimension,
             use_separate_proj_weight=use_separate_proj_weight,
         )
 
         # initialize mlp
-        self.activation = activation_layer()
         self.norm1, self.norm2 = RMSNorm(output_dim), RMSNorm(output_dim)
         self.gated_mlp = build_gated_mlp(
             in_size=output_dim, hidden_size=output_dim, out_size=output_dim
@@ -550,17 +659,15 @@ class Transformer(nn.Module):
         self.use_adjacency = HAS_DGL_SPARSE
 
     def forward(
-        self, x: torch.Tensor, adj, return_attention: bool = False
+        self, x: torch.Tensor, pos, adj, return_attention: bool = False
     ) -> torch.Tensor:
         """
         Forward pass of the Transformer block.
-
         Args:
             x (torch.Tensor): Input tensor of shape (N, input_dim).
             adj (Optional[SparseMatrix]): Optional adjacency matrix for sparse attention.
             return_attention (bool, optional): Whether to return attention weights.
                 Defaults to False.
-
         Returns:
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
                 The output tensor, and optionally the attention weights.
@@ -569,10 +676,10 @@ class Transformer(nn.Module):
             adj = None
 
         if return_attention:
-            x_, attn = self.attention(self.norm1(x), adj, return_attention)
+            x_, attn = self.attention(self.norm1(x), pos, adj, return_attention)
             x = x + x_
         else:
-            x = x + self.attention(self.norm1(x), adj, return_attention)
+            x = x + self.attention(self.norm1(x), pos, adj, return_attention)
 
         x = x + self.gated_mlp(self.norm2(x))
 
@@ -580,6 +687,74 @@ class Transformer(nn.Module):
             return x, attn
         else:
             return x
+
+
+class TemporalAttention(nn.Module):
+    """
+    Temporal corrector as sparse cross-attention.
+    Queries/Values: predicted state
+    Keys:           previous state
+    """
+
+    def __init__(self, hidden_size: int, num_heads: int = 4, use_gate: bool = True):
+        super().__init__()
+        assert (
+            hidden_size % num_heads == 0
+        ), "hidden_size must be divisible by num_heads"
+        self.h = hidden_size
+        self.H = num_heads
+        self.d = hidden_size // num_heads
+        self.use_gate = use_gate
+
+        # Per-node linear projections
+        self.q_proj = nn.Linear(self.h, self.h, bias=True)
+        self.k_proj = nn.Linear(self.h, self.h, bias=True)
+        self.v_proj = nn.Linear(self.h, self.h, bias=True)
+        self.out_proj = nn.Linear(self.h, self.h, bias=True)
+
+        if use_gate:
+            self.gate = nn.Sequential(
+                nn.Linear(2 * self.h, self.h),
+                nn.SiLU(),
+                nn.Linear(self.h, self.h),
+                nn.Sigmoid(),
+            )
+
+        self.mixer = nn.Sequential(
+            nn.Linear(2 * self.h, self.h),
+            nn.SiLU(),
+            nn.Linear(self.h, self.h),
+        )
+
+    def forward(
+        self,
+        h_prev: torch.Tensor,  # [N, H]
+        h_pred: torch.Tensor,  # [N, H]
+        adj: "SparseMatrix" = None,
+    ) -> torch.Tensor:
+
+        N = h_prev.size(0)
+
+        # Project and split heads
+        q = self.q_proj(h_pred)
+        k = self.k_proj(h_prev)
+        v = self.v_proj(h_pred)
+
+        q = q.reshape(N, self.d, self.H)
+        k = k.reshape(N, self.d, self.H)
+        v = v.reshape(N, self.d, self.H)
+
+        y = scaled_dot_product_attention(q, k, v, adj)
+
+        out = self.out_proj(y.reshape(N, self.h))
+
+        if self.use_gate:
+            g = self.gate(torch.cat([h_pred, h_prev], dim=-1))
+            out = g * out
+        h_corr = h_prev + out
+
+        fused = h_corr + self.mixer(torch.cat([h_corr, h_prev], dim=-1))
+        return fused
 
 
 class GraphNetBlock(MessagePassing):
