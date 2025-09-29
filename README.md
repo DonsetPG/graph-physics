@@ -409,6 +409,25 @@ You will need to define:
 
 Examples can be found [here](https://github.com/DonsetPG/graph-physics/tree/main/dataset_config).
 
+### Bi-stride Multi-Scale GNN
+
+The possibility exists to test another Message Passing-based model from literature: [Bi-stride Multi-Scale GNN](https://github.com/Eydcao/BSMS-GNN/tree/main) (Retrieved on September 17, 2025). Default arguments have been set to match the ones of our Transformer-based GNN model and allow simple comparisons.
+
+
+`bsms` is available as `type` of `model` and can be used in the same way as the other two models:
+```json
+"model": {
+    "type": "bsms",
+    "message_passing_num": 3,
+    "hidden_size": 16,
+    "node_input_size": 13,
+    "output_size": 3,
+    "edge_input_size": 0,
+    "hidden_layer": 2,
+    "pos_dim": 3
+}
+```
+
 # Citations
 
 If you use this repo, please use the following bibtex:
