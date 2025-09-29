@@ -1,3 +1,10 @@
+# --------------------------------------------------------------------------------------
+# DISCLAIMER:
+# This file is adapted from the TransolverPlusPlus GitHub repository:
+# https://github.com/Eydcao/BSMS-GNN/tree/main
+# Retrieved on September 17, 2025.
+# --------------------------------------------------------------------------------------
+
 from typing import Optional
 import torch
 import torch.nn as nn
@@ -19,9 +26,7 @@ def degree(
     try:
         N = torch.max(index) + 1
     except Exception as e:
-        raise ValueError(
-            f"message_passing_num (training_config file) is probably too high in comparison to the number of points in the meshes of the dataset. Try reducing message_passing_num. {e}"
-        )
+        raise ValueError(f"Try reducing message_passing_num. {e}")
     N = int(N)
     out = torch.zeros((N,), dtype=dtype, device=index.device)
     one = torch.ones((index.size(0),), dtype=out.dtype, device=out.device)

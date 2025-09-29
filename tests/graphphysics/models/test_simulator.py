@@ -41,6 +41,7 @@ class TestSimulator(unittest.TestCase):
             output_index_end=self.output_index_end,
             node_type_index=self.node_type_index,
             model=self.mock_model,
+            model_type="mock",
             device=self.device,
             model_dir="checkpoint/simulator.pth",
         )

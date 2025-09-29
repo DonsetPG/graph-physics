@@ -237,7 +237,6 @@ class BSMSProcessor(torch.nn.Module):
         hidden_size: int = 64,
         hidden_layer: int = 2,
         pos_dim: int = 3,
-        device: torch.device = None,
         data_dir: str = "",
     ):
         super(BSMSProcessor, self).__init__()
@@ -245,9 +244,6 @@ class BSMSProcessor(torch.nn.Module):
         self.process = BSGMP(message_passing_num, hidden_size, hidden_layer, pos_dim)
         self.decode = MLP(hidden_size, hidden_size, output_size, hidden_layer, False)
         self.pos_dim = pos_dim
-        if device is None:
-            self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-
         self.message_passing_num = message_passing_num
         self.data_dir = data_dir
         self.mm_layer_dir = os.path.join(
@@ -259,13 +255,11 @@ class BSMSProcessor(torch.nn.Module):
             m_gs, m_ids = load_multi_mesh(
                 mm_layer_dir=self.mm_layer_dir,
                 mesh_id=mesh_id,
-                device=self.device,
+                device=graph.x.device,
             )
         else:
             raise ValueError("mesh_id must be provided.")
-        x = graph.x.to(self.device)
-        pos = graph.pos.to(self.device)
-        x = self.encode(x)
-        x = self.process(x, m_ids, m_gs, pos)
+        x = self.encode(graph.x)
+        x = self.process(x, m_ids, m_gs, graph.pos)
         x = self.decode(x)
         return x

@@ -30,11 +30,9 @@ def sparse_square(adj_mat):
         adj_mat = adj_mat.tocoo()
 
         # Convert SciPy COO -> PyTorch sparse tensor
-        indices = torch.tensor(
-            np.vstack((adj_mat.row, adj_mat.col)), dtype=torch.long, device="cuda"
-        )
-        values = torch.tensor(adj_mat.data, dtype=torch.float32, device="cuda")
-        A = torch.sparse_coo_tensor(indices, values, adj_mat.shape, device="cuda")
+        indices = torch.tensor(np.vstack((adj_mat.row, adj_mat.col)), dtype=torch.long)
+        values = torch.tensor(adj_mat.data, dtype=torch.float32)
+        A = torch.sparse_coo_tensor(indices, values, adj_mat.shape)
 
         # Sparse × Sparse multiply (GPU)
         C = torch.sparse.mm(A, A)
