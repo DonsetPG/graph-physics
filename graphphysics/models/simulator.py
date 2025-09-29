@@ -143,28 +143,6 @@ class Simulator(nn.Module):
 
         return node_features
 
-    def _build_input_x(self, inputs, is_training: bool) -> Tuple[Data, torch.Tensor]:
-        """
-        Builds the input graph for the model by normalizing features and target delta.
-
-        Args:
-            inputs (Data): Input graph data.
-            is_training (bool): Whether the model is in training mode.
-
-        Returns:
-            Tuple[Data, torch.Tensor]: A tuple containing the processed input graph and normalized target delta.
-        """
-        node_type = inputs[:, self.node_type_index]
-        one_hot_type = torch.nn.functional.one_hot(
-            torch.squeeze(node_type.long()), NodeType.SIZE
-        )
-        features = inputs[:, self.feature_index_start : self.feature_index_end]
-        node_features = torch.cat([features, one_hot_type], dim=1)
-
-        node_features_normalized = self._node_normalizer(node_features, is_training)
-
-        return node_features_normalized
-
     def _build_input_graph(
         self, inputs: Data, is_training: bool
     ) -> Tuple[Data, torch.Tensor]:
