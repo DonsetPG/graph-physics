@@ -251,8 +251,12 @@ class TestTemporalAttention(unittest.TestCase):
         hidden_size = 2
         num_heads = 1
 
-        base = TemporalAttention(hidden_size=hidden_size, num_heads=num_heads, use_gate=False)
-        gated = TemporalAttention(hidden_size=hidden_size, num_heads=num_heads, use_gate=True)
+        base = TemporalAttention(
+            hidden_size=hidden_size, num_heads=num_heads, use_gate=False
+        )
+        gated = TemporalAttention(
+            hidden_size=hidden_size, num_heads=num_heads, use_gate=True
+        )
 
         base.eval()
         gated.eval()

@@ -173,6 +173,7 @@ class LightningModule(L.LightningModule):
         return self.model(graph)
 
     def training_step(self, batch: Batch):
+        batch = batch.to(self.device, non_blocking=True)
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
 
@@ -194,12 +195,12 @@ class LightningModule(L.LightningModule):
                 self.log(
                     f"train_loss - {loss_name}",
                     train_loss,
-                    on_step=True,
+                    on_step=False,
                     on_epoch=True,
                     prog_bar=False,
                 )
             self.log(
-                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
+                "train_multiloss", loss, on_step=False, on_epoch=True, prog_bar=True
             )
 
         else:  # Will raise an error if the single loss needs physical outputs.
@@ -215,7 +216,7 @@ class LightningModule(L.LightningModule):
             self.log(
                 f"train_{self.loss_name}",
                 loss,
-                on_step=True,
+                on_step=False,
                 on_epoch=True,
                 prog_bar=True,
             )
@@ -231,7 +232,7 @@ class LightningModule(L.LightningModule):
         self.log(
             f"train_cosineloss",
             cosine_loss,
-            on_step=True,
+            on_step=False,
             on_epoch=True,
             prog_bar=True,
         )
@@ -269,7 +270,7 @@ class LightningModule(L.LightningModule):
                     {
                         "sp_mtp/aux_loss": aux_loss.detach(),
                     },
-                    on_step=True,
+                    on_step=False,
                     on_epoch=True,
                     prog_bar=False,
                     logger=True,
@@ -358,6 +359,7 @@ class LightningModule(L.LightningModule):
         )
 
     def validation_step(self, batch: Batch, batch_idx: int):
+        batch = batch.to(self.device, non_blocking=True)
         # Determine if we need to reset the trajectory
         if batch.traj_index > self.current_val_trajectory:
             self._reset_validation_trajectory()
@@ -385,7 +387,7 @@ class LightningModule(L.LightningModule):
             node_type,
             masks=self.loss_masks,
         )
-        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val_loss", val_loss, on_step=False, on_epoch=True, prog_bar=True)
 
         # compute RMSE for the first step
         if self.step_counter == 0:
@@ -476,6 +478,7 @@ class LightningModule(L.LightningModule):
         If the next step is in the next trajectory, save the current trajectory
         to xdmf and reset the trajectory.
         """
+        batch = batch.to(self.device, non_blocking=True)
         if batch.traj_index > self.current_pred_trajectory:
             # save
             self._save_trajectory_to_xdmf(

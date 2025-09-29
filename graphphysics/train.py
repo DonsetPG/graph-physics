@@ -136,6 +136,7 @@ def main(argv):
         "batch_size": batch_size,
         "num_workers": num_workers,
         "exclude_keys": ["tetra"],
+        "pin_memory": device.type == "cuda",
     }
 
     valid_dataloader_kwargs = {
@@ -143,6 +144,7 @@ def main(argv):
         "shuffle": False,
         "batch_size": 1,
         "num_workers": num_workers,
+        "pin_memory": device.type == "cuda",
     }
 
     # Update arguments if num_workers > 0
