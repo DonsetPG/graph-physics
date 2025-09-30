@@ -46,6 +46,8 @@ class H5Dataset(BaseDataset):
             world_pos_parameters=world_pos_parameters,
         )
 
+        self.type = "h5"
+
         if switch_to_val:
             h5_path = h5_path.replace("train", "test")
 
