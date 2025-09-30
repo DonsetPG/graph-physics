@@ -147,6 +147,10 @@ def main(argv):
         "pin_memory": device.type == "cuda",
     }
 
+    if train_dataset.type == "h5":
+        train_dataloader_kwargs["pin_memory"] = (device.type == "cuda")
+        valid_dataloader_kwargs["pin_memory"] = (device.type == "cuda")
+
     # Update arguments if num_workers > 0
     if num_workers > 0:
         train_dataloader_kwargs.update(
