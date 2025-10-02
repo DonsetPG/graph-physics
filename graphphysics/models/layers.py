@@ -80,53 +80,6 @@ ACTIVATION = {
 }
 
 
-class MLP(nn.Module):
-    def __init__(
-        self,
-        in_size: int,
-        hidden_size: int,
-        out_size: int,
-        nb_of_layers: int = 4,
-        layer_norm: bool = True,
-        act: str = "relu",
-        res: bool = False,
-    ):
-        super().__init__()
-        assert nb_of_layers >= 2, "MLP must have at least 2 layers"
-
-        if act not in ACTIVATION:
-            raise NotImplementedError(f"Activation '{act}' not supported.")
-        activation = ACTIVATION[act]
-
-        self.res = res
-
-        # Input projection
-        self.linear_pre = nn.Sequential(nn.Linear(in_size, hidden_size), activation())
-
-        # Hidden layers
-        self.layers = nn.ModuleList(
-            [
-                nn.Sequential(nn.Linear(hidden_size, hidden_size), activation())
-                for _ in range(nb_of_layers - 2)
-            ]
-        )
-
-        # Output projection
-        output_layers = [nn.Linear(hidden_size, out_size)]
-        if layer_norm:
-            output_layers.append(RMSNorm(out_size))
-        self.linear_post = nn.Sequential(*output_layers)
-
-    def forward(self, x):
-        x = self.linear_pre(x)
-        for layer in self.layers:
-            if self.res:
-                x = layer(x) + x
-            else:
-                x = layer(x)
-        return self.linear_post(x)
-
-
 def build_mlp(
     in_size: int,
     hidden_size: int,
@@ -134,20 +87,42 @@ def build_mlp(
     nb_of_layers: int = 4,
     layer_norm: bool = True,
     act: str = "relu",
-    res: bool = False,
 ) -> nn.Module:
     """
-    Builds a Multilayer Perceptron with optional residuals, normalization, and dropout.
+    Builds a Multilayer Perceptron.
+
+    Args:
+        in_size (int): Size of the input features.
+        hidden_size (int): Size of the hidden layers.
+        out_size (int): Size of the output features.
+        nb_of_layers (int, optional): Total number of linear layers in the MLP.
+            Must be at least 2. Defaults to 4.
+        layer_norm (bool, optional): Whether to apply RMS normalization to the
+            output layer. Defaults to True.
+        act (str, optional): Activation function to use ('relu' or 'gelu'). Defaults to 'relu'.
+
+    Returns:
+        nn.Module: The constructed MLP model.
     """
-    return MLP(
-        in_size,
-        hidden_size,
-        out_size,
-        nb_of_layers=nb_of_layers,
-        layer_norm=layer_norm,
-        act=act,
-        res=res,
-    )
+    assert nb_of_layers >= 2, "The MLP must have at least 2 layers (input and output)."
+
+    if act not in ACTIVATION:
+        raise NotImplementedError(f"Activation '{act}' not supported.")
+    activation = ACTIVATION[act]
+
+    layers = [nn.Linear(in_size, hidden_size), activation()]
+
+    # Add hidden layers
+    for _ in range(nb_of_layers - 2):
+        layers.extend([nn.Linear(hidden_size, hidden_size), activation()])
+
+    # Add output layer
+    layers.append(nn.Linear(hidden_size, out_size))
+
+    if layer_norm:
+        layers.append(RMSNorm(out_size))
+
+    return nn.Sequential(*layers)
 
 
 class GatedMLP(nn.Module):

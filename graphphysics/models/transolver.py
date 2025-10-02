@@ -129,7 +129,6 @@ class Transolver_plus_block(nn.Module):
             nb_of_layers=2,
             layer_norm=False,
             act=act,
-            res=False,
         )
         if self.last_layer:
             self.ln_3 = nn.LayerNorm(hidden_dim)
@@ -178,7 +177,6 @@ class Model(nn.Module):
                 nb_of_layers=2,
                 layer_norm=False,
                 act=act,
-                res=False,
             )
         else:
             self.preprocess = build_mlp(
@@ -188,7 +186,6 @@ class Model(nn.Module):
                 nb_of_layers=2,
                 layer_norm=False,
                 act=act,
-                res=False,
             )
 
         self.n_hidden = n_hidden
