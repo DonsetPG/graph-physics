@@ -38,7 +38,6 @@
         "dtype": "float32"
       }
     },
-    "target_features": ["world_pos"],
     "field_names": [
       "cells",
       "node_type",

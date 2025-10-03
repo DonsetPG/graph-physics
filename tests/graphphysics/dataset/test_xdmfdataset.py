@@ -7,10 +7,7 @@ from graphphysics.dataset.preprocessing import (
     compute_min_distance_to_type,
 )
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.utils.torch_graph import torch_graph_to_mesh
 from graphphysics.utils.nodetype import NodeType
@@ -22,6 +19,7 @@ class TestXDMFDataset(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
         )
         self.dataset.trajectory_length += 1
 
@@ -39,6 +37,7 @@ class TestXDMFDatasetDistance(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder="tests/mock_xdmf_aneurysm",
             meta_path="tests/mock_h5/meta_aneurysm.json",
+            targets=["Vitesse"],
         )
         self.dataset.trajectory_length += 1
 
@@ -101,6 +100,7 @@ class TestXDMFDatasetRotating(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder="tests/mock_xdmf_aneurysm",
             meta_path="tests/mock_h5/meta_aneurysm.json",
+            targets=["Vitesse"],
         )
         self.dataset.trajectory_length += 1
 
@@ -141,11 +141,26 @@ class TestXDMFDatasetRotating(unittest.TestCase):
         mesh.write("test_rotate.vtu")
 
 
+class TestXDMFDataseTargets(unittest.TestCase):
+    def setUp(self):
+        self.dataset = XDMFDataset(
+            xdmf_folder=MOCK_XDMF_FOLDER,
+            meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
+        )
+        self.dataset.trajectory_length += 1
+
+    def test_get(self):
+        graph = self.dataset[0]
+        assert graph.y.shape[1] == 2
+
+
 class TestXDMFDatasetMasking(unittest.TestCase):
     def setUp(self):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             masking_ratio=0.4,
         )
         self.dataset.trajectory_length += 1
@@ -164,6 +179,7 @@ class TestH5DatasetPreprocessing(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
         )
         self.dataset.trajectory_length += 1
@@ -181,6 +197,7 @@ class TestXDMFDatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
             add_edge_features=False,
         )
@@ -199,6 +216,7 @@ class TestXDMFDatasetPreprocessingRE(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
             new_edges_ratio=0.5,
         )
@@ -218,6 +236,7 @@ class TestXDMFDatasetPreprocessingKHOP(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
             khop=2,
         )
@@ -237,6 +256,7 @@ class TestXDMFDatasetPreprocessingNoEdgeFeaturesRE(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
             new_edges_ratio=0.5,
             add_edge_features=False,
@@ -256,6 +276,7 @@ class TestXDMFDatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
             preprocessing=transform,
             khop=2,
             add_edge_features=False,

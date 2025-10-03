@@ -3,6 +3,7 @@
         "extension": "xdmf",
         "xdmf_folder": "tests/mock_xdmf_aneurysm",
         "meta_path": "tests/mock_h5/meta_aneurysm.json",
+        "targets": ["Vitesse"],
         "khop": 1
     },
     "model": {

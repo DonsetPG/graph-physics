@@ -15,14 +15,8 @@ from graphphysics.training.parse_parameters import (
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceL2Loss
 
-from tests.mock import (
-    MOCK_H5_META_SAVE_PATH,
-    MOCK_H5_SAVE_PATH,
-)
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 
 # Mock imports from 'graphphysics' package
 with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing, patch(
@@ -72,6 +66,7 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                     "extension": "h5",
                     "h5_path": MOCK_H5_SAVE_PATH,
                     "meta_path": MOCK_H5_META_SAVE_PATH,
+                    "targets": MOCK_H5_TARGETS,
                     "khop": 2,
                 },
                 "loss": {
@@ -128,6 +123,7 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
             self.param["dataset"]["extension"] = "xdmf"
             self.param["dataset"]["meta_path"] = MOCK_H5_META10_SAVE_PATH
             self.param["dataset"]["xdmf_folder"] = MOCK_XDMF_FOLDER
+            self.param["dataset"]["targets"] = MOCK_XDMF_TARGETS
             dataset = get_dataset(self.param, preprocessing=MagicMock())
 
             self.assertEqual(dataset.xdmf_folder, self.param["dataset"]["xdmf_folder"])

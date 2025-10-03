@@ -17,6 +17,7 @@ class XDMFDataset(BaseDataset):
         self,
         xdmf_folder: str,
         meta_path: str,
+        targets: list[str] = None,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -29,6 +30,7 @@ class XDMFDataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -136,9 +138,7 @@ class XDMFDataset(BaseDataset):
 
         target_data = {
             k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
+            for k in self.targets
         }
 
         def _reshape_array(a: dict):
@@ -160,6 +160,15 @@ class XDMFDataset(BaseDataset):
         )
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt
+
+        next = {
+            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
+            for k in self.meta["features"]
+            if k in target_point_data.keys()
+            and self.meta["features"][k]["type"] == "dynamic"
+            and k not in self.targets
+        }
+        graph.next_data = next
 
         if self.use_previous_data:
             previous = {
@@ -184,6 +193,7 @@ class XDMFDataset(BaseDataset):
             graph.edge_index.long() if graph.edge_index is not None else None
         )
 
+        del graph.next_data
         del graph.previous_data
         graph.traj_index = traj_index
 
