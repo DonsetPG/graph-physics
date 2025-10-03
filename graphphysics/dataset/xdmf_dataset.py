@@ -161,6 +161,15 @@ class XDMFDataset(BaseDataset):
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt
 
+        next = {
+            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
+            for k in self.meta["features"]
+            if k in target_point_data.keys()
+            and self.meta["features"][k]["type"] == "dynamic"
+            and k not in self.targets
+        }
+        graph.next_data = next
+
         if self.use_previous_data:
             previous = {
                 k: np.array(previous_data[k]).astype(self.meta["features"][k]["dtype"])
@@ -184,6 +193,7 @@ class XDMFDataset(BaseDataset):
             graph.edge_index.long() if graph.edge_index is not None else None
         )
 
+        del graph.next_data
         del graph.previous_data
         graph.traj_index = traj_index
 
