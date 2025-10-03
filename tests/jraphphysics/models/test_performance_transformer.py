@@ -3,10 +3,7 @@ import unittest
 import jax.numpy as jnp
 import jax.random as random
 from jraphphysics.dataset.xdmf_dataset import XDMFDataset
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 from jax.experimental import sparse as jsparse
 
 import flax.nnx as nnx
@@ -27,6 +24,7 @@ def process_items_xdmfdataloader_jraph_no_adjacency():
     dataset = XDMFDataset(
         xdmf_folder=MOCK_XDMF_FOLDER,
         meta_path=MOCK_H5_META10_SAVE_PATH,
+        targets=MOCK_XDMF_TARGETS,
     )
     dataloader = data.DataLoader(
         dataset,
@@ -71,6 +69,7 @@ def process_items_xdmfdataloader_jraph_adjacency():
     dataset = XDMFDataset(
         xdmf_folder=MOCK_XDMF_FOLDER,
         meta_path=MOCK_H5_META10_SAVE_PATH,
+        targets=MOCK_XDMF_TARGETS,
     )
     dataloader = data.DataLoader(
         dataset,

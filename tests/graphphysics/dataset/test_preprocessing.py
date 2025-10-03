@@ -1,5 +1,4 @@
 import unittest
-from typing import List
 import math
 import torch
 from torch_geometric.data import Data

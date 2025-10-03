@@ -3,6 +3,7 @@
         "extension": "h5",
         "h5_path": "dataset/h5_dataset/deforming_plate/train.h5",
         "meta_path": "dataset_config/plate_meta.json",
+        "targets": ["world_pos"],
         "khop": 1,
         "new_edges_ratio": 0
     },
