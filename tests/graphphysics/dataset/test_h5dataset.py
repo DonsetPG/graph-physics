@@ -2,10 +2,7 @@ import unittest
 
 
 from graphphysics.dataset.h5_dataset import H5Dataset
-from tests.mock import (
-    MOCK_H5_META_SAVE_PATH,
-    MOCK_H5_SAVE_PATH,
-)
+from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
 from graphphysics.dataset.preprocessing import build_preprocessing
 
 
@@ -14,6 +11,7 @@ class TestH5Dataset(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
         )
         self.dataset.trajectory_length += 1
 
@@ -31,6 +29,7 @@ class TestH5DatasetMasking(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             masking_ratio=0.4,
         )
         self.dataset.trajectory_length += 1
@@ -52,6 +51,7 @@ class TestH5DatasetPreprocessing(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
         )
         self.dataset.trajectory_length += 1
@@ -69,6 +69,7 @@ class TestH5DatasetPreprocessingNoEdgeFeatures(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
             add_edge_features=False,
         )
@@ -87,6 +88,7 @@ class TestH5DatasetPreprocessingRE(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
             new_edges_ratio=0.5,
         )
@@ -106,6 +108,7 @@ class TestH5DatasetPreprocessingKHOP(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
             khop=2,
         )
@@ -125,6 +128,7 @@ class TestH5DatasetPreprocessingNoEdgeFeaturesRE(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
             new_edges_ratio=0.5,
             add_edge_features=False,
@@ -144,6 +148,7 @@ class TestH5DatasetPreprocessingNoEdgeFeaturesKHOP(unittest.TestCase):
         self.dataset = H5Dataset(
             h5_path=MOCK_H5_SAVE_PATH,
             meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
             preprocessing=transform,
             khop=2,
             add_edge_features=False,

@@ -25,6 +25,7 @@ class H5Dataset(BaseDataset):
         self,
         h5_path: str,
         meta_path: str,
+        targets: list[str] = None,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -37,6 +38,7 @@ class H5Dataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -169,7 +171,11 @@ class H5Dataset(BaseDataset):
                 traj = self._get_trajectory(traj_number)
 
             graph = get_frame_as_graph(
-                traj=traj, frame=frame, meta=self.meta, frame_target=frame + 1
+                traj=traj,
+                frame=frame,
+                meta=self.meta,
+                targets=self.targets,
+                frame_target=frame + 1,
             )
 
             graph = self._apply_preprocessing(graph)

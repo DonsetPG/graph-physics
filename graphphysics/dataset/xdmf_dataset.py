@@ -17,6 +17,7 @@ class XDMFDataset(BaseDataset):
         self,
         xdmf_folder: str,
         meta_path: str,
+        targets: list[str] = None,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -29,6 +30,7 @@ class XDMFDataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -136,9 +138,7 @@ class XDMFDataset(BaseDataset):
 
         target_data = {
             k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
+            for k in self.targets
         }
 
         def _reshape_array(a: dict):

@@ -13,6 +13,7 @@ class XDMFDataset(BaseDataset):
         self,
         xdmf_folder: str,
         meta_path: str,
+        targets: list[str] = None,
         preprocessing: Optional[
             Callable[[jraph.GraphsTuple], jraph.GraphsTuple]
         ] = None,
@@ -22,6 +23,7 @@ class XDMFDataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            targets=targets,
             preprocessing=preprocessing,
             khop=khop,
             use_previous_data=use_previous_data,
@@ -91,8 +93,7 @@ class XDMFDataset(BaseDataset):
         target_data = {
             k: np.array(v).astype(self.meta["features"][k]["dtype"])
             for k, v in target_point_data.items()
-            if k in self.meta["features"]
-            and self.meta["features"][k]["type"] == "dynamic"
+            if k in self.targets
         }
 
         def _reshape_array(a: dict):

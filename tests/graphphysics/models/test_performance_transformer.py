@@ -1,12 +1,8 @@
 from torch_geometric.loader import DataLoader
-import unittest
 import torch
 
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.models.layers import (
     Transformer,
@@ -24,6 +20,7 @@ def process_items_xdmfdataloader():
     dataset = XDMFDataset(
         xdmf_folder=MOCK_XDMF_FOLDER,
         meta_path=MOCK_H5_META10_SAVE_PATH,
+        targets=MOCK_XDMF_TARGETS,
         preprocessing=transform,
     )
     dataloader = DataLoader(
