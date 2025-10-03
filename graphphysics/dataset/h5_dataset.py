@@ -219,6 +219,9 @@ class H5Dataset(BaseDataset):
             traj_index=traj_index, frame=frame, traj=traj
         )
 
+        next_features = self._build_node_features(traj, frame + 1)
+        graph.next_data = next_features
+
         if self.use_previous_data:
             previous_features = self._build_node_features(traj, frame - 1)
             graph.previous_data = previous_features
