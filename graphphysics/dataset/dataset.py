@@ -19,7 +19,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(
         self,
         meta_path: str,
-        targets: list[str] = None,
+        targets: list[str],
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -37,7 +37,7 @@ class BaseDataset(Dataset, ABC):
         self.meta: Dict[str, Any] = meta
 
         # Check targets are properly defined
-        if targets is not None:
+        if len(targets) > 0:
             for target in targets:
                 if target not in self.meta["features"]:
                     raise ValueError(f"Target {target} not found in available fields.")
