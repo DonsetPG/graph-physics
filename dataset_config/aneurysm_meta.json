@@ -28,7 +28,7 @@
         ],
         "dtype": "float32"
       },
-      "wall_mask": {
+      "node_type": {
         "type": "static",
         "shape": [
           79,
@@ -42,7 +42,7 @@
       "cells",
       "mesh_pos",
       "Vitesse",
-      "wall_mask"
+      "node_type"
     ],
     "trajectory_length": 79
   }

@@ -12,7 +12,7 @@ from loguru import logger
 from torch_geometric.loader import DataLoader
 
 from graphphysics.external.aneurysm import build_features
-from graphphysics.training.callback import LogPyVistaPredictionsCallback
+# from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
@@ -207,12 +207,12 @@ def main(argv):
         )
 
     # Initialize WandbLogger
-    if resume_training:
-        wandb_run = wandb.init(
-            project=wandb_project_name, id=lightning_module.wandb_run_id, resume="allow"
-        )
-    else:
-        wandb_run = wandb.init(project=wandb_project_name)
+    # if resume_training:
+    #     wandb_run = wandb.init(
+    #         project=wandb_project_name, id=lightning_module.wandb_run_id, resume="allow"
+    #     )
+    # else:
+    wandb_run = wandb.init(project=wandb_project_name)
 
     wandb_logger = WandbLogger(experiment=wandb_run)
     lightning_module.wandb_run_id = wandb_logger.experiment.id
@@ -244,7 +244,7 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
+            # LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         log_every_n_steps=100,

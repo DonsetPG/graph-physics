@@ -25,7 +25,10 @@ def aneurysm_node_type(graph: Data) -> torch.Tensor:
 
 
 def build_features(graph: Data) -> Data:
-    node_type = aneurysm_node_type(graph)
+
+    # node_type = aneurysm_node_type(graph)
+    node_type = graph.x[:, 3]
+    timestep = graph.x[:, 4]
 
     current_velocity = graph.x[:, 0:3]
     target_velocity = graph.y[:, 0:3]
@@ -50,7 +53,8 @@ def build_features(graph: Data) -> Data:
 
     graph.x = torch.cat(
         (
-            graph.x,
+            current_velocity,
+            timestep.to(device).unsqueeze(1),
             acceleration,
             graph.pos,
             mean_next_accel.unsqueeze(1),
@@ -60,5 +64,6 @@ def build_features(graph: Data) -> Data:
         ),
         dim=1,
     )
+    # print(graph.x[1000])
 
     return graph
