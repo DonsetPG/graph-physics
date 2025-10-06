@@ -136,10 +136,21 @@ class XDMFDataset(BaseDataset):
             if k in mesh.point_data.keys()
         }
 
-        target_data = {
-            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.targets
-        }
+        target_data = {}
+        next_data = {}
+        for k in self.meta["features"]:
+            if k in self.targets:
+                target_data[k] = np.array(target_point_data[k]).astype(
+                    self.meta["features"][k]["dtype"]
+                )
+            else:
+                if (
+                    k in target_point_data.keys()
+                    and self.meta["features"][k]["type"] == "dynamic"
+                ):
+                    next_data[k] = np.array(target_point_data[k]).astype(
+                        self.meta["features"][k]["dtype"]
+                    )
 
         def _reshape_array(a: dict):
             for k, v in a.items():
@@ -157,18 +168,10 @@ class XDMFDataset(BaseDataset):
             time=time,
             target=target_data,
             id=mesh_id,
+            next_data=next_data,
         )
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt
-
-        next = {
-            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
-            and k not in self.targets
-        }
-        graph.next_data = next
 
         if self.use_previous_data:
             previous = {

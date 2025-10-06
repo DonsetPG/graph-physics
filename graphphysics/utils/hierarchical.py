@@ -108,9 +108,15 @@ def get_frame_as_mesh(
               similar to point_data.
     """
     target_point_data = None
+    next_data = None
 
     if frame_target is not None:
         target_point_data = {key: traj[key][frame_target] for key in targets}
+        next_data = {
+            key: traj[key][frame_target]
+            for key in traj.keys()
+            if key not in ["mesh_pos", "cells", "node_type"] and key not in targets
+        }
 
     point_data = {
         key: traj[key][frame]
@@ -124,7 +130,7 @@ def get_frame_as_mesh(
     )
     cells = traj["cells"][frame] if traj["cells"].ndim > 1 else traj["cells"]
 
-    return mesh_pos, cells, point_data, target_point_data
+    return mesh_pos, cells, point_data, target_point_data, next_data
 
 
 def get_frame_as_graph(
@@ -151,10 +157,15 @@ def get_frame_as_graph(
     Returns:
         torch_geometric.data.Data: A PyTorch Geometric Data object representing the graph.
     """
-    points, cells, point_data, target = get_frame_as_mesh(
+    points, cells, point_data, target, next_data = get_frame_as_mesh(
         traj, frame, targets, frame_target
     )
     time = frame * meta.get("dt", 1)
     return meshdata_to_graph(
-        points=points, cells=cells, point_data=point_data, time=time, target=target
+        points=points,
+        cells=cells,
+        point_data=point_data,
+        time=time,
+        target=target,
+        next_data=next_data,
     )
