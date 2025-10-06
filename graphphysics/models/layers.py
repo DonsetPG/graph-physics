@@ -1,3 +1,4 @@
+import math
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
@@ -65,7 +66,7 @@ class RMSNorm(nn.Module):
             norm_x = partial_x.norm(2, dim=-1, keepdim=True)
             d_x = partial_size
 
-        rms_x = norm_x * d_x ** (-0.5)
+        rms_x = norm_x / math.sqrt(d_x)
         x_normed = x / (rms_x + self.eps)
 
         if self.bias:
@@ -338,7 +339,7 @@ def scaled_query_key_softmax(
     Returns:
         torch.Tensor: Attention scores.
     """
-    scaling_factor = k.size(-1) ** 0.5
+    scaling_factor = math.sqrt(k.size(1))
     q = q / scaling_factor
 
     if att_mask is not None and HAS_DGL_SPARSE:

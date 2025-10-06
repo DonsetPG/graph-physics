@@ -140,12 +140,12 @@ class LightningModule(L.LightningModule):
                 self.log(
                     f"train_loss - {loss_name}",
                     train_loss,
-                    on_step=False,
+                    on_step=True,
                     on_epoch=True,
                     prog_bar=False,
                 )
             self.log(
-                "train_multiloss", loss, on_step=False, on_epoch=True, prog_bar=True
+                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
             )
 
         else:  # Will raise an error if the single loss needs physical outputs.
@@ -161,7 +161,7 @@ class LightningModule(L.LightningModule):
             self.log(
                 f"train_{self.loss_name}",
                 loss,
-                on_step=False,
+                on_step=True,
                 on_epoch=True,
                 prog_bar=True,
             )
