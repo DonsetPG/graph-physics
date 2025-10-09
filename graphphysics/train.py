@@ -266,7 +266,12 @@ def main(argv):
             val_dataloaders=valid_dataloader,
         )
 
+    import os
+    os._exit(0)
+
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")
     app.run(main)
+    import sys
+    sys.exit(0)
