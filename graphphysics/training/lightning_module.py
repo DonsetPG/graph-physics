@@ -45,6 +45,7 @@ class LightningModule(L.LightningModule):
         use_previous_data: bool = False,
         previous_data_start: int = None,
         previous_data_end: int = None,
+        prediction_save_path: str = "predictions",
     ):
         """
         Initializes the LightningModule.
@@ -59,6 +60,7 @@ class LightningModule(L.LightningModule):
             masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
             use_previous_data (bool): If set to true, we also update autoregressively the
               features at previous_data_start : previous_data_end
+            prediction_save_path (str): Directory where predictions will be saved.
         """
         super().__init__()
         self.save_hyperparameters()
@@ -108,7 +110,7 @@ class LightningModule(L.LightningModule):
         self.trajectory_to_save: list[Batch] = []
 
         # Prediction
-        self.prediction_save_dir: str = "predictions"
+        self.prediction_save_path: str = prediction_save_path
         self.current_pred_trajectory = 0
         self.prediction_trajectory: list[Batch] = []
         self.last_pred_prediction = None
@@ -371,7 +373,7 @@ class LightningModule(L.LightningModule):
             # save
             self._save_trajectory_to_xdmf(
                 self.prediction_trajectory,
-                self.prediction_save_dir,
+                self.prediction_save_path,
                 self._get_traj_savename(
                     self.prediction_trajectory, self.current_pred_trajectory
                 ),
@@ -404,7 +406,7 @@ class LightningModule(L.LightningModule):
         """
         self._save_trajectory_to_xdmf(
             self.prediction_trajectory,
-            self.prediction_save_dir,
+            self.prediction_save_path,
             self._get_traj_savename(
                 self.prediction_trajectory, self.current_pred_trajectory
             ),
