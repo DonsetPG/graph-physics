@@ -254,8 +254,6 @@ class EncodeTransformDecode(nn.Module):
             raise ValueError(
                 "use_rope_embeddings=True requires 'pos' attribute in the input graph."
             )
-        if pos is not None:
-            pos = pos.to(x.device)
 
         prev_x = x
         last_x = x

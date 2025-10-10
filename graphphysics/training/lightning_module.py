@@ -184,15 +184,6 @@ class LightningModule(L.LightningModule):
             max_neighbors=self.spatial_mtp_max_neighbors,
         ).to(torch_device)
 
-        if device != "cpu" and hasattr(torch, "compile"):
-            try:
-                self.spatial_mtp = torch.compile(self.spatial_mtp, dynamic=True)
-                self.spatial_mtp = self.spatial_mtp.to(torch_device)
-            except Exception as exc:  # pragma: no cover - compile may be unavailable
-                logger.warning(
-                    f"torch.compile failed for SpatialMTP1Hop; falling back to eager mode: {exc}"
-                )
-
         def _capture_head_input(module, inputs):
             self._penultimate_hidden = inputs[0]
 

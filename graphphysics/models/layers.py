@@ -15,17 +15,6 @@ except ImportError:
     dglsp = None
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
 
-if hasattr(torch, "compiler") and hasattr(torch.compiler, "disable"):
-
-    def _maybe_disable_compiler(fn):
-        return torch.compiler.disable(fn)
-
-else:
-
-    def _maybe_disable_compiler(fn):
-        return fn
-
-
 class RMSNorm(nn.Module):
     """
     Root Mean Square Layer Normalization.
@@ -475,7 +464,6 @@ def scaled_query_key_softmax(
     return attn
 
 
-@_maybe_disable_compiler
 def scaled_dot_product_attention(
     q: torch.Tensor,
     k: torch.Tensor,
@@ -585,7 +573,6 @@ class Attention(nn.Module):
                 self.k_proj.weight = self.q_proj.weight
                 self.v_proj.weight = self.q_proj.weight
 
-    @_maybe_disable_compiler
     def forward(
         self,
         x: torch.Tensor,
@@ -612,9 +599,6 @@ class Attention(nn.Module):
                 raise ValueError(
                     "RoPE embeddings require positional information when enabled."
                 )
-            pos = pos.to(x.device)
-        else:
-            pos = None
 
         N = x.size(0)
         query, key, value = x, x, x
@@ -746,7 +730,6 @@ class Transformer(nn.Module):
                 raise ValueError(
                     "Transformer blocks require node positions when use_rope_embeddings=True."
                 )
-            pos_arg = pos.to(x.device)
 
         if return_attention:
             x_, attn = self.attention(
