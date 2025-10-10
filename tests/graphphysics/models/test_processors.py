@@ -79,6 +79,29 @@ class TestEncodeProcessDecode(unittest.TestCase):
         x_decoded = model(self.graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
+    def test_temporal_block(self):
+        model = EncodeProcessDecode(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            use_temporal_block=True,
+        )
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_rope_not_supported(self):
+        with self.assertRaises(ValueError):
+            EncodeProcessDecode(
+                message_passing_num=self.message_passing_num,
+                node_input_size=self.node_input_size,
+                edge_input_size=self.edge_input_size,
+                output_size=self.output_size,
+                hidden_size=self.hidden_size,
+                use_rope_embeddings=True,
+            )
+
 
 class TestEncodeTransformDecode(unittest.TestCase):
     def setUp(self):
@@ -198,6 +221,52 @@ class TestTransolverProcessor(unittest.TestCase):
             num_heads=self.num_heads,
         )
         x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_transolver_with_temporal_block(self):
+        graph = Data(
+            x=self.graph.x.clone(),
+            edge_index=self.graph.edge_index.clone(),
+            pos=torch.randn(self.num_nodes, 3),
+        )
+        model = TransolverProcessor(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            use_temporal_block=True,
+        )
+        x_decoded = model(graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_transolver_rope_requires_pos(self):
+        model = TransolverProcessor(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            use_rope_embeddings=True,
+        )
+        with self.assertRaises(ValueError):
+            model(self.graph)
+
+    def test_transolver_rope_with_pos(self):
+        graph = Data(
+            x=self.graph.x.clone(),
+            edge_index=self.graph.edge_index.clone(),
+            pos=torch.randn(self.num_nodes, 3),
+        )
+        model = TransolverProcessor(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            use_rope_embeddings=True,
+        )
+        x_decoded = model(graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
 

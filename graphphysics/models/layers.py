@@ -15,6 +15,7 @@ except ImportError:
     dglsp = None
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
 
+
 class RMSNorm(nn.Module):
     """
     Root Mean Square Layer Normalization.
@@ -724,7 +725,6 @@ class Transformer(nn.Module):
         if not self.use_adjacency:
             adj = None
 
-        pos_arg = None
         if self.use_rope_embeddings:
             if pos is None:
                 raise ValueError(
@@ -733,11 +733,11 @@ class Transformer(nn.Module):
 
         if return_attention:
             x_, attn = self.attention(
-                self.norm1(x), adj, pos=pos_arg, return_attention=True
+                self.norm1(x), adj, pos=pos, return_attention=True
             )
             x = x + x_
         else:
-            x = x + self.attention(self.norm1(x), adj, pos=pos_arg)
+            x = x + self.attention(self.norm1(x), adj, pos=pos)
 
         x = x + self.gated_mlp(self.norm2(x))
 

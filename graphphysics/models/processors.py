@@ -42,6 +42,11 @@ class EncodeProcessDecode(nn.Module):
         output_size: int,
         hidden_size: int = 128,
         only_processor: bool = False,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
+        use_temporal_block: bool = False,
     ):
         """
         Initializes the EncodeProcessDecode model.
@@ -53,11 +58,35 @@ class EncodeProcessDecode(nn.Module):
             output_size (int): Size of the output features.
             hidden_size (int, optional): Size of the hidden representations. Defaults to 128.
             only_processor (bool, optional): If True, only the processor is used (no encoding or decoding). Defaults to False.
+            use_rope_embeddings (bool, optional): Unsupported for this architecture.
+            use_gated_attention (bool, optional): Unsupported for this architecture.
+            rope_pos_dimension (int, optional): Placeholder for API parity; unused.
+            rope_base (float, optional): Placeholder for API parity; unused.
+            use_temporal_block (bool, optional): Whether to enable the temporal attention block. Defaults to False.
         """
         super().__init__()
         self.only_processor = only_processor
         self.hidden_size = hidden_size
         self.d = output_size
+        if use_rope_embeddings:
+            raise ValueError(
+                "EncodeProcessDecode does not support rotary positional embeddings."
+            )
+        if use_gated_attention:
+            raise ValueError(
+                "EncodeProcessDecode does not support gated attention layers."
+            )
+        self.use_temporal_block = use_temporal_block
+        if self.use_temporal_block and not HAS_DGL_SPARSE:
+            logger.warning(
+                "use_temporal_block=True but DGL sparse backend is unavailable. "
+                "Temporal attention will run without sparse adjacency."
+            )
+        self.temporal_block = (
+            TemporalAttention(hidden_size=hidden_size)
+            if self.use_temporal_block
+            else None
+        )
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -95,6 +124,7 @@ class EncodeProcessDecode(nn.Module):
                 If 'only_processor' is False, the node features are passed through the decoder before returning.
         """
         edge_index = graph.edge_index
+        adj = None
 
         if self.only_processor:
             x, edge_attr = graph.x, graph.edge_attr
@@ -102,8 +132,22 @@ class EncodeProcessDecode(nn.Module):
             x = self.nodes_encoder(graph.x)
             edge_attr = self.edges_encoder(graph.edge_attr)
 
+        if self.use_temporal_block and HAS_DGL_SPARSE:
+            adj = dglsp.spmatrix(indices=edge_index, shape=(x.size(0), x.size(0)))
+
+        prev_x = x
+        last_x = x
         for block in self.processor_list:
+            prev_x = x
             x, edge_attr = block(x, edge_index, edge_attr)
+            last_x = x
+
+        if self.use_temporal_block and self.temporal_block is not None:
+            x = self.temporal_block(
+                prev_x,
+                last_x,
+                adj if HAS_DGL_SPARSE else None,
+            )
 
         if self.only_processor:
             return x
@@ -302,10 +346,16 @@ class TransolverProcessor(nn.Module):
         slice_num: int = 32,
         ref: int = 8,
         unified_pos: bool = False,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
+        use_temporal_block: bool = False,
     ):
         super().__init__()
 
         self.hidden_size = hidden_size
+        self.use_rope_embeddings = use_rope_embeddings
 
         n_layers = message_passing_num
         out_dim = output_size
@@ -323,6 +373,11 @@ class TransolverProcessor(nn.Module):
             slice_num=slice_num,
             ref=ref,
             unified_pos=unified_pos,
+            use_rope_embeddings=use_rope_embeddings,
+            use_gated_attention=use_gated_attention,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
+            use_temporal_block=use_temporal_block,
         )
 
     def forward(self, graph: Data) -> torch.Tensor:
@@ -337,6 +392,10 @@ class TransolverProcessor(nn.Module):
             graph.pos.unsqueeze(0) if graph.pos is not None else None
         )  # (1, N, 3)
         condition = None  # Condition / global features (optional)
+        if self.use_rope_embeddings and pos_batched is None:
+            raise ValueError(
+                "use_rope_embeddings=True requires 'pos' attribute in the input graph."
+            )
 
         out = self.model.forward(x_batched, pos_batched, condition)
         out = out.squeeze(0)  # (N, out_dim)

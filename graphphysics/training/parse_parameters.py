@@ -98,6 +98,11 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     use_temporal_block = training_params.get("use_temporal_block", False)
     rope_pos_dimension = param.get("model", {}).get("rope_pos_dimension", 3)
     rope_base = param.get("model", {}).get("rope_base", 10000.0)
+    dropout = param.get("model", {}).get("dropout", 0.0)
+    mlp_ratio = param.get("model", {}).get("mlp_ratio", 1)
+    slice_num = param.get("model", {}).get("slice_num", 32)
+    ref = param.get("model", {}).get("ref", 8)
+    unified_pos = param.get("model", {}).get("unified_pos", False)
     set_use_silu_activation(use_silu)
 
     if model_type == "epd":
@@ -108,6 +113,11 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
             only_processor=only_processor,
+            use_rope_embeddings=use_rope,
+            use_gated_attention=use_gated_attention,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
+            use_temporal_block=use_temporal_block,
         )
     elif model_type == "transformer":
         return EncodeTransformDecode(
@@ -130,6 +140,16 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
+            dropout=dropout,
+            mlp_ratio=mlp_ratio,
+            slice_num=slice_num,
+            ref=ref,
+            unified_pos=unified_pos,
+            use_rope_embeddings=use_rope,
+            use_gated_attention=use_gated_attention,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
+            use_temporal_block=use_temporal_block,
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
