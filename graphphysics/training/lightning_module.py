@@ -110,7 +110,7 @@ class LightningModule(L.LightningModule):
         self.trajectory_to_save: list[Batch] = []
 
         # Prediction
-        self.prediction_save_dir: str = prediction_save_path
+        self.prediction_save_path: str = prediction_save_path
         self.current_pred_trajectory = 0
         self.prediction_trajectory: list[Batch] = []
         self.last_pred_prediction = None
@@ -373,7 +373,7 @@ class LightningModule(L.LightningModule):
             # save
             self._save_trajectory_to_xdmf(
                 self.prediction_trajectory,
-                self.prediction_save_dir,
+                self.prediction_save_path,
                 self._get_traj_savename(
                     self.prediction_trajectory, self.current_pred_trajectory
                 ),
@@ -406,7 +406,7 @@ class LightningModule(L.LightningModule):
         """
         self._save_trajectory_to_xdmf(
             self.prediction_trajectory,
-            self.prediction_save_dir,
+            self.prediction_save_path,
             self._get_traj_savename(
                 self.prediction_trajectory, self.current_pred_trajectory
             ),
