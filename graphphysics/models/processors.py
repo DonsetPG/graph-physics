@@ -4,12 +4,13 @@ from loguru import logger
 from torch_geometric.data import Data
 from torch_geometric.nn import TransformerConv
 
+import graphphysics.models.transolver as Transolver
 from graphphysics.models.layers import (
     GraphNetBlock,
+    TemporalAttention,
     Transformer,
     build_mlp,
 )
-import graphphysics.models.transolver as Transolver
 
 try:
     import dgl.sparse as dglsp
@@ -131,6 +132,11 @@ class EncodeTransformDecode(nn.Module):
         only_processor: bool = False,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
+        use_temporal_block: bool = False,
     ):
         """
         Initializes the EncodeTransformDecode model.
@@ -145,12 +151,20 @@ class EncodeTransformDecode(nn.Module):
             use_proj_bias (bool, optional): Whether to use bias in the projection layers of the Transformer blocks. Defaults to True.
             use_separate_proj_weight (bool, optional): Whether to use separate weights for Q, K, V projections in the Transformer blocks.
                 If False, weights are shared. Defaults to True.
+            use_rope_embeddings (bool, optional): Whether to enable rotary positional embeddings. Defaults to False.
+            use_gated_attention (bool, optional): Whether to apply gated attention. Defaults to False.
+            rope_pos_dimension (int, optional): Dimensionality of positional inputs for RoPE. Defaults to 3.
+            rope_base (float, optional): Base used in RoPE inverse frequency computation. Defaults to 10000.0.
         """
 
         super(EncodeTransformDecode, self).__init__()
         self.hidden_size = hidden_size
         self.only_processor = only_processor
         self.d = output_size
+        self.use_rope_embeddings = use_rope_embeddings and HAS_DGL_SPARSE
+        self.use_gated_attention = use_gated_attention
+        self._requested_rope = use_rope_embeddings
+        self.use_temporal_block = use_temporal_block
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -175,6 +189,10 @@ class EncodeTransformDecode(nn.Module):
                         num_heads=num_heads,
                         use_proj_bias=use_proj_bias,
                         use_separate_proj_weight=use_separate_proj_weight,
+                        use_rope_embeddings=self.use_rope_embeddings,
+                        use_gated_attention=use_gated_attention,
+                        pos_dimension=rope_pos_dimension,
+                        rope_base=rope_base,
                     )
                     for _ in range(message_passing_num)
                 ]
@@ -192,6 +210,26 @@ class EncodeTransformDecode(nn.Module):
                     for _ in range(message_passing_num)
                 ]
             )
+        )
+        if self._requested_rope and not HAS_DGL_SPARSE:
+            logger.warning(
+                "use_rope_embeddings=True but DGL sparse backend is unavailable. "
+                "RoPE will be ignored."
+            )
+        if use_gated_attention and not HAS_DGL_SPARSE:
+            logger.warning(
+                "use_gated_attention=True but DGL sparse backend is unavailable. "
+                "Gated attention will be ignored."
+            )
+        if use_temporal_block and not HAS_DGL_SPARSE:
+            logger.warning(
+                "use_temporal_block=True but DGL sparse backend is unavailable. "
+                "Temporal attention will run without sparse adjacency."
+            )
+        self.temporal_block = (
+            TemporalAttention(hidden_size=hidden_size, num_heads=num_heads)
+            if self.use_temporal_block
+            else None
         )
 
     def forward(self, graph: Data) -> torch.Tensor:
@@ -211,13 +249,32 @@ class EncodeTransformDecode(nn.Module):
         else:
             x = self.nodes_encoder(graph.x)
 
+        pos = getattr(graph, "pos", None)
+        if self.use_rope_embeddings and pos is None:
+            raise ValueError(
+                "use_rope_embeddings=True requires 'pos' attribute in the input graph."
+            )
+        if pos is not None:
+            pos = pos.to(x.device)
+
+        prev_x = x
+        last_x = x
+        adj = None
+
         if HAS_DGL_SPARSE:
             adj = dglsp.spmatrix(indices=edge_index, shape=(x.shape[0], x.shape[0]))
             for block in self.processor_list:
-                x = block(x, adj)
+                prev_x = x
+                last_x = block(prev_x, adj, pos=pos)
+                x = last_x
         else:
             for block in self.processor_list:
-                x = block(x, edge_index)
+                prev_x = x
+                last_x = block(prev_x, edge_index)
+                x = last_x
+
+        if self.use_temporal_block and self.temporal_block is not None:
+            x = self.temporal_block(prev_x, last_x, adj)
 
         if self.only_processor:
             return x

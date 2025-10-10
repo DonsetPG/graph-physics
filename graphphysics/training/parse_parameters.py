@@ -7,6 +7,7 @@ from torch_geometric.data import Data
 from graphphysics.dataset.h5_dataset import H5Dataset
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
+from graphphysics.models.layers import set_use_silu_activation
 from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
@@ -90,6 +91,14 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     """
     model_type = param.get("model", {}).get("type", "")
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
+    use_silu = param.get("model", {}).get("use_silu_activation", False)
+    training_params = param.get("training", {})
+    use_rope = param.get("model", {}).get("use_rope_embeddings", False)
+    use_gated_attention = param.get("model", {}).get("use_gated_attention", False)
+    use_temporal_block = training_params.get("use_temporal_block", False)
+    rope_pos_dimension = param.get("model", {}).get("rope_pos_dimension", 3)
+    rope_base = param.get("model", {}).get("rope_base", 10000.0)
+    set_use_silu_activation(use_silu)
 
     if model_type == "epd":
         return EncodeProcessDecode(
@@ -108,6 +117,11 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
+            use_rope_embeddings=use_rope,
+            use_gated_attention=use_gated_attention,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
+            use_temporal_block=use_temporal_block,
         )
     elif model_type == "transolver":
         return TransolverProcessor(

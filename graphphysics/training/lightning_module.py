@@ -1,13 +1,15 @@
 import os
 import shutil
-from typing import List
+from typing import Dict, List, Optional
 
 import lightning as L
 import meshio
 import torch
+import torch.nn as nn
 from loguru import logger
 from torch_geometric.data import Batch
 
+from graphphysics.models.spatial_mtp_1hop import SpatialMTP1Hop
 from graphphysics.training.parse_parameters import (
     get_gradient_method,
     get_loss,
@@ -114,11 +116,135 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
+        training_params: Dict = parameters.get("training", {})
+        self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
+        self.spatial_mtp_alpha: float = training_params.get("spatial_mtp_alpha", 0.20)
+        self.spatial_mtp_centers_per_step: int = training_params.get(
+            "spatial_mtp_centers_per_step", 256
+        )
+        self.spatial_mtp_num_heads: int = training_params.get(
+            "spatial_mtp_num_heads", 4
+        )
+        self.spatial_mtp_num_layers: int = training_params.get(
+            "spatial_mtp_num_layers", 1
+        )
+        self.spatial_mtp_assume_undirected: bool = training_params.get(
+            "spatial_mtp_assume_undirected", True
+        )
+        self.spatial_mtp_max_neighbors: Optional[int] = training_params.get(
+            "spatial_mtp_max_neighbors"
+        )
+
+        self.output_head: Optional[nn.Module] = None
+        self.node_encoder: Optional[nn.Module] = None
+        self.spatial_mtp: Optional[SpatialMTP1Hop] = None
+        self._head_hook = None
+        self._nodeenc_hook = None
+        self._penultimate_hidden = None
+        self._H_nodeenc = None
+
+        if self.use_spatial_mtp:
+            self._setup_spatial_mtp(processor, device)
+
     def forward(self, graph: Batch):
         return self.model(graph)
 
+    def _setup_spatial_mtp(self, processor: nn.Module, device: str) -> None:
+        out_head = getattr(processor, "decode_module", None)
+        if out_head is None or not isinstance(out_head, nn.Module):
+            raise ValueError(
+                "Spatial MTP requires a processor with a 'decode_module' nn.Module."
+            )
+
+        node_encoder = getattr(processor, "nodes_encoder", None)
+        if node_encoder is None or not isinstance(node_encoder, nn.Module):
+            raise ValueError(
+                "Spatial MTP requires a processor with a 'nodes_encoder' nn.Module."
+            )
+
+        first_linear = next(
+            (module for module in out_head.modules() if isinstance(module, nn.Linear)),
+            None,
+        )
+        if first_linear is None:
+            raise ValueError(
+                "Unable to infer hidden size for Spatial MTP (no Linear layer in decode module)."
+            )
+
+        d_model = first_linear.in_features
+        torch_device = torch.device(device)
+
+        self.output_head = out_head
+        self.node_encoder = node_encoder
+        self.spatial_mtp = SpatialMTP1Hop(
+            d_model=d_model,
+            num_heads=self.spatial_mtp_num_heads,
+            num_layers=self.spatial_mtp_num_layers,
+            assume_undirected=self.spatial_mtp_assume_undirected,
+            max_neighbors=self.spatial_mtp_max_neighbors,
+        ).to(torch_device)
+
+        if device != "cpu" and hasattr(torch, "compile"):
+            try:
+                self.spatial_mtp = torch.compile(self.spatial_mtp, dynamic=True)
+                self.spatial_mtp = self.spatial_mtp.to(torch_device)
+            except Exception as exc:  # pragma: no cover - compile may be unavailable
+                logger.warning(
+                    f"torch.compile failed for SpatialMTP1Hop; falling back to eager mode: {exc}"
+                )
+
+        def _capture_head_input(module, inputs):
+            self._penultimate_hidden = inputs[0]
+
+        def _capture_nodeenc_output(module, inputs, outputs):
+            self._H_nodeenc = outputs
+
+        self._head_hook = out_head.register_forward_pre_hook(_capture_head_input)
+        self._nodeenc_hook = node_encoder.register_forward_hook(_capture_nodeenc_output)
+
+    def _remove_spatial_mtp_hooks(self) -> None:
+        if self._head_hook is not None:
+            self._head_hook.remove()
+            self._head_hook = None
+        if self._nodeenc_hook is not None:
+            self._nodeenc_hook.remove()
+            self._nodeenc_hook = None
+
+    def _compute_spatial_mtp_loss(
+        self, batch: Batch, target: torch.Tensor
+    ) -> tuple[Optional[torch.Tensor], Dict[str, torch.Tensor]]:
+        if (not self.use_spatial_mtp) or (self.spatial_mtp is None):
+            return None, {}
+
+        H = self._penultimate_hidden
+        edge_index = getattr(batch, "edge_index", None)
+        if H is None or edge_index is None or target is None:
+            return None, {}
+
+        N = H.size(0)
+        if N == 0:
+            return None, {}
+
+        B = min(N, self.spatial_mtp_centers_per_step)
+        if B == 0:
+            return None, {}
+
+        centers = torch.randperm(N, device=H.device)[:B]
+        aux_loss, stats = self.spatial_mtp(
+            H=H,
+            edge_index=edge_index,
+            centers=centers,
+            out_head=self.output_head,
+            target=target,
+            H_neigh=self._H_nodeenc,
+        )
+        return aux_loss, stats
+
     def training_step(self, batch: Batch):
         batch = batch.to(self.device, non_blocking=True)
+        if self.use_spatial_mtp:
+            self._penultimate_hidden = None
+            self._H_nodeenc = None
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
 
@@ -165,7 +291,32 @@ class LightningModule(L.LightningModule):
                 on_epoch=True,
                 prog_bar=True,
             )
+        if self.use_spatial_mtp and self.training:
+            aux_loss, stats = self._compute_spatial_mtp_loss(
+                batch, target_delta_normalized
+            )
+            if aux_loss is not None:
+                loss = loss + self.spatial_mtp_alpha * aux_loss
+                log_stats = {"sp_mtp/aux_loss": aux_loss.detach()}
+                for key, value in stats.items():
+                    log_stats[key] = value.detach()
+                self.log_dict(
+                    log_stats,
+                    on_step=False,
+                    on_epoch=True,
+                    prog_bar=False,
+                    logger=True,
+                )
+
+        if self.use_spatial_mtp:
+            self._penultimate_hidden = None
+            self._H_nodeenc = None
+
         return loss
+
+    def teardown(self, stage: Optional[str] = None) -> None:
+        self._remove_spatial_mtp_hooks()
+        super().teardown(stage)
 
     def _save_trajectory_to_xdmf(
         self,

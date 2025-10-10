@@ -1,6 +1,8 @@
 import unittest
+from copy import deepcopy
 from unittest.mock import MagicMock, patch
 import torch
+import torch.nn as nn
 import meshio
 from torch_geometric.data import Dataset
 from torch_geometric.loader import DataLoader
@@ -73,6 +75,10 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
                     "meta_path": MOCK_H5_META_SAVE_PATH,
                     "khop": 2,
                 },
+            }
+            self.parameters["training"] = {
+                "use_spatial_mtp": False,
+                "use_temporal_block": False,
             }
             self.learning_rate = 0.001
             self.num_steps = 100
@@ -185,6 +191,45 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.use_previous_data = False
             self.model.previous_data_start = None
             self.model.previous_data_end = None
+
+        def test_spatial_mtp_setup(self):
+            params = deepcopy(self.parameters)
+            params["training"] = {"use_spatial_mtp": True}
+
+            hidden_size = params["model"]["hidden_size"]
+            output_size = params["model"]["output_size"]
+
+            class DummyProcessor(nn.Module):
+                def __init__(self, hidden_size: int, output_size: int):
+                    super().__init__()
+                    self.nodes_encoder = nn.Linear(hidden_size, hidden_size)
+                    self.decode_module = nn.Sequential(
+                        nn.Linear(hidden_size, hidden_size),
+                        nn.ReLU(),
+                        nn.Linear(hidden_size, output_size),
+                    )
+
+            dummy_processor = DummyProcessor(hidden_size, output_size)
+            mock_get_model.return_value = dummy_processor
+
+            model = LightningModule(
+                parameters=params,
+                learning_rate=self.learning_rate,
+                num_steps=self.num_steps,
+                warmup=self.warmup,
+                only_processor=self.only_processor,
+                trajectory_length=self.trajectory_length,
+            )
+
+            self.assertTrue(model.use_spatial_mtp)
+            self.assertIsNotNone(model.spatial_mtp)
+            self.assertIsNotNone(model.output_head)
+            self.assertIsNotNone(model._head_hook)
+            self.assertIsNotNone(model._nodeenc_hook)
+
+            model.teardown(stage=None)
+
+            mock_get_model.return_value = self.mock_processor
 
         def test_on_validation_epoch_end(self):
             # Simulate multiple validation steps

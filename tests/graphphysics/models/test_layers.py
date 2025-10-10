@@ -1,5 +1,6 @@
 import unittest
 import torch
+import torch.nn as nn
 from torch_geometric.utils import to_undirected
 
 from graphphysics.models.layers import (
@@ -13,6 +14,7 @@ from graphphysics.models.layers import (
     Attention,
     Transformer,
     GraphNetBlock,
+    set_use_silu_activation,
 )
 
 try:
@@ -33,6 +35,7 @@ class TestTransformerComponents(unittest.TestCase):
         self.assertEqual(output.shape, x.shape)
 
     def test_build_mlp(self):
+        set_use_silu_activation(False)
         in_size = 10
         hidden_size = 20
         out_size = 5
@@ -41,8 +44,20 @@ class TestTransformerComponents(unittest.TestCase):
         x = torch.randn(3, in_size)
         output = mlp(x)
         self.assertEqual(output.shape, (3, out_size))
+        self.assertTrue(
+            any(isinstance(layer, nn.ReLU) for layer in mlp),
+            "MLP should include ReLU activations when SiLU is disabled.",
+        )
+        set_use_silu_activation(True)
+        mlp_silu = build_mlp(in_size, hidden_size, out_size, nb_of_layers)
+        self.assertTrue(
+            any(isinstance(layer, nn.SiLU) for layer in mlp_silu),
+            "MLP should include SiLU activations when SiLU is enabled.",
+        )
+        set_use_silu_activation(False)
 
     def test_gated_mlp(self):
+        set_use_silu_activation(False)
         in_size = 10
         hidden_size = 20
         expansion_factor = 2
@@ -50,6 +65,19 @@ class TestTransformerComponents(unittest.TestCase):
         x = torch.randn(3, in_size)
         output = gated_mlp(x)
         self.assertEqual(output.shape, (3, expansion_factor * hidden_size))
+        self.assertIsInstance(
+            gated_mlp.activation,
+            nn.GELU,
+            "GatedMLP should use GELU when SiLU disabled.",
+        )
+        set_use_silu_activation(True)
+        gated_mlp_silu = GatedMLP(in_size, hidden_size, expansion_factor)
+        self.assertIsInstance(
+            gated_mlp_silu.activation,
+            nn.SiLU,
+            "GatedMLP should use SiLU when SiLU enabled.",
+        )
+        set_use_silu_activation(False)
 
     def test_build_gated_mlp(self):
         in_size = 10
@@ -111,6 +139,44 @@ class TestTransformerComponents(unittest.TestCase):
             output = attention(x, None)
         self.assertEqual(output.shape, (5, output_dim))
 
+    def test_attention_with_rope(self):
+        input_dim = 16
+        output_dim = 16
+        num_heads = 4
+        attention = Attention(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_rope_embeddings=True,
+        )
+        x = torch.randn(5, input_dim)
+        pos = torch.randn(5, 3)
+        output = attention(x, None, pos=pos)
+        self.assertEqual(output.shape, (5, output_dim))
+        attention_no_pos = Attention(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_rope_embeddings=True,
+        )
+        with self.assertRaises(ValueError):
+            attention_no_pos(x, None)
+
+    def test_attention_with_gate(self):
+        input_dim = 16
+        output_dim = 16
+        num_heads = 4
+        attention = Attention(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_gated_attention=True,
+        )
+        x = torch.randn(5, input_dim)
+        output = attention(x, None)
+        self.assertEqual(output.shape, (5, output_dim))
+        self.assertIsNotNone(attention.gate_proj)
+
     def test_transformer(self):
         input_dim = 16
         output_dim = 16
@@ -141,6 +207,43 @@ class TestTransformerComponents(unittest.TestCase):
             output, attn = transformer(x, None, return_attention=True)
         self.assertEqual(output.shape, (5, output_dim))
         self.assertIsNotNone(attn)
+
+    def test_transformer_with_rope(self):
+        input_dim = 16
+        output_dim = 16
+        num_heads = 4
+        transformer = Transformer(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_rope_embeddings=True,
+        )
+        x = torch.randn(5, input_dim)
+        pos = torch.randn(5, 3)
+        output = transformer(x, None, pos=pos)
+        self.assertEqual(output.shape, (5, output_dim))
+        transformer_no_pos = Transformer(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_rope_embeddings=True,
+        )
+        with self.assertRaises(ValueError):
+            transformer_no_pos(x, None)
+
+    def test_transformer_with_gate(self):
+        input_dim = 16
+        output_dim = 16
+        num_heads = 4
+        transformer = Transformer(
+            input_dim,
+            output_dim,
+            num_heads,
+            use_gated_attention=True,
+        )
+        x = torch.randn(5, input_dim)
+        output = transformer(x, None)
+        self.assertEqual(output.shape, (5, output_dim))
 
 
 class TestGraphNetBlock(unittest.TestCase):

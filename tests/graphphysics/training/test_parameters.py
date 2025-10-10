@@ -13,7 +13,8 @@ from graphphysics.training.parse_parameters import (
     get_gradient_method,
 )
 from graphphysics.utils.nodetype import NodeType
-from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceL2Loss
+from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceL2Loss, CosineLoss
+from graphphysics.models.layers import set_use_silu_activation, use_silu_activation
 
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
@@ -25,12 +26,22 @@ from tests.mock import (
 )
 
 # Mock imports from 'graphphysics' package
-with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing, patch(
+with patch(
+    "graphphysics.training.parse_parameters.build_preprocessing"
+) as mock_build_preprocessing, patch(
     "graphphysics.models.processors.EncodeProcessDecode"
 ) as MockEncodeProcessDecode, patch(
     "graphphysics.models.processors.EncodeTransformDecode"
 ) as MockEncodeTransformDecode, patch(
-    "graphphysics.models.simulator.Simulator"
+    "graphphysics.training.parse_parameters.EncodeTransformDecode",
+    new=MockEncodeTransformDecode,
+), patch(
+    "graphphysics.training.parse_parameters.EncodeProcessDecode",
+    new=MockEncodeProcessDecode,
+), patch(
+    "graphphysics.training.parse_parameters.TransolverProcessor"
+) as MockTransolverProcessor, patch(
+    "graphphysics.training.parse_parameters.Simulator"
 ) as MockSimulator, patch(
     "graphphysics.dataset.h5_dataset.H5Dataset"
 ) as MockH5Dataset, patch(
@@ -40,6 +51,8 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
     class TestConfigurationHelpers(unittest.TestCase):
         def setUp(self):
             self.device = torch.device("cpu")
+            set_use_silu_activation(False)
+            self.addCleanup(lambda: set_use_silu_activation(False))
             self.param = {
                 "transformations": {
                     "preprocessing": {
@@ -67,6 +80,9 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                     "edge_input_size": 4,
                     "output_size": 3,
                     "hidden_size": 128,
+                    "use_silu_activation": False,
+                    "use_rope_embeddings": False,
+                    "use_gated_attention": False,
                 },
                 "dataset": {
                     "extension": "h5",
@@ -80,17 +96,28 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                     "gradient_method": "finite_diff",
                 },
             }
+            self.param["training"] = {
+                "use_spatial_mtp": False,
+                "use_temporal_block": False,
+            }
 
         def test_get_preprocessing(self):
             preprocessing_function = get_preprocessing(self.param, self.device)
 
         def test_get_model_epd(self):
             model = get_model(self.param)
+            self.assertFalse(use_silu_activation())
 
         def test_get_model_transformer(self):
+            MockEncodeTransformDecode.reset_mock()
             self.param["model"]["type"] = "transformer"
             self.param["model"]["num_heads"] = 8
+            self.param["model"]["use_silu_activation"] = True
+            self.param["model"]["use_rope_embeddings"] = True
+            self.param["model"]["use_gated_attention"] = True
+            self.param["training"]["use_temporal_block"] = True
             model = get_model(self.param)
+            self.assertTrue(use_silu_activation())
 
         def test_get_model_invalid(self):
             self.param["model"]["type"] = "invalid_model_type"
@@ -161,6 +188,11 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
             single_loss, loss_name = get_loss(param=self.param)
             self.assertIsInstance(single_loss, DivergenceL2Loss)
             self.assertEqual(loss_name, "DIVERGENCEL2LOSS")
+
+            self.param["loss"]["type"] = ["cosinel2loss"]
+            cosine_loss, loss_name = get_loss(param=self.param)
+            self.assertIsInstance(cosine_loss, CosineLoss)
+            self.assertEqual(loss_name, "COSINEL2LOSS")
 
             # Assert that with no loss parameters, default loss is L2Loss
             param_wo_loss = deepcopy(self.param)
