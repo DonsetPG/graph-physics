@@ -174,6 +174,9 @@ def get_dataset(
         ValueError: If the dataset extension specified in param is not supported.
     """
     dataset_params = param.get("dataset", {})
+    targets = dataset_params.get("targets", [])
+    if len(targets) == 0:
+        raise ValueError("Please provide a list of target properties to predict.")
     khop = dataset_params.get("khop", 1)
     new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")

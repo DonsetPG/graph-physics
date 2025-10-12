@@ -37,15 +37,12 @@ class BaseDataset(Dataset, ABC):
         self.meta: Dict[str, Any] = meta
 
         # Check targets are properly defined
-        if len(targets) > 0:
-            for target in targets:
-                if target not in self.meta["features"]:
-                    raise ValueError(f"Target {target} not found in available fields.")
-                if self.meta["features"][target]["type"] != "dynamic":
-                    raise ValueError(f"Target {target} is not a dynamic field.")
-            self.targets = targets
-        else:
-            raise ValueError("Please provide a list of target properties to predict.")
+        for target in targets:
+            if target not in self.meta["features"]:
+                raise ValueError(f"Target {target} not found in available fields.")
+            if self.meta["features"][target]["type"] != "dynamic":
+                raise ValueError(f"Target {target} is not a dynamic field.")
+        self.targets = targets
 
         self.trajectory_length: int = self.meta["trajectory_length"]
         self.num_trajectories: Optional[int] = None
