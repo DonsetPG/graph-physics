@@ -193,7 +193,7 @@ def get_dataset(
         return H5Dataset(
             h5_path=dataset_params["h5_path"],
             meta_path=dataset_params["meta_path"],
-            targets=dataset_params["targets"],
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -207,7 +207,7 @@ def get_dataset(
         return XDMFDataset(
             xdmf_folder=dataset_params["xdmf_folder"],
             meta_path=dataset_params["meta_path"],
-            targets=dataset_params["targets"],
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
