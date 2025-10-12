@@ -59,28 +59,31 @@ class EncodeProcessDecode(nn.Module):
             output_size (int): Size of the output features.
             hidden_size (int, optional): Size of the hidden representations. Defaults to 128.
             only_processor (bool, optional): If True, only the processor is used (no encoding or decoding). Defaults to False.
-            use_rope_embeddings (bool, optional): Unsupported for this architecture.
-            use_gated_attention (bool, optional): Unsupported for this architecture.
+            use_rope_embeddings (bool, optional): Apply relative RoPE inside each GraphNetBlock.
+                Requires node coordinates (`graph.pos`) during the forward pass. Defaults to False.
+            use_gated_attention (bool, optional): Enable query-conditioned aggregation gates
+                inside each GraphNetBlock. Defaults to False.
             use_gated_mlp (bool, optional): Replace GraphNetBlock MLPs with gated variants.
                 Defaults to False.
-            rope_pos_dimension (int, optional): Placeholder for API parity; unused.
-            rope_base (float, optional): Placeholder for API parity; unused.
+            rope_pos_dimension (int, optional): Number of spatial axes (2 or 3) used for RoPE
+                rotations when `use_rope_embeddings=True`. Defaults to 3.
+            rope_base (float, optional): Base frequency for RoPE rotations. Defaults to 10000.0.
             use_temporal_block (bool, optional): Whether to enable the temporal attention block. Defaults to False.
         """
         super().__init__()
         self.only_processor = only_processor
         self.hidden_size = hidden_size
         self.d = output_size
-        if use_rope_embeddings:
-            raise ValueError(
-                "EncodeProcessDecode does not support rotary positional embeddings."
-            )
-        if use_gated_attention:
-            raise ValueError(
-                "EncodeProcessDecode does not support gated attention layers."
-            )
         self.use_temporal_block = use_temporal_block
         self.use_gated_mlp = use_gated_mlp
+        self.use_rope = use_rope_embeddings
+        self.use_gate = use_gated_attention
+        self.rope_axes = rope_pos_dimension
+        self.rope_base = rope_base
+        if self.use_rope and self.rope_axes not in (2, 3):
+            raise ValueError(
+                "rope_pos_dimension must be 2 or 3 when use_rope_embeddings=True."
+            )
         if self.use_temporal_block and not HAS_DGL_SPARSE:
             logger.warning(
                 "use_temporal_block=True but DGL sparse backend is unavailable. "
@@ -117,6 +120,10 @@ class EncodeProcessDecode(nn.Module):
                 GraphNetBlock(
                     hidden_size=hidden_size,
                     use_gated_mlp=use_gated_mlp,
+                    use_rope=use_rope_embeddings,
+                    rope_axes=rope_pos_dimension,
+                    rope_base=rope_base,
+                    use_gate=use_gated_attention,
                 )
                 for _ in range(message_passing_num)
             ]
@@ -147,9 +154,21 @@ class EncodeProcessDecode(nn.Module):
 
         prev_x = x
         last_x = x
+        pos = getattr(graph, "pos", None) if self.use_rope else None
+        if self.use_rope and pos is None:
+            raise ValueError(
+                "Graph data must contain `pos` when use_rope_embeddings=True."
+            )
+        phi = getattr(graph, "phi", None) if self.use_gate else None
         for block in self.processor_list:
             prev_x = x
-            x, edge_attr = block(x, edge_index, edge_attr)
+            x, edge_attr = block(
+                x,
+                edge_index,
+                edge_attr,
+                pos=pos,
+                phi=phi,
+            )
             last_x = x
 
         if self.use_temporal_block and self.temporal_block is not None:

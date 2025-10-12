@@ -91,16 +91,43 @@ class TestEncodeProcessDecode(unittest.TestCase):
         x_decoded = model(self.graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
-    def test_rope_not_supported(self):
+    def test_rope_requires_pos(self):
+        model = EncodeProcessDecode(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            use_rope_embeddings=True,
+        )
         with self.assertRaises(ValueError):
-            EncodeProcessDecode(
-                message_passing_num=self.message_passing_num,
-                node_input_size=self.node_input_size,
-                edge_input_size=self.edge_input_size,
-                output_size=self.output_size,
-                hidden_size=self.hidden_size,
-                use_rope_embeddings=True,
-            )
+            model(self.graph)
+
+    def test_rope_forward(self):
+        model = EncodeProcessDecode(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            use_rope_embeddings=True,
+        )
+        self.graph.pos = torch.randn(self.num_nodes, 3)
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_gate_forward(self):
+        model = EncodeProcessDecode(
+            message_passing_num=self.message_passing_num,
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            use_gated_attention=True,
+        )
+        self.graph.phi = torch.randn(self.num_nodes)
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
 
 class TestEncodeTransformDecode(unittest.TestCase):

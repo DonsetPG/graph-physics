@@ -114,6 +114,13 @@ with patch(
             self.param["model"]["use_gated_mlp"] = True
             get_model(self.param)
 
+        def test_get_model_epd_with_rope_and_gate(self):
+            MockEncodeProcessDecode.reset_mock()
+            self.param["model"]["use_rope_embeddings"] = True
+            self.param["model"]["use_gated_attention"] = True
+            self.param["model"]["rope_pos_dimension"] = 3
+            get_model(self.param)
+
         def test_get_model_transformer(self):
             MockEncodeTransformDecode.reset_mock()
             self.param["model"]["type"] = "transformer"
