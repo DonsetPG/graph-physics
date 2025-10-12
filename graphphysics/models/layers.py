@@ -822,7 +822,15 @@ class GraphNetBlock(MessagePassing):
     """
 
     def __init__(
-        self, hidden_size: int, nb_of_layers: int = 4, layer_norm: bool = True
+        self,
+        hidden_size: int,
+        nb_of_layers: int = 4,
+        layer_norm: bool = True,
+        use_rope: bool = False,
+        rope_axes: int = 3,
+        rope_base: float = 10000.0,
+        use_gated_mlp: bool = False,
+        use_gate: bool = False,
     ):
         """
         Initializes the GraphNetBlock.
@@ -833,24 +841,78 @@ class GraphNetBlock(MessagePassing):
                 Defaults to 4.
             layer_norm (bool, optional): Whether to use layer normalization in the MLPs.
                 Defaults to True.
+            use_rope (bool, optional): Apply rotary position embeddings to source node
+                features before message construction. Defaults to False.
+            rope_axes (int, optional): Number of spatial axes (2 or 3) to use for RoPE.
+                Defaults to 3.
+            rope_base (float, optional): Frequency base for RoPE. Defaults to 10000.0.
+            use_gated_mlp (bool, optional): Replace edge/node MLPs with gated variants.
+                Defaults to False.
+            use_gate (bool, optional): Enable query-conditioned multiplicative gating on
+                aggregated messages. Defaults to False.
         """
         super().__init__(aggr="add", flow="source_to_target")
         edge_input_dim = 3 * hidden_size
         node_input_dim = 2 * hidden_size
-        self.edge_block = build_mlp(
-            in_size=edge_input_dim,
-            hidden_size=hidden_size,
-            out_size=hidden_size,
-            nb_of_layers=nb_of_layers,
-            layer_norm=layer_norm,
-        )
-        self.node_block = build_mlp(
-            in_size=node_input_dim,
-            hidden_size=hidden_size,
-            out_size=hidden_size,
-            nb_of_layers=nb_of_layers,
-            layer_norm=layer_norm,
-        )
+        self.hidden_size = hidden_size
+        self.use_gated_mlp = use_gated_mlp
+
+        if self.use_gated_mlp:
+            self.edge_block = build_gated_mlp(
+                in_size=edge_input_dim,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+            )
+            self.node_block = build_gated_mlp(
+                in_size=node_input_dim,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+            )
+        else:
+            self.edge_block = build_mlp(
+                in_size=edge_input_dim,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+                nb_of_layers=nb_of_layers,
+                layer_norm=layer_norm,
+            )
+            self.node_block = build_mlp(
+                in_size=node_input_dim,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+                nb_of_layers=nb_of_layers,
+                layer_norm=layer_norm,
+            )
+
+        # RoPE configuration
+        self.use_rope = use_rope
+        self.rope_axes = rope_axes
+        self.rope_base = rope_base
+
+        if self.use_rope:
+            if rope_axes not in (2, 3):
+                raise ValueError("rope_axes must be 2 or 3 when use_rope=True.")
+            self._pair_count = hidden_size // (2 * rope_axes)
+            self._rope_dim = self._pair_count * 2 * rope_axes
+            if self._pair_count == 0:
+                raise ValueError(
+                    f"hidden_size={hidden_size} too small for rope_axes={rope_axes}; "
+                    "need at least 2 * rope_axes channels."
+                )
+            inv = torch.arange(self._pair_count, dtype=torch.float32)
+            denom = max(float(self._pair_count), 1.0)
+            inv = torch.pow(self.rope_base, -inv / denom)
+            self.register_buffer("_rope_inv_freq", inv, persistent=False)
+        else:
+            self._pair_count = 0
+            self._rope_dim = 0
+            self.register_buffer("_rope_inv_freq", torch.zeros(0), persistent=False)
+
+        # Gated aggregation configuration
+        self.use_gate = use_gate
+        if self.use_gate:
+            self.gate_proj = nn.Linear(hidden_size, hidden_size, bias=True)
+            self.gate_pos = nn.Parameter(torch.zeros(hidden_size))
 
     def forward(
         self,
@@ -858,6 +920,8 @@ class GraphNetBlock(MessagePassing):
         edge_index: torch.Tensor,
         edge_attr: torch.Tensor,
         size: int = None,
+        pos: Optional[torch.Tensor] = None,
+        phi: Optional[torch.Tensor] = None,
     ) -> Tuple[torch.Tensor, torch.Tensor]:
         """
         Forward pass of the GraphNetBlock.
@@ -868,6 +932,10 @@ class GraphNetBlock(MessagePassing):
             edge_attr (torch.Tensor): Edge features of shape [num_edges, hidden_size].
             size (Size, optional): The size of the source and target nodes.
                 Defaults to None.
+            pos (torch.Tensor, optional): Node positions of shape [num_nodes, rope_axes].
+                Required when use_rope is True. Defaults to None.
+            phi (torch.Tensor, optional): Optional per-node scalar used for the gate.
+                Defaults to None.
 
         Returns:
             Tuple[torch.Tensor, torch.Tensor]: Updated node features and edge features.
@@ -876,11 +944,24 @@ class GraphNetBlock(MessagePassing):
         row, col = edge_index
         x_i = x[col]  # Target node features
         x_j = x[row]  # Source node features
+
+        if self.use_rope:
+            if pos is None:
+                raise ValueError(
+                    "Node positions `pos` must be provided when use_rope=True."
+                )
+            delta_pos = pos[row, : self.rope_axes] - pos[col, : self.rope_axes]
+            x_j = self._apply_rope_rel(x_j, delta_pos)
+
         edge_attr_ = self.edge_update(edge_attr, x_i, x_j)
 
         # Perform message passing and update node features
         x_ = self.propagate(
-            edge_index, x=x, edge_attr=edge_attr_, size=(x.size(0), x.size(0))
+            edge_index,
+            x=x,
+            edge_attr=edge_attr_,
+            size=(x.size(0), x.size(0)),
+            phi=phi,
         )
 
         edge_attr = edge_attr + edge_attr_
@@ -918,17 +999,79 @@ class GraphNetBlock(MessagePassing):
         """
         return edge_attr
 
-    def update(self, aggr_out: torch.Tensor, x: torch.Tensor) -> torch.Tensor:
+    def update(
+        self,
+        aggr_out: torch.Tensor,
+        x: torch.Tensor,
+        phi: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
         """
         Updates node features after aggregation.
 
         Args:
             aggr_out (torch.Tensor): Aggregated messages [num_nodes, hidden_size].
             x (torch.Tensor): Node features [num_nodes, hidden_size].
+            phi (torch.Tensor, optional): Optional per-node scalar used for gating.
 
         Returns:
             torch.Tensor: Updated node features [num_nodes, hidden_size].
         """
+        if self.use_gate:
+            gate_logits = self.gate_proj(x)
+            if phi is not None:
+                phi = phi.view(-1, 1).to(device=gate_logits.device, dtype=gate_logits.dtype)
+                gate_logits = gate_logits + phi * self.gate_pos.view(1, -1)
+            gate_logits = gate_logits.to(dtype=aggr_out.dtype, device=aggr_out.device)
+            gate = torch.sigmoid(gate_logits)
+            aggr_out = aggr_out * gate
+
         node_input = torch.cat([x, aggr_out], dim=-1)
         x = self.node_block(node_input)
         return x
+
+    def _apply_rope_rel(
+        self, x_src: torch.Tensor, delta_pos: torch.Tensor
+    ) -> torch.Tensor:
+        """
+        Apply relative 2D/3D RoPE rotations to the source node features.
+
+        Args:
+            x_src (torch.Tensor): Source node features [num_edges, hidden_size].
+            delta_pos (torch.Tensor): Relative offsets [num_edges, rope_axes].
+
+        Returns:
+            torch.Tensor: Rotated source node features [num_edges, hidden_size].
+        """
+        if self._pair_count == 0:
+            return x_src
+
+        num_edges, hidden_dim = x_src.shape
+        rope_dim = self._rope_dim
+
+        x_rot = x_src[:, :rope_dim]
+        x_rest = x_src[:, rope_dim:]
+
+        parts = []
+        start = 0
+        inv_freq = self._rope_inv_freq
+        delta = delta_pos.to(device=x_src.device, dtype=inv_freq.dtype)
+
+        for axis in range(self.rope_axes):
+            seg = x_rot[:, start : start + 2 * self._pair_count].reshape(
+                num_edges, self._pair_count, 2
+            )
+            theta = delta[:, axis].unsqueeze(1) * inv_freq.unsqueeze(0)
+            cos_theta = torch.cos(theta).to(dtype=x_src.dtype)
+            sin_theta = torch.sin(theta).to(dtype=x_src.dtype)
+            even = seg[..., 0]
+            odd = seg[..., 1]
+            rot_even = even * cos_theta - odd * sin_theta
+            rot_odd = even * sin_theta + odd * cos_theta
+            seg_rot = torch.stack([rot_even, rot_odd], dim=-1).reshape(
+                num_edges, 2 * self._pair_count
+            )
+            parts.append(seg_rot)
+            start += 2 * self._pair_count
+
+        x_rotated = torch.cat(parts, dim=-1)
+        return torch.cat([x_rotated, x_rest], dim=-1)

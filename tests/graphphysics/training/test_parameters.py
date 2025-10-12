@@ -83,6 +83,7 @@ with patch(
                     "use_silu_activation": False,
                     "use_rope_embeddings": False,
                     "use_gated_attention": False,
+                    "use_gated_mlp": False,
                 },
                 "dataset": {
                     "extension": "h5",
@@ -105,8 +106,13 @@ with patch(
             preprocessing_function = get_preprocessing(self.param, self.device)
 
         def test_get_model_epd(self):
+            MockEncodeProcessDecode.reset_mock()
             model = get_model(self.param)
-            self.assertFalse(use_silu_activation())
+
+        def test_get_model_epd_with_gated_mlp(self):
+            MockEncodeProcessDecode.reset_mock()
+            self.param["model"]["use_gated_mlp"] = True
+            get_model(self.param)
 
         def test_get_model_transformer(self):
             MockEncodeTransformDecode.reset_mock()

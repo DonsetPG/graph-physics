@@ -12,7 +12,8 @@
         "node_input_size": 2,
         "output_size": 2,
         "edge_input_size": 3,
-        "use_silu_activation": false
+        "use_silu_activation": false,
+        "use_gated_mlp": false
     },
     "index": {
         "feature_index_start": 0,

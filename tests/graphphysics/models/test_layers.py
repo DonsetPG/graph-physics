@@ -260,10 +260,15 @@ class TestGraphNetBlock(unittest.TestCase):
         num_edges = edge_index.size(1)
         edge_attr = torch.randn(num_edges, hidden_size)
 
+        pos = torch.randn(num_nodes, 3)
+        phi = torch.randn(num_nodes)
+
         self.edge_index = edge_index
         self.x = x
         self.edge_attr = edge_attr
         self.hidden_size = hidden_size
+        self.pos = pos
+        self.phi = phi
 
     def test_graphnetblock_forward(self):
         block = GraphNetBlock(hidden_size=self.hidden_size)
@@ -307,6 +312,56 @@ class TestGraphNetBlock(unittest.TestCase):
         # Check that outputs are computed
         self.assertEqual(x_updated.shape, self.x.shape)
         self.assertEqual(edge_attr_updated.shape, self.edge_attr.shape)
+
+    def test_graphnetblock_with_gated_mlp(self):
+        block = GraphNetBlock(hidden_size=self.hidden_size, use_gated_mlp=True)
+        x = self.x.clone().requires_grad_(True)
+        edge_attr = self.edge_attr.clone().requires_grad_(True)
+
+        x_updated, edge_attr_updated = block(x, self.edge_index, edge_attr)
+
+        self.assertEqual(x_updated.shape, x.shape)
+        self.assertEqual(edge_attr_updated.shape, edge_attr.shape)
+
+        loss = x_updated.sum() + edge_attr_updated.sum()
+        loss.backward()
+
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(edge_attr.grad)
+
+    def test_graphnetblock_rope_requires_pos(self):
+        block = GraphNetBlock(
+            hidden_size=self.hidden_size, use_rope=True, rope_axes=3, rope_base=1000.0
+        )
+        with self.assertRaises(ValueError):
+            block(self.x, self.edge_index, self.edge_attr)
+
+    def test_graphnetblock_with_rope_and_gate(self):
+        block = GraphNetBlock(
+            hidden_size=self.hidden_size,
+            use_rope=True,
+            rope_axes=3,
+            use_gate=True,
+        )
+        x = self.x.clone().requires_grad_(True)
+        edge_attr = self.edge_attr.clone().requires_grad_(True)
+        phi = self.phi.clone().requires_grad_(False)
+
+        x_updated, edge_attr_updated = block(
+            x,
+            self.edge_index,
+            edge_attr,
+            pos=self.pos,
+            phi=phi,
+        )
+
+        self.assertEqual(x_updated.shape, x.shape)
+        self.assertEqual(edge_attr_updated.shape, edge_attr.shape)
+
+        loss = x_updated.sum() + edge_attr_updated.sum()
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(edge_attr.grad)
 
 
 if __name__ == "__main__":
