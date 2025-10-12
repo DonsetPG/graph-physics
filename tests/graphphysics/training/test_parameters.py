@@ -115,6 +115,7 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
 
             self.assertEqual(dataset.h5_path, self.param["dataset"]["h5_path"])
             self.assertEqual(dataset.meta_path, self.param["dataset"]["meta_path"])
+            self.assertEqual(dataset.targets, self.param["dataset"]["targets"])
             self.assertEqual(dataset.preprocessing, preprocessing)
             self.assertEqual(dataset.khop, self.param["dataset"]["khop"])
             self.assertTrue(dataset.add_edge_features, True)
@@ -128,6 +129,7 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
 
             self.assertEqual(dataset.xdmf_folder, self.param["dataset"]["xdmf_folder"])
             self.assertEqual(dataset.meta_path, self.param["dataset"]["meta_path"])
+            self.assertEqual(dataset.targets, self.param["dataset"]["targets"])
 
         def test_get_dataset_invalid(self):
             self.param["dataset"]["extension"] = "invalid_extension"
@@ -135,6 +137,25 @@ with patch("graphphysics.training.parse_parameters") as mock_build_preprocessing
                 get_dataset(self.param, preprocessing=MagicMock())
             self.assertIn(
                 "Dataset extension 'invalid_extension' not supported",
+                str(context.exception),
+            )
+
+        def test_get_dataset_invalid_targets_definition(self):
+            # Remove targets key
+            del self.param["dataset"]["targets"]
+            with self.assertRaises(ValueError) as context:
+                get_dataset(self.param, preprocessing=MagicMock())
+            self.assertIn(
+                "Please provide a list of target properties to predict",
+                str(context.exception),
+            )
+
+        def test_get_dataset_invalid_targets_name(self):
+            self.param["dataset"]["targets"] = ["invalid_target"]
+            with self.assertRaises(ValueError) as context:
+                get_dataset(self.param, preprocessing=MagicMock())
+            self.assertIn(
+                f"Target {self.param['dataset']['targets'][0]} not found in available fields.",
                 str(context.exception),
             )
 
