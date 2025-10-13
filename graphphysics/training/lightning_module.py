@@ -151,15 +151,32 @@ class LightningModule(L.LightningModule):
 
     def _setup_spatial_mtp(self, processor: nn.Module, device: str) -> None:
         out_head = getattr(processor, "decode_module", None)
-        if out_head is None or not isinstance(out_head, nn.Module):
+        node_encoder = getattr(processor, "nodes_encoder", None)
+
+        if not isinstance(out_head, nn.Module) or not isinstance(
+            node_encoder, nn.Module
+        ):
+            # Fallback for TransolverProcessor: use internal preprocess/output_proj modules.
+            transolver_model = getattr(processor, "model", None)
+            if isinstance(transolver_model, nn.Module):
+                maybe_encoder = getattr(transolver_model, "preprocess", None)
+                maybe_head = getattr(transolver_model, "output_proj", None)
+                if isinstance(maybe_encoder, nn.Module) and isinstance(
+                    maybe_head, nn.Module
+                ):
+                    node_encoder = maybe_encoder
+                    out_head = maybe_head
+
+        if not isinstance(out_head, nn.Module):
             raise ValueError(
-                "Spatial MTP requires a processor with a 'decode_module' nn.Module."
+                "Spatial MTP requires a processor with an output head nn.Module "
+                "(expected 'decode_module' or 'model.output_proj')."
             )
 
-        node_encoder = getattr(processor, "nodes_encoder", None)
-        if node_encoder is None or not isinstance(node_encoder, nn.Module):
+        if not isinstance(node_encoder, nn.Module):
             raise ValueError(
-                "Spatial MTP requires a processor with a 'nodes_encoder' nn.Module."
+                "Spatial MTP requires a processor with an encoder nn.Module "
+                "(expected 'nodes_encoder' or 'model.preprocess')."
             )
 
         first_linear = next(
@@ -185,10 +202,16 @@ class LightningModule(L.LightningModule):
         ).to(torch_device)
 
         def _capture_head_input(module, inputs):
-            self._penultimate_hidden = inputs[0]
+            hidden = inputs[0]
+            if isinstance(hidden, torch.Tensor) and hidden.dim() > 2:
+                hidden = hidden.reshape(-1, hidden.size(-1))
+            self._penultimate_hidden = hidden
 
         def _capture_nodeenc_output(module, inputs, outputs):
-            self._H_nodeenc = outputs
+            features = outputs
+            if isinstance(features, torch.Tensor) and features.dim() > 2:
+                features = features.reshape(-1, features.size(-1))
+            self._H_nodeenc = features
 
         self._head_hook = out_head.register_forward_pre_hook(_capture_head_input)
         self._nodeenc_hook = node_encoder.register_forward_hook(_capture_nodeenc_output)
