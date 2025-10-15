@@ -156,6 +156,7 @@ def get_dataset(
     use_edge_feature: bool = True,
     use_previous_data: bool = False,
     switch_to_val: bool = False,
+    target_same_frame=dataset_params["target_same_frame"]
 ):
     """
     Constructs the dataset based on provided parameters.

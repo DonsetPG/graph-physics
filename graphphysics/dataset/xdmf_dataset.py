@@ -24,6 +24,7 @@ class XDMFDataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        target_same_frame: bool = False,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
     ):
@@ -35,6 +36,7 @@ class XDMFDataset(BaseDataset):
             new_edges_ratio=new_edges_ratio,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            target_same_frame=target_same_frame,
         )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -56,12 +58,13 @@ class XDMFDataset(BaseDataset):
 
         self.xdmf_folder = xdmf_folder
         self.meta_path = meta_path
+        self.target_same_frame = target_same_frame
 
         # Get list of XDMF files in the folder
         self.file_paths: List[str] = [
             os.path.join(xdmf_folder, f)
             for f in os.listdir(xdmf_folder)
-            if os.path.isfile(os.path.join(xdmf_folder, f)) and f.endswith(".xdmf")
+            if os.path.isfile(os.path.join(xdmf_folder, f)) and (f.endswith(".xdmf") or f.endswith(".xmf"))
         ]
         self._size_dataset: int = len(self.file_paths)
 
@@ -102,14 +105,15 @@ class XDMFDataset(BaseDataset):
             if frame + _target_data_index > num_steps - 1:
                 _target_data_index = 1
 
-            if frame >= num_steps - 1:
+            if frame >= num_steps - 1 and (not self.target_same_frame):
                 raise IndexError(
-                    f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames."
-                )
+                    f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames.")
 
             points, cells = reader.read_points_cells()
             time, point_data, _ = reader.read_data(frame)
-            _, target_point_data, _ = reader.read_data(frame + _target_data_index)
+            target_frame = frame + 1
+            if self.target_same_frame: target_frame = frame
+￼           _, target_point_data, _ = reader.read_data(target_frame)
 
             if self.use_previous_data:
                 _, previous_data, _ = reader.read_data(frame - _previous_data_index)
