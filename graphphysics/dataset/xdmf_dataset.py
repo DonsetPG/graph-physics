@@ -113,7 +113,7 @@ class XDMFDataset(BaseDataset):
             time, point_data, _ = reader.read_data(frame)
             target_frame = frame + 1
             if self.target_same_frame: target_frame = frame
-￼           _, target_point_data, _ = reader.read_data(target_frame)
+            _, target_point_data, _ = reader.read_data(target_frame)
 
             if self.use_previous_data:
                 _, previous_data, _ = reader.read_data(frame - _previous_data_index)

@@ -83,14 +83,15 @@ class BaseDataset(Dataset, ABC):
             frame = index % self.trajectory_length
         else:
             traj = index // (self.trajectory_length - 1)
-￼            frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
+            frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
         return traj, frame
 
     def __len__(self) -> int:
+        self.target_same_frame=True # OJO !!!!!!!!!!!!!!!!!!!!!!!!
         if (self.target_same_frame):
             return self.size_dataset*self.trajectory_length
         else:
-￼            return self.size_dataset * (self.trajectory_length - 1)
+            return self.size_dataset * (self.trajectory_length - 1)
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
