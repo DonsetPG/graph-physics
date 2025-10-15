@@ -173,7 +173,9 @@ def meshdata_to_graph(
         )
     if cells.shape[0] == 3:
         face = cells
-
+    if cells.shape[0] == 2:    
+        face = cells
+        
     return Data(
         x=node_features,
         face=face,

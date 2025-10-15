@@ -97,6 +97,19 @@ class XDMFDataset(BaseDataset):
         _previous_data_index = random.randint(1, self.random_prev)
 
         # Read XDMF file
+        # --- ADD ---
+        # Option without time serie
+        if self.target_same_frame:
+            mesh = meshio.read(xdmf_file)
+            points, cells = mesh.points, mesh.cells
+            point_data = mesh.point_data  # dict attendu
+            target_point_data = point_data  # même frame = même cible
+            previous_data = None
+            num_steps = 1
+            target_frame = 1
+
+        # --- END ADD ---
+        '''
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
             num_steps = reader.num_steps
 
@@ -117,13 +130,15 @@ class XDMFDataset(BaseDataset):
 
             if self.use_previous_data:
                 _, previous_data, _ = reader.read_data(frame - _previous_data_index)
-
+        '''
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
 
         # Get faces or cells
         if "triangle" in mesh.cells_dict:
             cells = mesh.cells_dict["triangle"]
+        elif "line" in mesh.cells_dict:
+            cells = mesh.cells_dict["line"]    
         elif "tetra" in mesh.cells_dict:
             cells = torch.tensor(mesh.cells_dict["tetra"], dtype=torch.long)
         else:
@@ -144,6 +159,17 @@ class XDMFDataset(BaseDataset):
             if k in target_point_data.keys()
             and self.meta["features"][k]["type"] == "dynamic"
         }
+        # --- DEBUG PRINT ESSENTIEL ---
+        def summarize_data(name, data_dict):
+            print(f"\n{name} summary:")
+            for k, v in data_dict.items():
+                print(f"  {k:<20} shape={v.shape}, dtype={v.dtype}")
+            print(f"Total {len(data_dict)} features.\n")
+
+        summarize_data("point_data", point_data)
+        summarize_data("target_data", target_data)
+        # --- FIN DEBUG ---
+
 
         def _reshape_array(a: dict):
             for k, v in a.items():
@@ -158,7 +184,7 @@ class XDMFDataset(BaseDataset):
             points=points.astype(np.float32),
             cells=cells,
             point_data=point_data,
-            time=time,
+            time=0,
             target=target_data,
             id=mesh_id,
         )
