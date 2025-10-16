@@ -37,6 +37,8 @@ class BaseDataset(Dataset, ABC):
         self.meta: Dict[str, Any] = meta
 
         # Check targets are properly defined
+        if targets is None or len(targets) == 0:
+            raise ValueError("At least one target must be specified.")
         for target in targets:
             if target not in self.meta["features"]:
                 raise ValueError(f"Target {target} not found in available fields.")
