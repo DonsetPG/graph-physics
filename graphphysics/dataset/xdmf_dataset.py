@@ -102,35 +102,44 @@ class XDMFDataset(BaseDataset):
         if self.target_same_frame:
             mesh = meshio.read(xdmf_file)
             points, cells = mesh.points, mesh.cells
-            point_data = mesh.point_data  # dict attendu
+            point_data = dict(mesh.point_data)
+            # --- AJOUT : inclure mesh_pos et wall_mask ---
+            point_data["mesh_pos"] = mesh.points.astype(
+                self.meta["features"]["mesh_pos"]["dtype"]
+            )
+            if "wall_mask" in mesh.point_data.keys():
+                point_data["wall_mask"] = np.array(
+                    mesh.point_data["wall_mask"]
+                ).astype(self.meta["features"]["wall_mask"]["dtype"])
+            # --- FIN AJOUT ---
             target_point_data = point_data  # même frame = même cible
             previous_data = None
             num_steps = 1
             target_frame = 1
 
         # --- END ADD ---
-        '''
-        with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
-            num_steps = reader.num_steps
+        else:
+            with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
+                num_steps = reader.num_steps
 
-            if frame - _previous_data_index < 0:
-                _previous_data_index = 1
-            if frame + _target_data_index > num_steps - 1:
-                _target_data_index = 1
+                if frame - _previous_data_index < 0:
+                    _previous_data_index = 1
+                if frame + _target_data_index > num_steps - 1:
+                    _target_data_index = 1
 
-            if frame >= num_steps - 1 and (not self.target_same_frame):
-                raise IndexError(
-                    f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames.")
+                if frame >= num_steps - 1 and (not self.target_same_frame):
+                    raise IndexError(
+                        f"Frame index {frame} out of bounds for trajectory {traj_index} with {num_steps} frames.")
 
-            points, cells = reader.read_points_cells()
-            time, point_data, _ = reader.read_data(frame)
-            target_frame = frame + 1
-            if self.target_same_frame: target_frame = frame
-            _, target_point_data, _ = reader.read_data(target_frame)
+                points, cells = reader.read_points_cells()
+                time, point_data, _ = reader.read_data(frame)
+                target_frame = frame + 1
+                if self.target_same_frame: target_frame = frame
+                _, target_point_data, _ = reader.read_data(target_frame)
 
-            if self.use_previous_data:
-                _, previous_data, _ = reader.read_data(frame - _previous_data_index)
-        '''
+                if self.use_previous_data:
+                    _, previous_data, _ = reader.read_data(frame - _previous_data_index)
+    
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
 
@@ -147,19 +156,35 @@ class XDMFDataset(BaseDataset):
             )
 
         # Process point data and target data
-        point_data = {
-            k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in mesh.point_data.keys()
-        }
+        if self.target_same_frame:
+            selected_features = ["mesh_pos", "wall_mask"]
+            point_data = {
+                k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in mesh.point_data.keys() and k in selected_features
+            }
 
-        target_data = {
-            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
-        }
+            target_data = {
+                k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in target_point_data.keys()
+                and k == "Velocity"
+            }
+        else:
+            point_data = {
+                k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in mesh.point_data.keys()
+            }
+
+            target_data = {
+                k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in target_point_data.keys()
+                and self.meta["features"][k]["type"] == "dynamic"
+            }    
         # --- DEBUG PRINT ESSENTIEL ---
+        print('-----DEBUG--------')
         def summarize_data(name, data_dict):
             print(f"\n{name} summary:")
             for k, v in data_dict.items():
@@ -168,6 +193,7 @@ class XDMFDataset(BaseDataset):
 
         summarize_data("point_data", point_data)
         summarize_data("target_data", target_data)
+        print('-----------------')
         # --- FIN DEBUG ---
 
 
@@ -180,17 +206,28 @@ class XDMFDataset(BaseDataset):
         _reshape_array(target_data)
 
         # Create graph from mesh data
-        graph = meshdata_to_graph(
-            points=points.astype(np.float32),
-            cells=cells,
-            point_data=point_data,
-            time=0,
-            target=target_data,
-            id=mesh_id,
-        )
+        if self.target_same_frame:
+            graph = meshdata_to_graph(
+                points=points.astype(np.float32),
+                cells=cells,
+                point_data=point_data,
+                time=0,
+                target=target_data,
+                id=mesh_id,
+            )
+        else:
+            graph = meshdata_to_graph(
+                points=points.astype(np.float32),
+                cells=cells,
+                point_data=point_data,
+                time=time,
+                target=target_data,
+                id=mesh_id,
+            )
+
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt
-
+        self.use_previous_data = False #### I force use_previous_data to be false
         if self.use_previous_data:
             previous = {
                 k: np.array(previous_data[k]).astype(self.meta["features"][k]["dtype"])
@@ -204,7 +241,7 @@ class XDMFDataset(BaseDataset):
 
         graph = graph.to(self.device)
 
-        graph = self._apply_preprocessing(graph)
+        #graph = self._apply_preprocessing(graph) #### I remove preprocess
         graph = self._apply_k_hop(graph, traj_index)
         graph = self._may_remove_edges_attr(graph)
         graph = self._add_random_edges(graph)
