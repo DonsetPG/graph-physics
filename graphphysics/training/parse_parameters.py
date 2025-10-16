@@ -174,6 +174,9 @@ def get_dataset(
         ValueError: If the dataset extension specified in param is not supported.
     """
     dataset_params = param.get("dataset", {})
+    targets = dataset_params.get("targets", [])
+    if len(targets) == 0:
+        raise ValueError("Please provide a list of target properties to predict.")
     khop = dataset_params.get("khop", 1)
     new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")
@@ -190,6 +193,7 @@ def get_dataset(
         return H5Dataset(
             h5_path=dataset_params["h5_path"],
             meta_path=dataset_params["meta_path"],
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -203,6 +207,7 @@ def get_dataset(
         return XDMFDataset(
             xdmf_folder=dataset_params["xdmf_folder"],
             meta_path=dataset_params["meta_path"],
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,

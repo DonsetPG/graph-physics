@@ -5,10 +5,7 @@ import jax.numpy as jnp
 from torch.utils import data
 
 from jraphphysics.dataset.xdmf_dataset import XDMFDataset
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 from jraphphysics.utils.jax_graph import batched_meshdata_to_graph
 
 
@@ -17,6 +14,7 @@ class TestXDMFDataset(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
         )
         self.dataset.trajectory_length += 1
 
@@ -35,6 +33,7 @@ class TestXDMFDataloader(unittest.TestCase):
         self.dataset = XDMFDataset(
             xdmf_folder=MOCK_XDMF_FOLDER,
             meta_path=MOCK_H5_META10_SAVE_PATH,
+            targets=MOCK_XDMF_TARGETS,
         )
         self.dataset.trajectory_length += 1
         self.dataloader = data.DataLoader(

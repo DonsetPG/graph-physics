@@ -17,6 +17,7 @@ class XDMFDataset(BaseDataset):
         self,
         xdmf_folder: str,
         meta_path: str,
+        targets: list[str] = None,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -29,6 +30,7 @@ class XDMFDataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -134,12 +136,21 @@ class XDMFDataset(BaseDataset):
             if k in mesh.point_data.keys()
         }
 
-        target_data = {
-            k: np.array(target_point_data[k]).astype(self.meta["features"][k]["dtype"])
-            for k in self.meta["features"]
-            if k in target_point_data.keys()
-            and self.meta["features"][k]["type"] == "dynamic"
-        }
+        target_data = {}
+        next_data = {}
+        for k in self.meta["features"]:
+            if k in self.targets:
+                target_data[k] = np.array(target_point_data[k]).astype(
+                    self.meta["features"][k]["dtype"]
+                )
+            else:
+                if (
+                    k in target_point_data.keys()
+                    and self.meta["features"][k]["type"] == "dynamic"
+                ):
+                    next_data[k] = np.array(target_point_data[k]).astype(
+                        self.meta["features"][k]["dtype"]
+                    )
 
         def _reshape_array(a: dict):
             for k, v in a.items():
@@ -157,6 +168,7 @@ class XDMFDataset(BaseDataset):
             time=time,
             target=target_data,
             id=mesh_id,
+            next_data=next_data,
         )
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt
@@ -184,6 +196,7 @@ class XDMFDataset(BaseDataset):
             graph.edge_index.long() if graph.edge_index is not None else None
         )
 
+        del graph.next_data
         del graph.previous_data
         graph.traj_index = traj_index
 

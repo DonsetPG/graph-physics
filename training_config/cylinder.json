@@ -3,6 +3,7 @@
         "extension": "h5",
         "h5_path": "dataset/h5_dataset/cylinder_flow/train.h5",
         "meta_path": "dataset_config/cylinder_meta.json",
+        "targets": ["velocity"],
         "khop": 1
     },
     "model": {

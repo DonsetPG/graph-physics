@@ -3,6 +3,7 @@
         "extension": "xdmf",
         "xdmf_folder": "dataset/train",
         "meta_path": "dataset/meta.json",
+        "targets": ["Vitesse"],
         "khop": 1,
         "new_edges_ratio": 0
     },

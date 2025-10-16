@@ -1,16 +1,9 @@
 from torch_geometric.loader import DataLoader
-import unittest
 
 from graphphysics.dataset.h5_dataset import H5Dataset
-from tests.mock import (
-    MOCK_H5_META_SAVE_PATH,
-    MOCK_H5_SAVE_PATH,
-)
+from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
-from tests.mock import (
-    MOCK_XDMF_FOLDER,
-    MOCK_H5_META10_SAVE_PATH,
-)
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 from graphphysics.dataset.preprocessing import build_preprocessing
 
 ITEMS_TO_FETCH = 20
@@ -25,6 +18,7 @@ def get_items_h5():
     dataset = H5Dataset(
         h5_path=MOCK_H5_SAVE_PATH,
         meta_path=MOCK_H5_META_SAVE_PATH,
+        targets=MOCK_H5_TARGETS,
         preprocessing=transform,
     )
     dataset.trajectory_length += 1
@@ -37,6 +31,7 @@ def get_items_xdmf():
     dataset = XDMFDataset(
         xdmf_folder=MOCK_XDMF_FOLDER,
         meta_path=MOCK_H5_META10_SAVE_PATH,
+        targets=MOCK_XDMF_TARGETS,
         preprocessing=transform,
     )
     dataset.trajectory_length += 1
@@ -49,6 +44,7 @@ def get_items_h5dataloader():
     dataset = H5Dataset(
         h5_path=MOCK_H5_SAVE_PATH,
         meta_path=MOCK_H5_META_SAVE_PATH,
+        targets=MOCK_H5_TARGETS,
         preprocessing=transform,
     )
     dataset.trajectory_length += 1
@@ -70,6 +66,7 @@ def get_items_xdmfdataloader():
     dataset = XDMFDataset(
         xdmf_folder=MOCK_XDMF_FOLDER,
         meta_path=MOCK_H5_META10_SAVE_PATH,
+        targets=MOCK_XDMF_TARGETS,
         preprocessing=transform,
     )
     dataloader = DataLoader(

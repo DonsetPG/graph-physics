@@ -109,6 +109,7 @@ def meshdata_to_graph(
     target: Optional[np.ndarray] = None,
     return_only_node_features: bool = False,
     id: Optional[str] = None,
+    next_data: Optional[np.ndarray] = None,
 ) -> Data:
     """Converts mesh data into a PyTorch Geometric Data object.
 
@@ -181,6 +182,7 @@ def meshdata_to_graph(
         y=target_features,
         pos=torch.tensor(points, dtype=torch.float32),
         id=id,
+        next_data=next_data,
     )
 
 
