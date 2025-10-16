@@ -177,6 +177,7 @@ def get_dataset(
     khop = dataset_params.get("khop", 1)
     new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")
+    target_same_frame=dataset_params["target_same_frame"]
 
     world_pos_parameters = None
     if khop > 1:

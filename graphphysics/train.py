@@ -79,7 +79,7 @@ def main(argv):
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    wandb_project_name = FLAGS.project_name
+    #wandb_project_name = FLAGS.project_name
     num_epochs = FLAGS.num_epochs
     initial_lr = FLAGS.init_lr
     batch_size = FLAGS.batch_size
@@ -128,6 +128,18 @@ def main(argv):
         switch_to_val=True,
     )
 
+    print("---- DEBUG ----")
+    print("TRAIN Dataset type:", type(train_dataset))
+    print("Number of XDMF files:", train_dataset.size_dataset)
+    print("Trajectory length:", train_dataset.trajectory_length)
+    print("Computed len(train_dataset):", len(train_dataset))
+    print("----------------")
+    print("VAL Dataset type:", type(val_dataset))
+    print("Number of XDMF files:", val_dataset.size_dataset)
+    print("Trajectory length:", val_dataset.trajectory_length)
+    print("Computed len(val_dataset):", len(val_dataset))
+    print("----------------")
+    
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)
 
     train_dataloader_kwargs = {
@@ -205,6 +217,7 @@ def main(argv):
         )
 
     # Initialize WandbLogger
+    '''
     if resume_training:
         wandb_run = wandb.init(
             project=wandb_project_name, id=lightning_module.wandb_run_id, resume="allow"
@@ -214,6 +227,7 @@ def main(argv):
 
     wandb_logger = WandbLogger(experiment=wandb_run)
     lightning_module.wandb_run_id = wandb_logger.experiment.id
+    '''
     if model_save_name is not None:
         checkpoint_callback = ModelCheckpoint(
             dirpath="checkpoints/", filename=model_save_name
@@ -221,7 +235,7 @@ def main(argv):
     else:
         checkpoint_callback = ModelCheckpoint(dirpath="checkpoints")
     lr_monitor = LearningRateMonitor(logging_interval="step")
-
+    '''
     wandb_logger.experiment.config.update(
         {
             "architecture": parameters["model"]["type"],
@@ -232,13 +246,13 @@ def main(argv):
             "batch_size": batch_size,
         }
     )
-
+    '''
     # Configure Trainer
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
         devices=1,
         max_epochs=num_epochs,
-        logger=wandb_logger,
+        #logger=wandb_logger,
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
