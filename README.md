@@ -78,7 +78,7 @@ We also save:
 - Meshes of auto regressive prediction as `.xdmf` file for the first trajectory of the validation dataset.
 
 > [!WARNING]  
-> If saving thoses meshes takes too much space, you can 1. monitor the disk usage using Weights and Biases, 2. Remove this functionnality in [lightning_module.py](https://github.com/DonsetPG/graph-physics/blob/0c9b6af20a25e7d08f2731efdfe4911f34fbc274/graphphysics/training/lightning_module.py#L154) (see the code below)
+> If saving those meshes takes too much space, you can 1. monitor the disk usage using Weights and Biases, 2. Remove this functionality in [lightning_module.py](https://github.com/DonsetPG/graph-physics/blob/0c9b6af20a25e7d08f2731efdfe4911f34fbc274/graphphysics/training/lightning_module.py#L154) (see the code below)
 
 https://github.com/DonsetPG/graph-physics/blob/6687b0bafabdd575d2ace6c0e7c39796e1f1624c/graphphysics/training/lightning_module.py#L151-L165
 
@@ -121,7 +121,7 @@ pip install h5py==3.10.0
 
 ### DGL
 
-You will need to install DGL. You can find information on how to set it up for your environnement [here](https://www.dgl.ai/pages/start.html).
+You will need to install DGL. You can find information on how to set it up for your environment [here](https://www.dgl.ai/pages/start.html).
 
 In the case of a google colab, you can use:
 ```
@@ -130,7 +130,7 @@ pip install  dgl -f https://data.dgl.ai/wheels/torch-2.4/cu124/repo.html
 
 ### WandB
 
-We use Weights and Bias to log most of our metrics and vizualizations during the trainig. Make sure you create and account, and log in before you start training.
+We use Weights and Bias to log most of our metrics and vizualizations during the training. Make sure you create and account, and log in before you start training.
 
 ```python
 import wandb
@@ -164,7 +164,7 @@ in the same call as your training.
 
 Most of setting up a new use case depends on two `.json` files: one to define the dataset details, and one for the training settings.
 
-Let's start with the training settings. An exemple is available [here](https://github.com/DonsetPG/graph-physics/blob/main/training_config/cylinder.json).
+Let's start with the training settings. An example is available [here](https://github.com/DonsetPG/graph-physics/blob/main/training_config/cylinder.json).
 
 ### Dataset
 
@@ -173,6 +173,7 @@ Let's start with the training settings. An exemple is available [here](https://g
     "extension": "h5",
     "h5_path": "dataset/h5_dataset/cylinder_flow/train.h5",
     "meta_path": "dataset/h5_dataset/cylinder_flow/meta.json",
+    "targets": ["velocity"],
     "khop": 1
 }
 ```
@@ -184,7 +185,15 @@ Let's start with the training settings. An exemple is available [here](https://g
 > You will need a dataset at the same location with `test` instead of `train` in its name for the validation step to work. Otherwise, you can specify its name directly in `training.py`
 
 - `meta_path`: Location to the .json file with the dataset details (see below)
-- `khop`: K-hop neighbours size to use. You should start with 1.
+- `targets`: List of the fields to predict.
+
+> [!NOTE]   
+> If this key does not exist or if the list is empty, an error will be raised.   
+> The field(s) designated as target(s) must be dynamic. If it is not the case, an error will be raised.   
+> The order in which the fields are defined in `targets` must be the same as that in the `dataset_config` file.     
+> The dynamic fields not designated as targets will be added to `graph.next_data` and will be available for building features, for instance if the user wants to use the velocity boundary conditions of the next time step.
+
+- `khop`: K-hop neighbors size to use. You should start with 1.
 
 You also need to define a few other parameters: 
 
@@ -197,9 +206,9 @@ You also need to define a few other parameters:
     "node_type_index": 2
 }
 ```
-- `feature_index_`: This is to define where we should look for nodes features. The end is excluded. For example, if you have 2D velocities at index 0 and 1, and pressure at index 2. If you want to use the pressure you should set  `feature_index_start=0` and  `feature_index_end=3`, otherwise, `feature_index_end=2`.
+- `feature_index_`: This is to define where we should look for nodes features. The end is excluded. For example, if you have 2D velocities at index 0 and 1, and pressure at index 2. If you want to use the pressure you should set `feature_index_start=0` and `feature_index_end=3`, otherwise, `feature_index_end=2`.
 
-- `output_index_`: We define our architectures to predict one of your feature for the enxt time steps. So you need to tell us where to look. For example, if you want to predict the velocity at the next step, since the velocity is at index 0 and 1, you will set  `output_index_start=0` and `output_index_end=2`.
+- `output_index_`: We define our architectures to predict one of your feature for the next time steps. So you need to tell us where to look. For example, if you want to predict the velocity at the next step, since the velocity is at index 0 and 1, you will set `output_index_start=0` and `output_index_end=2`.
 
 - `node_type_index`: Finally, we use a node type classification for each node:
 
@@ -217,7 +226,7 @@ SIZE = 9
 > [!WARNING]  
 > You should modify this if this is not at all representative of your use case. Those are taken from [Meshgraphnet](https://github.com/google-deepmind/deepmind-research/tree/master/meshgraphnets) and we found them to be general enough for all of our use cases. 
 
-This means that you either need to have such feature in your dataset, or to define a python function to build them (see below). After that, you need to tell us where to look. For example, if we only have velocity and node type, we will have  `node_type_index=2`. If we also had the pressure, we would set `node_type_index=3`
+This means that you either need to have such feature in your dataset, or to define a python function to build them (see below). After that, you need to tell us where to look. For example, if we only have velocity and node type, we will have `node_type_index=2`. If we also had the pressure, we would set `node_type_index=3`
 
 > [!WARNING]  
 > H5-based dataloader does not support multiple workers. XDMF can.
