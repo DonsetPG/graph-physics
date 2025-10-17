@@ -16,6 +16,8 @@ from graphphysics.utils.torch_graph import (
     get_masked_indexes,
 )
 
+from .preprocessing import _translate_world_params
+
 
 class BaseDataset(Dataset, ABC):
     def __init__(
@@ -68,13 +70,18 @@ class BaseDataset(Dataset, ABC):
         self.x_layout = x_layout
         self.x_coords = dict(x_coords or {})
 
+        translated_world_params = _translate_world_params(
+            world_pos_parameters, self.x_layout
+        )
         self.world_pos_index_start = None
         self.world_pos_index_end = None
-        if world_pos_parameters is not None:
-            self.world_pos_index_start = world_pos_parameters.get(
+        if translated_world_params is not None:
+            self.world_pos_index_start = translated_world_params.get(
                 "world_pos_index_start"
             )
-            self.world_pos_index_end = world_pos_parameters.get("world_pos_index_end")
+            self.world_pos_index_end = translated_world_params.get(
+                "world_pos_index_end"
+            )
 
     @property
     @abstractmethod
