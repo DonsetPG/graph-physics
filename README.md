@@ -188,7 +188,10 @@ Let's start with the training settings. An example is available [here](https://g
 - `targets`: List of the fields to predict.
 
 > [!NOTE]   
-> If this key does not exist or if the list is empty, an error will be raised. The field(s) designated as target(s) must be dynamic. If it is not the case, an error will be raised. The dynamic fields not designated as targets will be added to `graph.next_data` and will be available for building features, for instance if the user wants to use the velocity boundary conditions of the next time step.
+> If this key does not exist or if the list is empty, an error will be raised.   
+> The field(s) designated as target(s) must be dynamic. If it is not the case, an error will be raised.   
+> The order in which the fields are defined in `targets` must be the same as that in the `dataset_config` file.     
+> The dynamic fields not designated as targets will be added to `graph.next_data` and will be available for building features, for instance if the user wants to use the velocity boundary conditions of the next time step.
 
 - `khop`: K-hop neighbors size to use. You should start with 1.
 
