@@ -16,12 +16,41 @@
         "edge_input_size": 0,
         "num_heads": 4
     },
-    "index": {
-        "feature_index_start": 0,
-        "feature_index_end": 14,
-        "output_index_start": 0,
-        "output_index_end": 3,
-        "node_type_index": 14
+    "features": {
+        "node": [
+            "mesh_pos",
+            "Vitesse",
+            "wall_mask",
+            "derived_feature_0",
+            "derived_feature_1",
+            "derived_feature_2",
+            "derived_feature_3",
+            "derived_feature_4",
+            "derived_feature_5",
+            "derived_feature_6",
+            "node_type"
+        ],
+        "node_type": "node_type"
+    },
+    "sizes": {
+        "derived_feature_0": 1,
+        "derived_feature_1": 1,
+        "derived_feature_2": 1,
+        "derived_feature_3": 1,
+        "derived_feature_4": 1,
+        "derived_feature_5": 1,
+        "derived_feature_6": 1,
+        "node_type": 1
+    },
+    "named_features": {
+        "mode": "semantic",
+        "legacy_index": {
+            "feature_index_start": 0,
+            "feature_index_end": 14,
+            "output_index_start": 0,
+            "output_index_end": 3,
+            "node_type_index": 14
+        }
     },
     "loss": {
         "type": ["l2loss", "gradientl2loss", "divergencel2loss"],

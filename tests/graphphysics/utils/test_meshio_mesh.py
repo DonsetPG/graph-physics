@@ -1,11 +1,16 @@
 import unittest
-import meshio
-import numpy as np
 import os
 import shutil
-import torch
+
+import pytest
+
+meshio = pytest.importorskip("meshio")
+np = pytest.importorskip("numpy")
+torch = pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
 from torch_geometric.data import Data
 
+from named_features import NamedData, make_x_layout
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu, vtu_to_xdmf
 from tests.mock import MOCK_VTU_FOLDER_PATH, MOCK_VTU_ANEURYSM_FOLDER_PATH
 
@@ -55,6 +60,18 @@ class TestConvertToMeshioVtu(unittest.TestCase):
         # Check that data matches the graph's x
         np.testing.assert_array_equal(mesh.point_data["x0"], x[:, 0].numpy())
         np.testing.assert_array_equal(mesh.point_data["x1"], x[:, 1].numpy())
+
+    def test_add_all_data_named(self):
+        """Named layouts export semantic feature names."""
+        x = torch.tensor(
+            [[1.0, 2.0, 3.0], [4.0, 5.0, 6.0], [7.0, 8.0, 9.0]], dtype=torch.float32
+        )
+        layout = make_x_layout(["velocity", "pressure"], {"velocity": 2, "pressure": 1})
+        graph = NamedData(pos=self.pos_2d, face=self.face_2d, x=x, x_layout=layout)
+        mesh = convert_to_meshio_vtu(graph, add_all_data=True)
+
+        np.testing.assert_array_equal(mesh.point_data["velocity"], x[:, :2].numpy())
+        np.testing.assert_array_equal(mesh.point_data["pressure"], x[:, 2].numpy())
 
     def test_missing_pos(self):
         """Test error handling when graph.pos is missing."""

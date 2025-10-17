@@ -1,7 +1,12 @@
 import unittest
-import torch
+
+import pytest
+
+torch = pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
 from torch_geometric.data import Data
 
+from named_features import NamedData, make_x_layout
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.external.bezier import add_bezier_node_type
 from graphphysics.external.aneurysm import build_features
@@ -78,6 +83,26 @@ class TestCustomFeatures(unittest.TestCase):
             ]
         }
 
+        # NamedData variants
+        bezier_layout = make_x_layout(
+            ["unused", "bn", "a1", "a2", "a3", "a4"],
+            {"unused": 3, "bn": 1, "a1": 1, "a2": 1, "a3": 1, "a4": 1},
+        )
+        self.graph_bezier_named = NamedData(
+            x=self.graph_bezier.x.clone(), x_layout=bezier_layout
+        )
+
+        aneurysm_layout = make_x_layout(
+            ["Vitesse", "wall_mask"], {"Vitesse": 3, "wall_mask": 1}
+        )
+        self.graph_build_named = NamedData(
+            x=self.graph_build.x.clone(),
+            pos=self.graph_build.pos.clone(),
+            y=self.graph_build.y.clone(),
+            previous_data={"Vitesse": list(self.graph_build.previous_data["Vitesse"])},
+            x_layout=aneurysm_layout,
+        )
+
     def test_add_bezier_node_type(self):
         # Apply the function
         graph = add_bezier_node_type(self.graph_bezier)
@@ -99,6 +124,13 @@ class TestCustomFeatures(unittest.TestCase):
 
         # Node 4 should be default (0) because a2 == 1.0, so wall_mask should be False
         self.assertEqual(node_type_column[4].item(), NodeType.NORMAL)
+
+    def test_add_bezier_node_type_named(self):
+        graph = add_bezier_node_type(self.graph_bezier_named)
+        node_names = graph.x_layout.names()
+        self.assertTrue(any(name.startswith("node_type") for name in node_names))
+        appended = graph.x[:, -1]
+        self.assertTrue(torch.all(torch.isfinite(appended)))
 
     def test_build_features(self):
         device = "cuda" if torch.cuda.is_available() else "cpu"
@@ -152,6 +184,28 @@ class TestCustomFeatures(unittest.TestCase):
         self.assertTrue(torch.all(mean_next_accel == expected_mean))
         self.assertTrue(torch.all(min_next_accel == expected_min))
         self.assertTrue(torch.all(max_next_accel == expected_max))
+
+    def test_build_features_named(self):
+        device = "cuda" if torch.cuda.is_available() else "cpu"
+        graph_named = self.graph_build_named.clone()
+        graph_named.x = graph_named.x.to(device)
+        graph_named.pos = graph_named.pos.to(device)
+        graph_named.y = graph_named.y.to(device)
+        graph_named = build_features(graph_named)
+        names = graph_named.x_layout.names()
+        expected_suffixes = {
+            "acceleration",
+            "mesh_pos",
+            "mean_next_accel",
+            "min_next_accel",
+            "max_next_accel",
+        }
+        self.assertTrue(any(name.startswith("node_type") for name in names))
+        for suffix in expected_suffixes:
+            self.assertTrue(
+                any(name.startswith(suffix) for name in names),
+                msg=f"Missing feature starting with {suffix}",
+            )
 
     def test_build_features_with_missing_previous_data(self):
         graph = self.graph_build.clone()

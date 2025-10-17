@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Tuple
+from typing import Optional, Sequence, Tuple
 
 import torch
 import torch.nn as nn
@@ -8,6 +8,7 @@ from torch_geometric.data import Data
 
 from graphphysics.models.layers import Normalizer
 from graphphysics.utils.nodetype import NodeType
+from named_features import XFeatureLayout
 
 
 class Simulator(nn.Module):
@@ -29,6 +30,11 @@ class Simulator(nn.Module):
         model: nn.Module,
         device: torch.device,
         model_dir: str = "checkpoint/simulator.pth",
+        *,
+        x_layout: Optional[XFeatureLayout] = None,
+        feature_names: Optional[Sequence[str]] = None,
+        target_names: Optional[Sequence[str]] = None,
+        node_type_name: Optional[str] = None,
     ):
         """
         Initializes the Simulator module.
@@ -61,6 +67,16 @@ class Simulator(nn.Module):
         self.output_index_start = output_index_start
         self.output_index_end = output_index_end
 
+        self.x_layout = x_layout
+        self.feature_names: tuple[str, ...] = (
+            tuple(feature_names) if feature_names else tuple()
+        )
+        self.target_names: tuple[str, ...] = (
+            tuple(target_names) if target_names else tuple()
+        )
+        self.node_type_name = node_type_name
+        self._layout_sizes = x_layout.sizes() if x_layout else {}
+
         self.model_dir = model_dir
         self.model = model.to(device)
         self._output_normalizer = Normalizer(
@@ -77,6 +93,92 @@ class Simulator(nn.Module):
 
         self.device = device
 
+    def _supports_named(self, inputs: Data) -> bool:
+        return hasattr(inputs, "x_sel") and callable(getattr(inputs, "x_sel", None))
+
+    def _gather_features(
+        self,
+        inputs: Data,
+        names: Sequence[str],
+        start: Optional[int],
+        end: Optional[int],
+    ) -> torch.Tensor:
+        if names and self._supports_named(inputs):
+            if len(names) == 1:
+                return inputs.x_sel(names[0])
+            return inputs.x_sel(list(names))
+        if names and self.x_layout is not None:
+            parts = [inputs.x[..., self.x_layout.slc(name)] for name in names]
+            return parts[0] if len(parts) == 1 else torch.cat(parts, dim=-1)
+        if start is not None and end is not None:
+            return inputs.x[..., start:end]
+        raise RuntimeError("Simulator is missing feature selection configuration.")
+
+    def _assign_features(
+        self,
+        inputs: Data,
+        names: Sequence[str],
+        values: torch.Tensor,
+        start: Optional[int],
+        end: Optional[int],
+    ) -> None:
+        tensor = values
+        if names and self.x_layout is not None:
+            if self._supports_named(inputs) and hasattr(inputs, "x_assign"):
+                offset = 0
+                mapping = {}
+                for name in names:
+                    size = self._layout_sizes[name]
+                    mapping[name] = tensor[..., offset : offset + size]
+                    offset += size
+                inputs.x_assign(mapping, inplace=True)
+                return
+            offset = 0
+            for name in names:
+                slc = self.x_layout.slc(name)
+                size = slc.stop - slc.start
+                inputs.x[..., slc] = tensor[..., offset : offset + size]
+                offset += size
+            return
+        if start is not None and end is not None:
+            inputs.x[..., start:end] = tensor
+            return
+        raise RuntimeError("Simulator is missing feature assignment configuration.")
+
+    def _select_node_type_tensor(self, inputs: Data) -> torch.Tensor:
+        if self.node_type_name:
+            if self._supports_named(inputs):
+                tensor = inputs.x_sel(self.node_type_name)
+            elif self.x_layout is not None:
+                tensor = inputs.x[..., self.x_layout.slc(self.node_type_name)]
+            else:
+                tensor = None
+            if tensor is not None:
+                return tensor
+        if self.node_type_index is not None:
+            return inputs.x[..., self.node_type_index]
+        raise RuntimeError("Node type feature is not configured for the simulator.")
+
+    def get_node_type(self, inputs: Data) -> torch.Tensor:
+        tensor = self._select_node_type_tensor(inputs)
+        if tensor.dim() == inputs.x.dim():
+            tensor = tensor.squeeze(-1)
+        return tensor.reshape(-1)
+
+    def select_targets_from_x(self, inputs: Data) -> torch.Tensor:
+        return self._gather_features(
+            inputs, self.target_names, self.output_index_start, self.output_index_end
+        )
+
+    def assign_targets_to_x(self, inputs: Data, values: torch.Tensor) -> None:
+        self._assign_features(
+            inputs,
+            self.target_names,
+            values,
+            self.output_index_start,
+            self.output_index_end,
+        )
+
     def _get_pre_target(self, inputs: Data) -> torch.Tensor:
         """
         Extracts the previous target values from the input data.
@@ -87,7 +189,7 @@ class Simulator(nn.Module):
         Returns:
             torch.Tensor: The previous target values extracted from node features.
         """
-        return inputs.x[:, self.output_index_start : self.output_index_end]
+        return self.select_targets_from_x(inputs)
 
     def _get_target_normalized(
         self, inputs: Data, is_training: bool = True
@@ -119,10 +221,11 @@ class Simulator(nn.Module):
         Returns:
             torch.Tensor: One-hot encoded node types.
         """
-        node_type = inputs.x[:, self.node_type_index]
-        return torch.nn.functional.one_hot(
-            torch.squeeze(node_type.long()), NodeType.SIZE
-        )
+        node_type = self._select_node_type_tensor(inputs)
+        if node_type.dim() == inputs.x.dim():
+            node_type = node_type.squeeze(-1)
+        node_type = node_type.reshape(-1).long()
+        return torch.nn.functional.one_hot(node_type, NodeType.SIZE)
 
     def _build_node_features(
         self, inputs: Data, one_hot_type: torch.Tensor
@@ -137,7 +240,9 @@ class Simulator(nn.Module):
         Returns:
             torch.Tensor: The concatenated node features.
         """
-        features = inputs.x[:, self.feature_index_start : self.feature_index_end]
+        features = self._gather_features(
+            inputs, self.feature_names, self.feature_index_start, self.feature_index_end
+        )
         node_features = torch.cat([features, one_hot_type], dim=1)
 
         return node_features

@@ -94,10 +94,9 @@ class LogPyVistaPredictionsCallback(Callback):
 
                     if predicted_outputs is not None:
                         # Update the graph with the last prediction
-                        graph.x[
-                            :,
-                            model.model.output_index_start : model.model.output_index_end,
-                        ] = predicted_outputs.detach()
+                        model.model.assign_targets_to_x(
+                            graph, predicted_outputs.detach()
+                        )
 
                     mask = build_mask(model.param, graph)
                     target = graph.y
@@ -105,7 +104,7 @@ class LogPyVistaPredictionsCallback(Callback):
                     _, _, predicted_outputs = model(graph)
                     predicted_outputs[mask] = target[mask]
 
-                    graph.x = predicted_outputs
+                    model.model.assign_targets_to_x(graph, predicted_outputs)
 
                     # Convert outputs to a PyVista mesh
                     predicted_mesh = self._convert_to_pyvista_mesh(graph)
@@ -117,7 +116,7 @@ class LogPyVistaPredictionsCallback(Callback):
                     frames_predictions.append(img_array)
 
                     ### Same for Ground Truth:
-                    graph.x = graph.y
+                    model.model.assign_targets_to_x(graph, graph.y)
                     # Convert outputs to a PyVista mesh
                     ground_truth_mesh = self._convert_to_pyvista_mesh(graph)
 

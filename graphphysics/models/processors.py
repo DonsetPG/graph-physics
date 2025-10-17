@@ -4,12 +4,8 @@ from loguru import logger
 from torch_geometric.data import Data
 from torch_geometric.nn import TransformerConv
 
-from graphphysics.models.layers import (
-    GraphNetBlock,
-    Transformer,
-    build_mlp,
-)
 import graphphysics.models.transolver as Transolver
+from graphphysics.models.layers import GraphNetBlock, Transformer, build_mlp
 
 try:
     import dgl.sparse as dglsp

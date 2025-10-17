@@ -1,6 +1,6 @@
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import torch
 import torch_geometric.transforms as T
@@ -13,6 +13,9 @@ from graphphysics.utils.torch_graph import (
     compute_k_hop_graph,
     get_masked_indexes,
 )
+from named_features import XFeatureLayout
+
+from .preprocessing import _translate_world_params
 
 
 class BaseDataset(Dataset, ABC):
@@ -27,6 +30,8 @@ class BaseDataset(Dataset, ABC):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         world_pos_parameters: Optional[dict] = None,
+        x_layout: Optional[XFeatureLayout] = None,
+        x_coords: Optional[Mapping[str, object]] = None,
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -61,14 +66,21 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
+        self.x_layout = x_layout
+        self.x_coords = dict(x_coords or {})
 
+        translated_world_params = _translate_world_params(
+            world_pos_parameters, self.x_layout
+        )
         self.world_pos_index_start = None
         self.world_pos_index_end = None
-        if world_pos_parameters is not None:
-            self.world_pos_index_start = world_pos_parameters.get(
+        if translated_world_params is not None:
+            self.world_pos_index_start = translated_world_params.get(
                 "world_pos_index_start"
             )
-            self.world_pos_index_end = world_pos_parameters.get("world_pos_index_end")
+            self.world_pos_index_end = translated_world_params.get(
+                "world_pos_index_end"
+            )
 
     @property
     @abstractmethod

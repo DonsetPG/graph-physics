@@ -1,5 +1,5 @@
 from collections import OrderedDict
-from typing import Callable, Optional, Tuple, Union
+from typing import Callable, Dict, Mapping, Optional, Tuple, Union
 
 import numpy as np
 import torch
@@ -10,9 +10,11 @@ from torch_geometric.data import Data
 from graphphysics.dataset.dataset import BaseDataset
 from graphphysics.utils.hierarchical import (
     get_frame_as_graph,
+    get_frame_as_mesh,
     get_traj_as_meshes,
     read_h5_metadata,
 )
+from named_features import XFeatureLayout
 
 try:
     import h5py
@@ -35,6 +37,8 @@ class H5Dataset(BaseDataset):
         switch_to_val: bool = False,
         world_pos_parameters: Optional[dict] = None,
         cache_size: int = 8,
+        x_layout: Optional[XFeatureLayout] = None,
+        x_coords: Optional[Mapping[str, object]] = None,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -46,6 +50,8 @@ class H5Dataset(BaseDataset):
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
             world_pos_parameters=world_pos_parameters,
+            x_layout=x_layout,
+            x_coords=x_coords,
         )
 
         self.type = "h5"
@@ -126,32 +132,32 @@ class H5Dataset(BaseDataset):
             self._frame_cache.popitem(last=False)
         return None
 
-    def _build_node_features(self, traj: dict, frame: int) -> torch.Tensor:
-        time = frame * self.meta.get("dt", 1)
+    def _build_node_features(
+        self, traj: dict, frame: int
+    ) -> Union[torch.Tensor, Dict[str, np.ndarray]]:
+        time_value = frame * self.meta.get("dt", 1)
+        _, _, point_data, _, _ = get_frame_as_mesh(
+            traj,
+            frame,
+            targets=None,
+            feature_layout=self.x_layout,
+            time_value=time_value,
+        )
 
-        point_data = {
-            key: (traj[key][frame] if traj[key].ndim > 1 else traj[key])
-            for key in traj.keys()
-            if key not in ["mesh_pos", "cells", "node_type"]
-        }
-        point_data["node_type"] = traj["node_type"][0]
+        if self.x_layout is None:
+            arrays = [value.astype(np.float32) for value in point_data.values()]
+            if arrays:
+                node_features = np.concatenate(arrays, axis=1)
+            else:
+                num_nodes = traj["mesh_pos"].shape[-2]
+                node_features = np.zeros((num_nodes, 0), dtype=np.float32)
+            time_column = np.full(
+                (node_features.shape[0], 1), time_value, dtype=np.float32
+            )
+            node_features = np.concatenate([node_features, time_column], axis=1)
+            return torch.from_numpy(node_features)
 
-        arrays = []
-        for data in point_data.values():
-            arr = data
-            if arr.ndim == 1:
-                arr = arr[:, None]
-            arrays.append(arr.astype(np.float32))
-
-        if arrays:
-            node_features = np.concatenate(arrays, axis=1)
-        else:
-            node_features = np.zeros((traj["mesh_pos"].shape[-2], 0), dtype=np.float32)
-
-        time_column = np.full((node_features.shape[0], 1), time, dtype=np.float32)
-        node_features = np.concatenate([node_features, time_column], axis=1)
-
-        return torch.from_numpy(node_features)
+        return {name: value for name, value in point_data.items()}
 
     def _get_processed_graph(
         self,
@@ -176,6 +182,8 @@ class H5Dataset(BaseDataset):
                 meta=self.meta,
                 targets=self.targets,
                 frame_target=frame + 1,
+                feature_layout=self.x_layout,
+                x_coords=self.x_coords,
             )
 
             graph = self._apply_preprocessing(graph)

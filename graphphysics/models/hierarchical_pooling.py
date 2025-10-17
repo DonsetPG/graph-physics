@@ -4,10 +4,9 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-
 from torch_geometric.data import Batch
-from torch_geometric.nn.unpool import knn_interpolate
 from torch_geometric.nn.pool.select import SelectTopK
+from torch_geometric.nn.unpool import knn_interpolate
 from torch_geometric.transforms import KNNGraph
 
 

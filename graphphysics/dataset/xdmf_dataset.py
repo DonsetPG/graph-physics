@@ -1,6 +1,6 @@
 import os
 import random
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Callable, List, Mapping, Optional, Tuple, Union
 
 import meshio
 import numpy as np
@@ -10,6 +10,7 @@ from torch_geometric.data import Data
 
 from graphphysics.dataset.dataset import BaseDataset
 from graphphysics.utils.torch_graph import meshdata_to_graph
+from named_features import XFeatureLayout
 
 
 class XDMFDataset(BaseDataset):
@@ -27,6 +28,8 @@ class XDMFDataset(BaseDataset):
         switch_to_val: bool = False,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
+        x_layout: Optional[XFeatureLayout] = None,
+        x_coords: Optional[Mapping[str, object]] = None,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -37,6 +40,8 @@ class XDMFDataset(BaseDataset):
             new_edges_ratio=new_edges_ratio,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            x_layout=x_layout,
+            x_coords=x_coords,
         )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -169,6 +174,8 @@ class XDMFDataset(BaseDataset):
             target=target_data,
             id=mesh_id,
             next_data=next_data,
+            x_layout=self.x_layout,
+            x_coords=self.x_coords,
         )
         # TODO: add target_dt and previous_dt as features per node.
         graph.target_dt = _target_data_index * self.dt

@@ -1,6 +1,15 @@
+from collections import OrderedDict
+
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
+np = pytest.importorskip("numpy")
+
 import torch
 import torch_geometric.transforms as T
-import numpy as np
+from named_features import NamedData, make_x_layout
+
 from graphphysics.utils.torch_graph import (
     mesh_to_graph,
     meshdata_to_graph,
@@ -44,6 +53,46 @@ def test_meshdata_to_graph_3d():
     )
 
     assert graph.x.shape[0] == 4
+
+
+def test_meshdata_to_graph_with_layout():
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+
+    cells = np.array([[0, 1, 2]], dtype=np.int32)
+    point_data = OrderedDict(
+        [
+            (
+                "velocity",
+                np.array([[0.0, 1.0], [1.0, 0.0], [0.0, -1.0]], dtype=np.float32),
+            ),
+            ("pressure", np.array([[0.1], [0.2], [0.3]], dtype=np.float32)),
+            ("node_type", np.array([[0.0], [1.0], [2.0]], dtype=np.float32)),
+            ("time", np.array([[0.5], [0.5], [0.5]], dtype=np.float32)),
+        ]
+    )
+    layout = make_x_layout(
+        ["velocity", "pressure", "node_type", "time"],
+        {"velocity": 2, "pressure": 1, "node_type": 1, "time": 1},
+    )
+
+    graph = meshdata_to_graph(
+        points=points,
+        cells=cells,
+        point_data=point_data,
+        x_layout=layout,
+    )
+
+    assert isinstance(graph, NamedData)
+    assert graph.x_layout is layout
+    assert graph.x.shape[1] == sum(layout.sizes().values())
+    np.testing.assert_allclose(graph.x_sel("time").cpu().numpy(), point_data["time"])
 
 
 def test_mesh_to_graph():
@@ -97,3 +146,37 @@ def test_torch_graph_to_mesh():
     assert len(mesh.points) == len(new_mesh.points)
     for k in list(mesh.point_data.keys()):
         assert np.array_equal(mesh.point_data[k], new_mesh.point_data[k])
+
+
+def test_torch_graph_to_mesh_named():
+    points = np.array(
+        [
+            [0.0, 0.0, 0.0],
+            [1.0, 0.0, 0.0],
+            [0.0, 1.0, 0.0],
+        ],
+        dtype=np.float32,
+    )
+    cells = np.array([[0, 1, 2]], dtype=np.int32)
+    point_data = OrderedDict(
+        [
+            (
+                "velocity",
+                np.array([[0.0, 1.0], [1.0, 0.0], [0.0, -1.0]], dtype=np.float32),
+            ),
+            ("pressure", np.array([[0.1], [0.2], [0.3]], dtype=np.float32)),
+        ]
+    )
+    layout = make_x_layout(["velocity", "pressure"], {"velocity": 2, "pressure": 1})
+    graph = meshdata_to_graph(
+        points=points,
+        cells=cells,
+        point_data=point_data,
+        x_layout=layout,
+    )
+
+    new_mesh = torch_graph_to_mesh(graph)
+    np.testing.assert_allclose(new_mesh.point_data["velocity"], point_data["velocity"])
+    np.testing.assert_allclose(
+        new_mesh.point_data["pressure"], point_data["pressure"][:, 0]
+    )
