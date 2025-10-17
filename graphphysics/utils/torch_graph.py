@@ -1,4 +1,4 @@
-from typing import Dict, List, Optional, Union
+from typing import Dict, Iterable, List, Mapping, Optional, Sequence, Union
 
 import meshio
 import numpy as np
@@ -6,6 +6,8 @@ import torch
 import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
+
+from named_features import NamedData, XFeatureLayout
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
@@ -101,15 +103,52 @@ def compute_k_hop_graph(
     return khop_mesh_graph
 
 
+def _stack_point_data(
+    point_data: Mapping[str, np.ndarray],
+    *,
+    order: Optional[Sequence[str]] = None,
+    num_nodes: int,
+) -> np.ndarray:
+    if not point_data:
+        return np.zeros((num_nodes, 0), dtype=np.float32)
+
+    if order is None:
+        items = list(point_data.items())
+    else:
+        items = [(name, point_data[name]) for name in order if name in point_data]
+
+    arrays = []
+    detected_nodes = None
+    for name, array in items:
+        arr = np.asarray(array)
+        if arr.ndim == 1:
+            arr = arr[:, None]
+        if detected_nodes is None:
+            detected_nodes = arr.shape[0]
+        elif arr.shape[0] != detected_nodes:
+            raise ValueError(
+                f"Feature '{name}' has inconsistent node count: expected {detected_nodes}, got {arr.shape[0]}."
+            )
+        arrays.append(arr.astype(np.float32))
+
+    if not arrays:
+        return np.zeros((num_nodes, 0), dtype=np.float32)
+
+    return np.concatenate(arrays, axis=1)
+
+
 def meshdata_to_graph(
     points: np.ndarray,
     cells: np.ndarray,
-    point_data: Optional[Dict[str, np.ndarray]],
+    point_data: Optional[Mapping[str, np.ndarray]],
     time: Union[int, float] = 1,
-    target: Optional[np.ndarray] = None,
+    target: Optional[Mapping[str, np.ndarray]] = None,
     return_only_node_features: bool = False,
     id: Optional[str] = None,
-    next_data: Optional[np.ndarray] = None,
+    next_data: Optional[Mapping[str, np.ndarray]] = None,
+    *,
+    x_layout: Optional[XFeatureLayout] = None,
+    x_coords: Optional[Mapping[str, object]] = None,
 ) -> Data:
     """Converts mesh data into a PyTorch Geometric Data object.
 
@@ -126,34 +165,34 @@ def meshdata_to_graph(
         Data: A PyTorch Geometric Data object representing the mesh.
     """
     # Combine all point data into a single array
+    feature_order: Optional[Sequence[str]] = None
+    if x_layout is not None:
+        feature_order = x_layout.names()
+
     if point_data is not None:
-        if any(data.ndim > 1 for data in point_data.values()):
-            # if any(data.shape[1] > 1 for data in point_data.values()):
-            node_features = np.hstack(
-                [data for data in point_data.values()]
-                + [np.full((len(points),), time).reshape((-1, 1))]
-            )
-            node_features = torch.tensor(node_features, dtype=torch.float32)
-        else:
-            node_features = np.vstack(
-                [data for data in point_data.values()] + [np.full((len(points),), time)]
-            ).T
-            node_features = torch.tensor(node_features, dtype=torch.float32)
+        stacked = _stack_point_data(
+            point_data, order=feature_order, num_nodes=len(points)
+        )
+        node_features = torch.tensor(stacked, dtype=torch.float32)
     else:
-        node_features = torch.zeros((len(points), 1), dtype=torch.float32)
+        node_features = torch.zeros((len(points), 0), dtype=torch.float32)
+
+    if x_layout is None:
+        time_column = torch.full((len(points), 1), float(time), dtype=torch.float32)
+        if node_features.numel() == 0:
+            node_features = time_column
+        else:
+            node_features = torch.cat([node_features, time_column], dim=1)
 
     if return_only_node_features:
         return node_features
 
     # Convert target to tensor if provided
-    if target is not None:
-        if any(data.ndim > 1 for data in target.values()):
-            # if any(data.shape[1] > 1 for data in target.values()):
-            target_features = np.hstack([data for data in target.values()])
-            target_features = torch.tensor(target_features, dtype=torch.float32)
-        else:
-            target_features = np.vstack([data for data in target.values()]).T
-            target_features = torch.tensor(target_features, dtype=torch.float32)
+    if target is not None and len(target) > 0:
+        target_features = torch.tensor(
+            _stack_point_data(target, order=feature_order, num_nodes=len(points)),
+            dtype=torch.float32,
+        )
     else:
         target_features = None
 
@@ -175,15 +214,20 @@ def meshdata_to_graph(
     if cells.shape[0] == 3:
         face = cells
 
-    return Data(
-        x=node_features,
+    data_kwargs = dict(
         face=face,
         tetra=tetra,
         y=target_features,
         pos=torch.tensor(points, dtype=torch.float32),
         id=id,
         next_data=next_data,
+        time=time,
     )
+
+    if x_layout is not None:
+        return NamedData(x=node_features, x_layout=x_layout, x_coords=x_coords, **data_kwargs)
+
+    return Data(x=node_features, **data_kwargs)
 
 
 def mesh_to_graph(
@@ -191,6 +235,9 @@ def mesh_to_graph(
     time: Union[int, float] = 1,
     target_mesh: Optional[Mesh] = None,
     target_fields: Optional[List[str]] = None,
+    *,
+    x_layout: Optional[XFeatureLayout] = None,
+    x_coords: Optional[Mapping[str, object]] = None,
 ) -> Data:
     """Converts mesh and optional target mesh data into a PyTorch Geometric Data object.
 
@@ -220,10 +267,26 @@ def mesh_to_graph(
         point_data=mesh.point_data,
         time=time,
         target=target,
+        x_layout=x_layout,
+        x_coords=x_coords,
     )
 
 
-def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> Mesh:
+def _named_point_data(graph: NamedData, names: Iterable[str]) -> Dict[str, np.ndarray]:
+    data: Dict[str, np.ndarray] = {}
+    for name in names:
+        tensor = graph.x_sel(name)
+        array = tensor.detach().cpu().numpy()
+        if array.ndim == 2 and array.shape[1] == 1:
+            data[name] = array[:, 0]
+        else:
+            data[name] = array
+    return data
+
+
+def torch_graph_to_mesh(
+    graph: Data, node_features_mapping: Optional[Union[Mapping[str, int], Sequence[str]]] = None
+) -> Mesh:
     """Converts a PyTorch Geometric graph to a meshio Mesh object.
 
     This function takes a graph represented in PyTorch Geometric's `Data` format and
@@ -246,10 +309,23 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
     The function detaches tensors and moves them to CPU before converting to NumPy arrays,
     ensuring compatibility with meshio and avoiding GPU memory issues.
     """
-    point_data = {
-        f: graph.x[:, indx].detach().cpu().numpy()
-        for f, indx in node_features_mapping.items()
-    }
+    point_data: Dict[str, np.ndarray] = {}
+
+    if node_features_mapping is None:
+        if isinstance(graph, NamedData):
+            point_data = _named_point_data(graph, graph.x_names())
+        elif getattr(graph, "x", None) is not None:
+            for i in range(graph.x.shape[1]):
+                point_data[f"x{i}"] = graph.x[:, i].detach().cpu().numpy()
+    elif isinstance(node_features_mapping, Mapping):
+        for feature, index in node_features_mapping.items():
+            point_data[feature] = graph.x[:, index].detach().cpu().numpy()
+    else:
+        if not hasattr(graph, "x_sel"):
+            raise ValueError(
+                "Name-based export requires a graph with named features (NamedData)."
+            )
+        point_data = _named_point_data(graph, node_features_mapping)
 
     cells = graph.face.detach().cpu().numpy()
     if graph.pos.shape[1] == 2:

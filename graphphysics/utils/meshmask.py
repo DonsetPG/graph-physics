@@ -1,5 +1,6 @@
 import torch
 import torch.nn as nn
+import torch
 from torch_geometric.data import Data
 from torch_geometric.utils.num_nodes import maybe_num_nodes
 

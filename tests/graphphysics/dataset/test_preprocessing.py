@@ -1,8 +1,15 @@
 import unittest
 import math
-import torch
+import pytest
+
+pytest.importorskip("torch_geometric")
+
 from torch_geometric.data import Data
 from torch_geometric.transforms import Compose
+
+torch = pytest.importorskip("torch")
+
+from named_features import NamedData, make_x_layout
 
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.dataset.preprocessing import (
@@ -47,6 +54,20 @@ class TestGraphPreprocessing(unittest.TestCase):
             ],
             dtype=torch.float32,
         )
+        displacement = torch.zeros_like(self.x[:, 0:3])
+        node_type = self.x[:, 3:4]
+        named_x = torch.cat([self.x[:, 0:3], displacement, node_type], dim=1)
+        self.layout = make_x_layout(
+            ["world_pos", "obstacle_displacement", "node_type"],
+            {"world_pos": 3, "obstacle_displacement": 3, "node_type": 1},
+        )
+        self.named_graph = NamedData(
+            x=named_x.clone(),
+            edge_index=self.edge_index.clone(),
+            y=self.y.clone(),
+            pos=self.pos.clone(),
+            x_layout=self.layout,
+        )
         self.graph = Data(x=self.x, edge_index=self.edge_index, y=self.y, pos=self.pos)
 
     def test_add_edge_features(self):
@@ -56,47 +77,47 @@ class TestGraphPreprocessing(unittest.TestCase):
         self.assertEqual(graph.edge_attr.shape[1], 4)
 
     def test_add_obstacles_next_pos(self):
-        graph = self.graph.clone()
+        graph = self.named_graph.clone()
         graph = add_obstacles_next_pos(
             graph,
-            world_pos_index_start=0,
-            world_pos_index_end=3,
-            node_type_index=3,
+            world_pos_feature="world_pos",
+            displacement_feature="obstacle_displacement",
+            node_type_feature="node_type",
         )
-        self.assertEqual(graph.x.shape[1], self.x.shape[1] + 3)
+        expected = self.y - self.x[:, 0:3]
+        node_type = self.x[:, 3]
+        mean_obstacle = expected[node_type == NodeType.OBSTACLE].mean(dim=0)
+        expected[node_type != NodeType.OBSTACLE] = mean_obstacle
+        assert torch.allclose(
+            graph.x_sel("obstacle_displacement"), expected, atol=1e-6
+        )
 
     def test_add_world_edges(self):
-        graph = self.graph.clone()
         graph = add_world_edges(
-            graph,
-            world_pos_index_start=0,
-            world_pos_index_end=3,
-            node_type_index=3,
+            self.named_graph.clone(),
+            world_pos_feature="world_pos",
+            node_type_feature="node_type",
             radius=5.0,  # Large radius to connect all nodes
         )
         self.assertGreater(graph.edge_index.shape[1], self.edge_index.shape[1])
 
     def test_add_world_pos_features(self):
-        graph = self.graph.clone()
-        # Assume edge_attr is initialized
+        graph = self.named_graph.clone()
         graph.edge_attr = torch.zeros((graph.edge_index.shape[1], 1))
         graph = add_world_pos_features(
             graph,
-            world_pos_index_start=0,
-            world_pos_index_end=3,
+            world_pos_feature="world_pos",
         )
         self.assertEqual(
             graph.edge_attr.shape[1], 5
         )  # Original 1 + 3 for relative position + 1 norm
 
     def test_add_noise(self):
-        graph = self.graph.clone()
         graph = add_noise(
-            graph,
-            noise_index_start=0,
-            noise_index_end=3,
+            self.named_graph.clone(),
+            noise_features="world_pos",
             noise_scale=0.1,
-            node_type_index=3,
+            node_type_feature="node_type",
         )
         # Check that node features have changed for NORMAL nodes
         normal_indices = (self.x[:, 3] == NodeType.NORMAL).nonzero(as_tuple=True)[0]
@@ -122,12 +143,12 @@ class TestGraphPreprocessing(unittest.TestCase):
         ]
 
         # 1) t=0 -> Expect significant noise for NORMAL nodes
+        graph_base_named = self.named_graph.clone()
         graph_t0 = add_noise(
-            graph_base.clone(),
-            noise_index_start=0,
-            noise_index_end=3,
+            graph_base_named.clone(),
+            noise_features="world_pos",
             noise_scale=0.1,
-            node_type_index=3,
+            node_type_feature="node_type",
             t=0,
         )
         # NORMAL nodes should change
@@ -139,11 +160,10 @@ class TestGraphPreprocessing(unittest.TestCase):
 
         # 2) t=1 -> Expect NO noise for NORMAL nodes (scale_=0)
         graph_t1 = add_noise(
-            graph_base.clone(),
-            noise_index_start=0,
-            noise_index_end=3,
+            graph_base_named.clone(),
+            noise_features="world_pos",
             noise_scale=0.1,
-            node_type_index=3,
+            node_type_feature="node_type",
             t=1,
         )
         # NORMAL nodes should remain the same
@@ -155,29 +175,30 @@ class TestGraphPreprocessing(unittest.TestCase):
 
     def test_build_preprocessing(self):
         noise_params = {
-            "noise_index_start": 0,
-            "noise_index_end": 3,
+            "noise_features": ["world_pos"],
             "noise_scale": 0.1,
-            "node_type_index": 3,
+            "node_type_feature": "node_type",
         }
         world_pos_params = {
-            "world_pos_index_start": 0,
-            "world_pos_index_end": 3,
-            "node_type_index": 3,
+            "use": True,
+            "world_pos_feature": "world_pos",
+            "displacement_feature": "obstacle_displacement",
+            "node_type_feature": "node_type",
             "radius": 5.0,
         }
-        transform = build_preprocessing(noise_params, world_pos_params)
-        graph = transform(
-            Data(
-                x=self.x,
-                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
-                y=self.y,
-                pos=self.pos,
-            )
+        transform = build_preprocessing(
+            noise_params,
+            world_pos_params,
+            x_layout=self.layout,
         )
+        torch.manual_seed(0)
+        graph = transform(self.named_graph.clone())
         self.assertIsNotNone(graph.edge_index)
         self.assertIsNotNone(graph.edge_attr)
-        self.assertEqual(graph.x.shape[1], self.x.shape[1] + 3)
+        assert not torch.allclose(
+            graph.x_sel("obstacle_displacement"),
+            torch.zeros_like(graph.x_sel("obstacle_displacement")),
+        )
 
     def test_add_edge_features_without_world_pos(self):
         transform = build_preprocessing(add_edges_features=True)
@@ -215,30 +236,20 @@ class TestGraphPreprocessing(unittest.TestCase):
 
     def test_build_preprocessing_without_world_pos(self):
         noise_params = {
-            "noise_index_start": 0,
-            "noise_index_end": 3,
+            "noise_features": ["world_pos"],
             "noise_scale": 0.1,
-            "node_type_index": 3,
+            "node_type_feature": "node_type",
         }
-        transform = build_preprocessing(noise_parameters=noise_params)
-        graph = transform(
-            Data(
-                x=self.x,
-                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
-                y=self.y,
-                pos=self.pos,
-            )
+        transform = build_preprocessing(
+            noise_parameters=noise_params,
+            x_layout=self.layout,
         )
+        graph = transform(self.named_graph.clone())
         self.assertIsNotNone(graph.edge_index)
         self.assertIsNotNone(graph.edge_attr)
 
     def test_add_noise_with_multiple_indices(self):
-        graph = Data(
-            x=self.x,
-            face=torch.tensor([[0], [1], [2]], dtype=torch.int),
-            y=self.y,
-            pos=self.pos,
-        )
+        graph = self.graph.clone()
         noise_params = {
             "noise_index_start": [0, 1],
             "noise_index_end": [1, 3],
@@ -295,31 +306,25 @@ class TestGraphPreprocessing(unittest.TestCase):
             return graph
 
         noise_params = {
-            "noise_index_start": 0,
-            "noise_index_end": 3,
+            "noise_features": ["world_pos"],
             "noise_scale": 0.1,
-            "node_type_index": 3,
+            "node_type_feature": "node_type",
         }
         world_pos_params = {
-            "world_pos_index_start": 0,
-            "world_pos_index_end": 3,
-            "node_type_index": 3,
+            "use": True,
+            "world_pos_feature": "world_pos",
+            "displacement_feature": "obstacle_displacement",
+            "node_type_feature": "node_type",
             "radius": 5.0,
         }
         transform = build_preprocessing(
             noise_params,
             world_pos_params,
             extra_node_features=extra_node_feature,
+            x_layout=self.layout,
         )
-        graph = transform(
-            Data(
-                x=self.x,
-                face=torch.tensor([[0], [1], [2]], dtype=torch.int),
-                y=self.y,
-                pos=self.pos,
-            )
-        )
-        assert graph.x.shape[1] == 10
+        graph = transform(self.named_graph.clone())
+        assert graph.x.shape[1] == self.named_graph.x.shape[1] + self.pos.shape[1]
 
     def test_random_3d_rotate(self):
         # Clone the graph

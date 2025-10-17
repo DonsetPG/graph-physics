@@ -1,12 +1,14 @@
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Mapping, Optional, Tuple
 
 import torch
 import torch_geometric.transforms as T
 from loguru import logger
 from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import add_random_edge
+
+from named_features import XFeatureLayout
 
 from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
@@ -27,6 +29,8 @@ class BaseDataset(Dataset, ABC):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         world_pos_parameters: Optional[dict] = None,
+        x_layout: Optional[XFeatureLayout] = None,
+        x_coords: Optional[Mapping[str, object]] = None,
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -61,6 +65,8 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
+        self.x_layout = x_layout
+        self.x_coords = dict(x_coords or {})
 
         self.world_pos_index_start = None
         self.world_pos_index_end = None

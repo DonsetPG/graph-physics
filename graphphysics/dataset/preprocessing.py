@@ -1,7 +1,9 @@
+from __future__ import annotations
+
 import math
 import random
 from functools import partial
-from typing import Callable, List, Optional, Tuple, Union
+from typing import Any, Callable, Iterable, List, Mapping, Optional, Sequence, Tuple, Union
 
 import torch
 import torch_geometric.transforms as T
@@ -11,6 +13,198 @@ from torch_geometric.transforms import BaseTransform
 from torch_geometric.utils import to_undirected
 
 from graphphysics.utils.nodetype import NodeType
+
+try:  # Optional import during typing in lightweight environments
+    from named_features import XFeatureLayout
+except ImportError:  # pragma: no cover - fallback when named features are unavailable
+    XFeatureLayout = None  # type: ignore
+
+
+def _get_layout(graph: Data) -> "XFeatureLayout":
+    layout = getattr(graph, "x_layout", None)
+    if layout is None:
+        raise ValueError(
+            "This transformation requires graph.x_layout to resolve named features."
+        )
+    return layout
+
+
+def _select_feature(graph: Data, name: str) -> torch.Tensor:
+    if hasattr(graph, "x_sel"):
+        return graph.x_sel(name)
+    layout = _get_layout(graph)
+    return graph.x[:, layout.slc(name)]
+
+
+def _assign_feature(graph: Data, name: str, value: torch.Tensor) -> Data:
+    if hasattr(graph, "x_assign"):
+        return graph.x_assign({name: value}, inplace=True)
+    layout = _get_layout(graph)
+    graph.x[:, layout.slc(name)] = value
+    return graph
+
+
+def _feature_slice_from_indices(
+    layout: Optional["XFeatureLayout"], start: int, end: int
+) -> Optional[str]:
+    if layout is None:
+        return None
+    for block in layout.blocks:
+        if block.start == start and block.end == end:
+            return block.name
+    return None
+
+
+def _feature_name_from_index(layout: Optional["XFeatureLayout"], index: int) -> Optional[str]:
+    if layout is None:
+        return None
+    for block in layout.blocks:
+        if block.start <= index < block.end and block.size == 1:
+            return block.name
+    return None
+
+
+def _ensure_sequence(value: Union[Sequence[int], int]) -> List[int]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        return [int(v) for v in value]
+    return [int(value)]
+
+
+def _ensure_float_sequence(
+    value: Union[Sequence[float], float], expected: int
+) -> List[float]:
+    if isinstance(value, Sequence) and not isinstance(value, (str, bytes)):
+        values = [float(v) for v in value]
+        if len(values) != expected:
+            raise ValueError(
+                "noise_scale must have the same length as the number of target features."
+            )
+        return values
+    return [float(value)] * expected
+
+
+def _translate_world_params(
+    params: Optional[Mapping[str, Any]], layout: Optional["XFeatureLayout"]
+) -> Optional[dict]:
+    if params is None:
+        return None
+
+    result = dict(params)
+    if layout is None:
+        return result
+
+    world_name = result.get("world_pos_feature")
+    if world_name and (
+        result.get("world_pos_index_start") is None
+        or result.get("world_pos_index_end") is None
+    ):
+        slc = layout.slc(world_name)
+        result.setdefault("world_pos_index_start", slc.start)
+        result.setdefault("world_pos_index_end", slc.stop)
+    elif (
+        "world_pos_feature" not in result
+        and result.get("world_pos_index_start") is not None
+        and result.get("world_pos_index_end") is not None
+    ):
+        name = _feature_slice_from_indices(
+            layout,
+            int(result["world_pos_index_start"]),
+            int(result["world_pos_index_end"]),
+        )
+        if name:
+            result["world_pos_feature"] = name
+
+    node_type_name = result.get("node_type_feature")
+    if node_type_name and result.get("node_type_index") is None:
+        slc = layout.slc(node_type_name)
+        if slc.stop - slc.start != 1:
+            raise ValueError(
+                "node_type_feature must reference a single channel in the layout."
+            )
+        result.setdefault("node_type_index", slc.start)
+    elif (
+        "node_type_feature" not in result and result.get("node_type_index") is not None
+    ):
+        name = _feature_name_from_index(layout, int(result["node_type_index"]))
+        if name:
+            result["node_type_feature"] = name
+
+    displacement = result.get("displacement_feature")
+    if displacement and (
+        result.get("displacement_index_start") is None
+        or result.get("displacement_index_end") is None
+    ):
+        slc = layout.slc(displacement)
+        result.setdefault("displacement_index_start", slc.start)
+        result.setdefault("displacement_index_end", slc.stop)
+
+    return result
+
+
+def _translate_noise_params(
+    params: Optional[Mapping[str, Any]], layout: Optional["XFeatureLayout"]
+) -> Optional[dict]:
+    if params is None:
+        return None
+
+    result = dict(params)
+    if layout is None:
+        return result
+
+    features = result.get("noise_features")
+    if features is not None and (
+        result.get("noise_index_start") is None or result.get("noise_index_end") is None
+    ):
+        if isinstance(features, (str, bytes)):
+            feature_names = [features]
+        elif isinstance(features, Iterable):
+            feature_names = [str(name) for name in features]
+        else:  # pragma: no cover - guard for unexpected input
+            raise TypeError("noise_features must be a string or sequence of strings.")
+        starts: List[int] = []
+        ends: List[int] = []
+        for name in feature_names:
+            slc = layout.slc(name)
+            starts.append(slc.start)
+            ends.append(slc.stop)
+        result.setdefault(
+            "noise_index_start", starts if len(starts) > 1 else starts[0]
+        )
+        result.setdefault("noise_index_end", ends if len(ends) > 1 else ends[0])
+    elif (
+        "noise_features" not in result
+        and result.get("noise_index_start") is not None
+        and result.get("noise_index_end") is not None
+    ):
+        starts = _ensure_sequence(result["noise_index_start"])
+        ends = _ensure_sequence(result["noise_index_end"])
+        if len(starts) == len(ends):
+            names: List[str] = []
+            for start, end in zip(starts, ends):
+                name = _feature_slice_from_indices(layout, start, end)
+                if name is None:
+                    names = []
+                    break
+                names.append(name)
+            if names:
+                result["noise_features"] = names if len(names) > 1 else names[0]
+
+    node_type_name = result.get("node_type_feature")
+    if node_type_name and result.get("node_type_index") is None:
+        slc = layout.slc(node_type_name)
+        if slc.stop - slc.start != 1:
+            raise ValueError(
+                "node_type_feature must reference a single channel in the layout."
+            )
+        result.setdefault("node_type_index", slc.start)
+    elif (
+        "node_type_feature" not in result and result.get("node_type_index") is not None
+    ):
+        name = _feature_name_from_index(layout, int(result["node_type_index"]))
+        if name:
+            result["node_type_feature"] = name
+
+    return result
 
 
 def add_edge_features() -> List[Callable[[Data], Data]]:
@@ -48,53 +242,105 @@ def _3d_face_to_edge(graph: Data) -> Data:
 
 def add_obstacles_next_pos(
     graph: Data,
-    world_pos_index_start: int,
-    world_pos_index_end: int,
-    node_type_index: int,
+    *,
+    world_pos_feature: Optional[str] = None,
+    target_world_pos_feature: Optional[str] = None,
+    displacement_feature: Optional[str] = None,
+    node_type_feature: Optional[str] = None,
+    world_pos_index_start: Optional[int] = None,
+    world_pos_index_end: Optional[int] = None,
+    node_type_index: Optional[int] = None,
 ) -> Data:
-    """
-    Adds obstacle displacement to node features in the graph.
+    """Adds obstacle displacement information to the node features.
 
-    Parameters:
-        graph (Data): The input graph data.
-        world_pos_index_start (int): The starting index of world position in node features.
-        world_pos_index_end (int): The ending index of world position in node features.
-        node_type_index (int): The index of the node type feature.
-
-    Returns:
-        Data: The graph with updated node features.
+    Parameters
+    ----------
+    graph:
+        Input graph.
+    world_pos_feature:
+        Name of the feature in ``graph.x`` representing the current world position.
+    target_world_pos_feature:
+        Name of the feature representing the target/next world position. Defaults to
+        ``world_pos_feature`` when omitted.
+    displacement_feature:
+        Feature name that should receive the computed displacement. Required when
+        ``world_pos_feature`` is provided.
+    node_type_feature:
+        Feature name representing node types. Defaults to ``"node_type"`` when
+        available.
+    world_pos_index_start/world_pos_index_end/node_type_index:
+        Legacy numeric configuration kept for backwards compatibility when named
+        features are unavailable.
     """
-    # Extract world positions and other features
+
+    use_named = world_pos_feature is not None or node_type_feature is not None
+
+    if use_named:
+        if world_pos_feature is None:
+            raise ValueError(
+                "Named usage of add_obstacles_next_pos requires 'world_pos_feature'."
+            )
+        if displacement_feature is None:
+            raise ValueError(
+                "Named usage of add_obstacles_next_pos requires 'displacement_feature'."
+            )
+
+        layout = _get_layout(graph)
+        target_name = target_world_pos_feature or world_pos_feature
+        world_pos = _select_feature(graph, world_pos_feature)
+        try:
+            target_world_pos = graph.y[:, layout.slc(target_name)]
+        except Exception as exc:  # pragma: no cover - guard for mismatched targets
+            raise ValueError(
+                f"Unable to index target feature '{target_name}' using the x-layout slices."
+            ) from exc
+
+        displacement = target_world_pos - world_pos
+        node_type_name = node_type_feature or "node_type"
+        node_type_values = _select_feature(graph, node_type_name).squeeze(-1)
+
+        obstacle_mask = node_type_values == NodeType.OBSTACLE
+        if obstacle_mask.any():
+            mean_obstacle = displacement[obstacle_mask].mean(dim=0)
+        else:  # pragma: no cover - rare case when dataset has no obstacles
+            mean_obstacle = torch.zeros_like(displacement[0])
+        displacement[~obstacle_mask] = mean_obstacle
+
+        _assign_feature(graph, displacement_feature, displacement)
+        return graph
+
+    if world_pos_index_start is None or world_pos_index_end is None:
+        raise ValueError(
+            "Legacy usage of add_obstacles_next_pos requires 'world_pos_index_start' and 'world_pos_index_end'."
+        )
+    if node_type_index is None:
+        raise ValueError(
+            "Legacy usage of add_obstacles_next_pos requires 'node_type_index'."
+        )
+
     world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
     other_features = graph.x[:, world_pos_index_end:]
-
-    # Extract target world positions from graph.y
     target_world_pos = graph.y[:, world_pos_index_start:world_pos_index_end]
-
-    # Compute obstacle displacement
     obstacle_displacement = target_world_pos - world_pos
-
-    # Get node types
-    # -3 because the index we gave will be the proper index after we added the
-    # dimensionals obstacle next pos
     node_type = graph.x[:, node_type_index - 3]
 
-    # Create mask for nodes that are not obstacles
     only_obstacle_displacement = obstacle_displacement[node_type == NodeType.OBSTACLE]
     mean_obstacle_displacement = torch.mean(only_obstacle_displacement, dim=0)
     obstacle_displacement[node_type != NodeType.OBSTACLE] = mean_obstacle_displacement
 
-    # Update node features
     graph.x = torch.cat([world_pos, obstacle_displacement, other_features], dim=1)
     return graph
 
 
 def add_world_edges(
     graph: Data,
-    world_pos_index_start: int,
-    world_pos_index_end: int,
-    node_type_index: int,
+    world_pos_index_start: Optional[int] = None,
+    world_pos_index_end: Optional[int] = None,
+    node_type_index: Optional[int] = None,
+    *,
     radius: float = 0.03,
+    world_pos_feature: Optional[str] = None,
+    node_type_feature: Optional[str] = None,
 ) -> Data:
     """
     Adds world edges to the graph based on proximity in world position.
@@ -116,10 +362,31 @@ def add_world_edges(
         pairs = tree.query_pairs(max_d, output_type="ndarray")
         return torch.Tensor(pairs.T).long()
 
-    world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
+    use_named = world_pos_feature is not None or node_type_feature is not None
+
+    if use_named:
+        if world_pos_feature is None:
+            raise ValueError(
+                "Named usage of add_world_edges requires 'world_pos_feature'."
+            )
+        world_pos = _select_feature(graph, world_pos_feature)
+        node_type_name = node_type_feature or "node_type"
+        node_types = _select_feature(graph, node_type_name).squeeze(-1)
+    else:
+        if world_pos_index_start is None or world_pos_index_end is None:
+            raise ValueError(
+                "Legacy usage of add_world_edges requires 'world_pos_index_start' and 'world_pos_index_end'."
+            )
+        if node_type_index is None:
+            raise ValueError(
+                "Legacy usage of add_world_edges requires 'node_type_index'."
+            )
+        world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
+        node_types = graph.x[:, node_type_index]
+
     added_edges = _close_pairs_ckdtree(world_pos, radius).to(graph.x.device)
 
-    type = graph.x[:, node_type_index]
+    type = node_types
 
     m1 = torch.gather(type, -1, added_edges[0]) == NodeType.OBSTACLE
     m2 = torch.gather(type, -1, added_edges[1]) == NodeType.NORMAL
@@ -142,8 +409,10 @@ def add_world_edges(
 
 def add_world_pos_features(
     graph: Data,
-    world_pos_index_start: int,
-    world_pos_index_end: int,
+    world_pos_index_start: Optional[int] = None,
+    world_pos_index_end: Optional[int] = None,
+    *,
+    world_pos_feature: Optional[str] = None,
 ) -> Data:
     """
     Adds world position features to the graph's edge attributes.
@@ -156,7 +425,14 @@ def add_world_pos_features(
     Returns:
         Data: The graph with updated edge attributes.
     """
-    world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
+    if world_pos_feature is not None:
+        world_pos = _select_feature(graph, world_pos_feature)
+    else:
+        if world_pos_index_start is None or world_pos_index_end is None:
+            raise ValueError(
+                "Legacy usage of add_world_pos_features requires 'world_pos_index_start' and 'world_pos_index_end'."
+            )
+        world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
     senders, receivers = graph.edge_index
 
     relative_world_pos = world_pos[senders] - world_pos[receivers]
@@ -176,10 +452,13 @@ def add_world_pos_features(
 
 def add_noise(
     graph: Data,
-    noise_index_start: Union[int, List[int]],
-    noise_index_end: Union[int, List[int]],
-    noise_scale: Union[float, List[float]],
-    node_type_index: int,
+    noise_index_start: Union[int, List[int], None] = None,
+    noise_index_end: Union[int, List[int], None] = None,
+    noise_scale: Union[float, List[float]] = 0.0,
+    node_type_index: Optional[int] = None,
+    *,
+    noise_features: Optional[Union[str, Sequence[str]]] = None,
+    node_type_feature: Optional[str] = None,
     t: Optional[float] = None,
 ) -> Data:
     """
@@ -197,42 +476,68 @@ def add_noise(
     Returns:
         Data: The modified graph with noise added to node features.
     """
-    # Ensure noise indices are lists
-    if isinstance(noise_index_start, int):
-        noise_index_start = [noise_index_start]
-    if isinstance(noise_index_end, int):
-        noise_index_end = [noise_index_end]
+    use_named = noise_features is not None or node_type_feature is not None
 
-    # Ensure noise scales are lists
-    if isinstance(noise_scale, float):
-        noise_scale = [noise_scale] * len(noise_index_start)
+    if use_named:
+        if noise_features is None:
+            raise ValueError(
+                "Named usage of add_noise requires 'noise_features'."
+            )
+
+        if isinstance(noise_features, (str, bytes)):
+            target_features = [noise_features]
+        elif isinstance(noise_features, Iterable):
+            target_features = [str(name) for name in noise_features]
+        else:  # pragma: no cover - guard for unexpected input
+            raise TypeError("noise_features must be a string or sequence of strings.")
+
+        scales = _ensure_float_sequence(noise_scale, len(target_features))
+        node_type_name = node_type_feature or "node_type"
+        node_type_tensor = _select_feature(graph, node_type_name).squeeze(-1)
+        mask = node_type_tensor != NodeType.NORMAL
+
+        for feature_name, scale in zip(target_features, scales):
+            feature_tensor = _select_feature(graph, feature_name)
+            scale_value = (
+                10 * scale * (1 + math.cos(t * math.pi)) if t is not None else scale
+            )
+            noise = torch.randn_like(feature_tensor) * scale_value
+            noise[mask] = 0
+            updated = feature_tensor + noise
+            _assign_feature(graph, feature_name, updated)
+
+        return graph
+
+    if noise_index_start is None or noise_index_end is None:
+        raise ValueError(
+            "Legacy usage of add_noise requires 'noise_index_start' and 'noise_index_end'."
+        )
+    if node_type_index is None:
+        raise ValueError(
+            "Legacy usage of add_noise requires 'node_type_index'."
+        )
+
+    noise_index_start = _ensure_sequence(noise_index_start)
+    noise_index_end = _ensure_sequence(noise_index_end)
 
     if len(noise_index_start) != len(noise_index_end):
         raise ValueError(
             "noise_index_start and noise_index_end must have the same length."
         )
-    if len(noise_scale) != len(noise_index_start):
-        raise ValueError(
-            "noise_scale must have the same length as noise_index_start and noise_index_end."
-        )
+
+    noise_scale_values = _ensure_float_sequence(noise_scale, len(noise_index_start))
 
     node_type = graph.x[:, node_type_index]
 
-    # Mask to zero noise for nodes that are not NORMAL
     mask = node_type != NodeType.NORMAL
 
-    for start, end, scale in zip(noise_index_start, noise_index_end, noise_scale):
+    for start, end, scale in zip(
+        noise_index_start, noise_index_end, noise_scale_values
+    ):
         feature = graph.x[:, start:end]
-
         scale_ = 10 * scale * (1 + math.cos(t * math.pi)) if t is not None else scale
-
-        # Generate noise
         noise = torch.randn_like(feature) * scale_
-
-        # Zero out noise for nodes not of type NORMAL
         noise[mask] = 0
-
-        # Add noise to features
         graph.x[:, start:end] = feature + noise
 
     return graph
@@ -376,6 +681,8 @@ def build_preprocessing(
     extra_edge_features: Optional[
         Union[Callable[[Data], Data], List[Callable[[Data], Data]]]
     ] = None,
+    *,
+    x_layout: Optional["XFeatureLayout"] = None,
 ) -> T.Compose:
     """
     Builds a preprocessing transform pipeline for the graph data.
@@ -386,6 +693,7 @@ def build_preprocessing(
         add_edges_features (bool): Whether to add edge features.
         extra_node_features (Callable or List[Callable], optional): Extra node feature functions to apply first.
         extra_edge_features (Callable or List[Callable], optional): Extra edge feature functions to apply last.
+        x_layout (XFeatureLayout, optional): Feature layout used to translate legacy indices into names.
 
     Returns:
         T.Compose: A composition of graph transformations.
@@ -399,20 +707,65 @@ def build_preprocessing(
         preprocessing.extend(extra_node_features)
 
     if world_pos_parameters is not None:
+        world_pos_parameters = _translate_world_params(world_pos_parameters, x_layout)
+        if not world_pos_parameters.pop("use", True):
+            world_pos_parameters = None
+
+    if world_pos_parameters is not None:
+        if "world_pos_feature" in world_pos_parameters and "displacement_feature" not in world_pos_parameters:
+            raise ValueError(
+                "World position preprocessing requires 'displacement_feature' when using named features."
+            )
         preprocessing.extend(
             [
                 partial(
                     add_obstacles_next_pos,
-                    world_pos_index_start=world_pos_parameters["world_pos_index_start"],
-                    world_pos_index_end=world_pos_parameters["world_pos_index_end"],
-                    node_type_index=world_pos_parameters["node_type_index"],
+                    **(
+                        {
+                            "world_pos_feature": world_pos_parameters["world_pos_feature"],
+                            "target_world_pos_feature": world_pos_parameters.get(
+                                "target_feature"
+                            ),
+                            "displacement_feature": world_pos_parameters[
+                                "displacement_feature"
+                            ],
+                            "node_type_feature": world_pos_parameters.get(
+                                "node_type_feature"
+                            ),
+                        }
+                        if "world_pos_feature" in world_pos_parameters
+                        else {
+                            "world_pos_index_start": world_pos_parameters[
+                                "world_pos_index_start"
+                            ],
+                            "world_pos_index_end": world_pos_parameters[
+                                "world_pos_index_end"
+                            ],
+                            "node_type_index": world_pos_parameters["node_type_index"],
+                        }
+                    ),
                 ),
                 T.FaceToEdge(remove_faces=False),
                 partial(
                     add_world_edges,
-                    world_pos_index_start=world_pos_parameters["world_pos_index_start"],
-                    world_pos_index_end=world_pos_parameters["world_pos_index_end"],
-                    node_type_index=world_pos_parameters["node_type_index"],
+                    **(
+                        {
+                            "world_pos_feature": world_pos_parameters["world_pos_feature"],
+                            "node_type_feature": world_pos_parameters.get(
+                                "node_type_feature"
+                            ),
+                        }
+                        if "world_pos_feature" in world_pos_parameters
+                        else {
+                            "world_pos_index_start": world_pos_parameters[
+                                "world_pos_index_start"
+                            ],
+                            "world_pos_index_end": world_pos_parameters[
+                                "world_pos_index_end"
+                            ],
+                            "node_type_index": world_pos_parameters["node_type_index"],
+                        }
+                    ),
                     radius=world_pos_parameters.get("radius", 0.03),
                 ),
             ]
@@ -424,12 +777,25 @@ def build_preprocessing(
             preprocessing.extend(add_edge_features())
 
     if noise_parameters is not None:
+        noise_parameters = _translate_noise_params(noise_parameters, x_layout)
+        if "noise_features" in noise_parameters and not noise_parameters["noise_features"]:
+            raise ValueError("Named noise configuration requires non-empty 'noise_features'.")
         add_noise_transform = partial(
             add_noise,
-            noise_index_start=noise_parameters["noise_index_start"],
-            noise_index_end=noise_parameters["noise_index_end"],
-            noise_scale=noise_parameters["noise_scale"],
-            node_type_index=noise_parameters["node_type_index"],
+            **(
+                {
+                    "noise_features": noise_parameters["noise_features"],
+                    "noise_scale": noise_parameters.get("noise_scale", 0.0),
+                    "node_type_feature": noise_parameters.get("node_type_feature"),
+                }
+                if "noise_features" in noise_parameters
+                else {
+                    "noise_index_start": noise_parameters["noise_index_start"],
+                    "noise_index_end": noise_parameters["noise_index_end"],
+                    "noise_scale": noise_parameters["noise_scale"],
+                    "node_type_index": noise_parameters["node_type_index"],
+                }
+            ),
         )
         # Insert after the first transform
         preprocessing.insert(1, add_noise_transform)

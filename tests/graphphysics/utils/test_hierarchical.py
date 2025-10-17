@@ -1,3 +1,12 @@
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
+pytest.importorskip("numpy")
+h5py = pytest.importorskip("h5py")
+
+from named_features import NamedData, make_x_layout
+
 from graphphysics.utils.hierarchical import (
     get_frame_as_graph,
     get_frame_as_mesh,
@@ -62,3 +71,28 @@ def test_get_frame_as_graph():
     graph = get_frame_as_graph(traj=traj, frame=0, meta=meta, targets=MOCK_H5_TARGETS)
 
     assert graph.x.shape[0] == 1876
+
+
+def test_get_frame_as_graph_with_layout():
+    file_handle, datasets_index, size_dataset, meta = get_h5_dataset(
+        MOCK_H5_SAVE_PATH, MOCK_H5_META_SAVE_PATH
+    )
+    traj = get_traj_as_meshes(file_handle, "0", meta)
+    layout = make_x_layout(
+        ["velocity", "pressure", "node_type", "time"],
+        {"velocity": 2, "pressure": 1, "node_type": 1, "time": 1},
+    )
+
+    graph = get_frame_as_graph(
+        traj=traj,
+        frame=0,
+        meta=meta,
+        targets=MOCK_H5_TARGETS,
+        feature_layout=layout,
+    )
+
+    assert isinstance(graph, NamedData)
+    assert graph.x_layout is layout
+    assert graph.x.shape[1] == sum(layout.sizes().values())
+    velocity = graph.x_sel("velocity")
+    assert velocity.shape[1] == 2

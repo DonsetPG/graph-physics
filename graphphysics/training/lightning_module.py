@@ -21,10 +21,23 @@ from graphphysics.utils.scheduler import CosineWarmupScheduler
 
 
 def build_mask(param: dict, graph: Batch):
-    if len(graph.x.shape) > 2:
-        node_type = graph.x[:, 0, param["index"]["node_type_index"]]
+    named_section = param.get("named_features", {})
+    node_type_name = None
+    if isinstance(named_section, dict):
+        node_type_name = named_section.get("node_type")
+
+    if node_type_name and hasattr(graph, "x_sel"):
+        node_type = graph.x_sel(node_type_name)
+        if node_type.dim() == graph.x.dim():
+            node_type = node_type.squeeze(-1)
+        node_type = node_type.reshape(-1)
     else:
-        node_type = graph.x[:, param["index"]["node_type_index"]]
+        index = param["index"]["node_type_index"]
+        if len(graph.x.shape) > 2:
+            node_type = graph.x[:, 0, index]
+        else:
+            node_type = graph.x[:, index]
+
     mask = torch.logical_or(node_type == NodeType.NORMAL, node_type == NodeType.OUTFLOW)
     mask = torch.logical_not(mask)
 
@@ -121,7 +134,7 @@ class LightningModule(L.LightningModule):
 
     def training_step(self, batch: Batch):
         batch = batch.to(self.device, non_blocking=True)
-        node_type = batch.x[:, self.model.node_type_index]
+        node_type = self.model.get_node_type(batch)
         network_output, target_delta_normalized, _ = self.model(batch)
 
         if self.is_multiloss:
@@ -218,9 +231,7 @@ class LightningModule(L.LightningModule):
         # Prepare the batch for the current step
         if last_prediction is not None:
             # Update the batch with the last prediction
-            batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
-                last_prediction.detach()
-            )
+            self.model.assign_targets_to_x(batch, last_prediction.detach())
             if self.use_previous_data:
                 batch.x[:, self.previous_data_start : self.previous_data_end] = (
                     last_previous_data_prediction.detach()
@@ -228,9 +239,7 @@ class LightningModule(L.LightningModule):
         mask = build_mask(self.param, batch)
         target = batch.y
 
-        current_output = batch.x[
-            :, self.model.output_index_start : self.model.output_index_end
-        ]
+        current_output = self.model.select_targets_from_x(batch)
 
         with torch.no_grad():
             _, _, predicted_outputs = self.model(batch)
@@ -268,7 +277,7 @@ class LightningModule(L.LightningModule):
 
         if self.current_val_trajectory == 0:
             self.trajectory_to_save.append(batch)
-        node_type = batch.x[:, self.model.node_type_index]
+        node_type = self.model.get_node_type(batch)
 
         self.val_step_outputs.append(predicted_outputs.cpu())
         self.val_step_targets.append(target.cpu())

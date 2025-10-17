@@ -1,9 +1,17 @@
 import unittest
 
+import pytest
+
+pytest.importorskip("torch")
+pytest.importorskip("torch_geometric")
+pytest.importorskip("numpy")
+h5py = pytest.importorskip("h5py")
+
+from named_features import NamedData, make_x_layout
 
 from graphphysics.dataset.h5_dataset import H5Dataset
-from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
 from graphphysics.dataset.preprocessing import build_preprocessing
+from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
 
 
 class TestH5Dataset(unittest.TestCase):
@@ -22,6 +30,23 @@ class TestH5Dataset(unittest.TestCase):
         graph = self.dataset[0]
         assert graph.num_nodes == 1876
         assert graph.edge_index is None
+
+    def test_get_with_layout_returns_named_data(self):
+        layout = make_x_layout(
+            ["velocity", "pressure", "node_type", "time"],
+            {"velocity": 2, "pressure": 1, "node_type": 1, "time": 1},
+        )
+        dataset = H5Dataset(
+            h5_path=MOCK_H5_SAVE_PATH,
+            meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
+            x_layout=layout,
+        )
+        dataset.trajectory_length += 1
+        graph = dataset[0]
+        assert isinstance(graph, NamedData)
+        assert graph.x_layout is layout
+        assert graph.x.shape[1] == sum(layout.sizes().values())
 
 
 class TestH5DatasetMasking(unittest.TestCase):

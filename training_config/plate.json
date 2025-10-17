@@ -16,24 +16,32 @@
         "hidden_size": 64,
         "num_heads": 4
     },
-    "index": {
-        "feature_index_start": 0,
-        "feature_index_end": 6,
-        "output_index_start": 0,
-        "output_index_end": 3,
-        "node_type_index": 6
+    "features": {
+        "node": ["world_pos", "mesh_pos", "node_type"],
+        "node_type": "node_type"
+    },
+    "named_features": {
+        "mode": "semantic",
+        "legacy_index": {
+            "feature_index_start": 0,
+            "feature_index_end": 6,
+            "output_index_start": 0,
+            "output_index_end": 3,
+            "node_type_index": 6
+        }
     },
     "transformations": {
         "preprocessing": {
-            "noise": 0.003,
-            "noise_index_start": [0],
-            "noise_index_end": [3],
+            "noise_scale": 0.003,
+            "noise_features": ["world_pos"],
             "masking": 0
         },
         "world_pos_parameters": {
             "use": true,
-            "world_pos_index_start": 0,
-            "world_pos_index_end": 3
+            "world_pos_feature": "mesh_pos",
+            "target_feature": "world_pos",
+            "displacement_feature": "world_pos",
+            "node_type_feature": "node_type"
         }
     }
 }

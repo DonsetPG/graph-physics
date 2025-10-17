@@ -18,6 +18,7 @@ from graphphysics.training.parse_parameters import (
     get_dataset,
     get_num_workers,
     get_preprocessing,
+    prepare_parameters,
 )
 from graphphysics.utils.progressbar import ColabProgressBar
 
@@ -58,6 +59,12 @@ flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
+flags.DEFINE_enum(
+    "named_features_mode",
+    "auto",
+    ["auto", "semantic", "legacy"],
+    "How to interpret named feature configurations (auto=prefer semantic if available).",
+)
 
 
 def main(argv):
@@ -76,6 +83,12 @@ def main(argv):
     except Exception as e:
         logger.error(f"Error reading training parameters: {e}")
         return
+
+    parameters = prepare_parameters(
+        parameters,
+        config_dir=os.path.dirname(training_parameters_path),
+        named_features_mode=FLAGS.named_features_mode,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 

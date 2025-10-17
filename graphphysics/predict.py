@@ -11,7 +11,11 @@ from torch_geometric.loader import DataLoader
 import wandb
 from graphphysics.external.aneurysm import build_features
 from graphphysics.training.lightning_module import LightningModule
-from graphphysics.training.parse_parameters import get_dataset, get_preprocessing
+from graphphysics.training.parse_parameters import (
+    get_dataset,
+    get_preprocessing,
+    prepare_parameters,
+)
 
 warnings.filterwarnings(
     "ignore", ".*Trying to infer the `batch_size` from an ambiguous collection.*"
@@ -29,6 +33,12 @@ flags.DEFINE_string(
 )
 flags.DEFINE_string(
     "prediction_save_path", "predictions", "Path to where the predictions will be saved"
+)
+flags.DEFINE_enum(
+    "named_features_mode",
+    "auto",
+    ["auto", "semantic", "legacy"],
+    "How to interpret named feature configurations (auto=prefer semantic if available).",
 )
 
 
@@ -48,6 +58,12 @@ def main(argv):
     except Exception as e:
         logger.error(f"Error reading training parameters: {e}")
         return
+
+    parameters = prepare_parameters(
+        parameters,
+        config_dir=os.path.dirname(parameters_path),
+        named_features_mode=FLAGS.named_features_mode,
+    )
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
