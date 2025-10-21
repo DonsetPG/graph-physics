@@ -1,0 +1,27 @@
+<?xml version="1.0" ?>
+<Xdmf Version="3.0">
+  <Domain>
+    <Grid Name="EdgeMesh" GridType="Uniform">
+      <Topology TopologyType="Polyline" NodesPerElement="2" NumberOfElements="67821">
+        <DataItem Format="HDF" DataType="Int" Dimensions="67821 2">
+          mesh_run4.h5:/edges
+        </DataItem>
+      </Topology>
+      <Geometry GeometryType="XYZ">
+        <DataItem Format="HDF" DataType="Float" Dimensions="11060 3">
+          mesh_run4.h5:/points
+        </DataItem>
+      </Geometry>
+      <Attribute Name="Velocity" AttributeType="Vector" Center="Node">
+        <DataItem Format="HDF" DataType="Float" Dimensions="11060 3">
+          mesh_run4.h5:/velocity
+        </DataItem>
+      </Attribute>
+      <Attribute Name="wall_mask" AttributeType="Scalar" Center="Node">
+        <DataItem Format="HDF" DataType="Int" Dimensions="11060 1">
+          mesh_run4.h5:/wall_mask
+        </DataItem>
+      </Attribute>
+    </Grid>
+  </Domain>
+</Xdmf>
