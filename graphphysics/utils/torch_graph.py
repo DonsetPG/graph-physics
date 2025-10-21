@@ -85,9 +85,8 @@ def compute_k_hop_graph(
     ).to(device)
 
     # Build k-hop graph
-    khop_mesh_graph = Data(
-        x=graph.x, edge_index=khop_edge_index, pos=graph.pos, y=graph.y, face=graph.face
-    )
+    khop_mesh_graph = graph.clone()
+    khop_mesh_graph.edge_index = khop_edge_index.to(device)
 
     # Optionally compute edge features
     if add_edge_features_to_khop:
@@ -96,6 +95,7 @@ def compute_k_hop_graph(
             T.Distance(norm=False),
         ]
         edge_feature_computer = T.Compose(transforms)
+        khop_mesh_graph.edge_attr = None
         khop_mesh_graph = edge_feature_computer(khop_mesh_graph).to(device)
 
     return khop_mesh_graph
