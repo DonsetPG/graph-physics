@@ -173,9 +173,18 @@ def meshdata_to_graph(
         )
     if cells.shape[0] == 3:
         face = cells
-    if cells.shape[0] == 2:    
+    if cells.shape[0] == 2: #case where cells are edges    
         face = cells
-        
+        # force Data with edge_index=face
+        return Data(
+        x=node_features,
+        edge_index=face,
+        face=face,
+        tetra=tetra,
+        y=target_features,
+        pos=torch.tensor(points, dtype=torch.float32),
+        id=id,
+        ) 
     return Data(
         x=node_features,
         face=face,
