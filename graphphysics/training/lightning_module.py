@@ -182,6 +182,18 @@ class LightningModule(L.LightningModule):
         init_mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
         points = init_mesh.points
         cells = init_mesh.cells
+
+        # --- Option: without time series (single frame only) ---
+        target_same_frame: bool = True
+        if getattr(self, "target_same_frame", True):
+            mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
+            meshio.write(xdmf_filename, mesh)
+            logger.info(
+                f"[No Time Series] Single frame saved at {xdmf_filename}"
+            )
+            return
+
+
         try:
             with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
                 # Write the mesh (points and cells) once

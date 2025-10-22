@@ -44,10 +44,10 @@ def convert_to_meshio_vtu(graph: Data, add_all_data: bool = False) -> meshio.Mes
         .numpy()
         .T
     )
-    cells = [
-        ("tetra" if getattr(graph, "tetra", None) is not None else "triangle", faces)
-    ]
-
+    #cells = [
+    #    ("tetra" if getattr(graph, "tetra", None) is not None else "triangle", faces)
+    #]
+    cells = [("line", faces)] # my case !!!!!!!!
     # Create Meshio mesh
     mesh = meshio.Mesh(vertices, cells)
 
