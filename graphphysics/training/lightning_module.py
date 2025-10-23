@@ -200,7 +200,7 @@ class LightningModule(L.LightningModule):
         logger.info(
             f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
         )
-        h5_filename = f"{xdmf_filename.replace('xdmf', 'h5')}"
+        h5_filename = xdmf_filename.replace(".xdmf", ".h5")
         src = os.path.join(os.getcwd(), os.path.basename(h5_filename))
         # The h5 file may be in the cwd (meshio bug), move it to xdmf location
         if os.path.exists(src):
