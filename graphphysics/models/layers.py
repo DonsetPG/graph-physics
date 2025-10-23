@@ -15,6 +15,21 @@ except ImportError:
     dglsp = None
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
 
+try:
+    from flash_attn import flash_attn_qkvpacked_func  # type: ignore
+
+    HAS_FLASH_ATTN = True
+except ImportError:
+    try:
+        from flash_attn.flash_attn_interface import (  # type: ignore
+            flash_attn_qkvpacked_func,
+        )
+
+        HAS_FLASH_ATTN = True
+    except ImportError:
+        HAS_FLASH_ATTN = False
+        flash_attn_qkvpacked_func = None
+
 
 class RMSNorm(nn.Module):
     """
@@ -397,6 +412,8 @@ class Attention(nn.Module):
         num_heads=4,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
+        dropout_p: float = 0.0,
+        use_flash: bool = True,
     ):
         """
         Initializes the Attention module.
@@ -409,6 +426,10 @@ class Attention(nn.Module):
                 Defaults to True.
             use_separate_proj_weight (bool, optional): Whether to use separate weights
                 for Q, K, V projections. If False, weights are shared. Defaults to True.
+            dropout_p (float, optional): Dropout probability applied inside flash attention.
+                Defaults to 0.0.
+            use_flash (bool, optional): Whether to enable flash attention when available.
+                Defaults to True.
         """
         super().__init__()
 
@@ -419,6 +440,8 @@ class Attention(nn.Module):
         self.hidden_size = output_dim
         self.num_heads = num_heads
         self.head_dim = output_dim // num_heads
+        self.dropout_p = dropout_p
+        self.use_flash = use_flash
 
         self.q_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.k_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
@@ -430,6 +453,113 @@ class Attention(nn.Module):
             with torch.no_grad():
                 self.k_proj.weight = self.q_proj.weight
                 self.v_proj.weight = self.q_proj.weight
+
+    def _can_use_flash(self, x: torch.Tensor) -> bool:
+        """
+        Determine whether flash attention can be used for the current input.
+        """
+        if not self.use_flash or not HAS_FLASH_ATTN:
+            return False
+        if not x.is_cuda:
+            return False
+        if x.dtype not in (torch.float16, torch.bfloat16):
+            return False
+        return True
+
+    def _build_attention_bias(
+        self,
+        adj,
+        num_nodes: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Optional[torch.Tensor]:
+        """
+        Build an additive attention bias tensor for flash attention based on the adjacency.
+        """
+        if adj is None:
+            return None
+
+        if HAS_DGL_SPARSE and isinstance(adj, SparseMatrix):
+            mask = adj.to_dense()
+        elif torch.is_tensor(adj):
+            mask = adj
+            if mask.is_sparse:
+                mask = mask.to_dense()
+        else:
+            raise TypeError(
+                "Unsupported adjacency type for flash attention "
+                f"({type(adj).__name__})."
+            )
+
+        if mask.dim() != 2:
+            raise ValueError(
+                "Adjacency mask must be a 2D tensor with shape (N, N) "
+                f"but received shape {mask.shape}."
+            )
+
+        mask = mask.to(device=device)
+        if mask.dtype != torch.bool:
+            mask = mask != 0
+        else:
+            mask = mask.bool()
+
+        mask = mask | torch.eye(num_nodes, dtype=torch.bool, device=device)
+
+        mask = mask.unsqueeze(0).unsqueeze(0)  # Shape: (1, 1, N, N)
+        mask = mask.expand(1, self.num_heads, num_nodes, num_nodes)
+
+        bias = torch.zeros(
+            (1, self.num_heads, num_nodes, num_nodes),
+            device=device,
+            dtype=dtype,
+        )
+
+        min_val = torch.finfo(bias.dtype).min
+        bias = bias.masked_fill(~mask, min_val)
+        return bias
+
+    def _flash_attention(
+        self,
+        q: torch.Tensor,
+        k: torch.Tensor,
+        v: torch.Tensor,
+        adj,
+    ) -> torch.Tensor:
+        """
+        Compute attention using flash_attn on packed QKV tensors.
+
+        Args:
+            q (torch.Tensor): Query tensor of shape (N, num_heads, head_dim).
+            k (torch.Tensor): Key tensor of shape (N, num_heads, head_dim).
+            v (torch.Tensor): Value tensor of shape (N, num_heads, head_dim).
+            adj: Optional adjacency information.
+
+        Returns:
+            torch.Tensor: Attention output of shape (N, num_heads, head_dim).
+        """
+        num_nodes = q.size(0)
+        # Stack along the new QKV axis so flash attention sees (batch, seq, 3, heads, dim).
+        qkv = torch.stack((q, k, v), dim=1).unsqueeze(0).contiguous()
+
+        attn_bias = self._build_attention_bias(
+            adj=adj,
+            num_nodes=num_nodes,
+            device=qkv.device,
+            dtype=qkv.dtype,
+        )
+
+        dropout_p = self.dropout_p if self.training else 0.0
+
+        flash_kwargs = {
+            "dropout_p": dropout_p,
+            "causal": False,
+        }
+
+        if attn_bias is not None:
+            flash_kwargs["attn_bias"] = attn_bias
+
+        output = flash_attn_qkvpacked_func(qkv, **flash_kwargs)
+        return output.squeeze(0)
 
     def forward(
         self,
@@ -463,10 +593,31 @@ class Attention(nn.Module):
         k = k.reshape(N, self.head_dim, self.num_heads)
         v = v.reshape(N, self.head_dim, self.num_heads)
 
-        if return_attention:
-            y, attn = scaled_dot_product_attention(q, k, v, adj, return_attention=True)
+        attn = None
+
+        if self._can_use_flash(x) and not return_attention:
+            q_heads = q.permute(0, 2, 1)  # (N, num_heads, head_dim)
+            k_heads = k.permute(0, 2, 1)
+            v_heads = v.permute(0, 2, 1)
+
+            y_heads = self._flash_attention(q_heads, k_heads, v_heads, adj)
+            y = y_heads.permute(0, 2, 1)
         else:
-            y = scaled_dot_product_attention(q, k, v, adj)
+            if return_attention:
+                y, attn = scaled_dot_product_attention(
+                    q, k, v, adj, return_attention=True
+                )
+            else:
+                y = scaled_dot_product_attention(q, k, v, adj)
+
+            if self._can_use_flash(x) and return_attention:
+                # Compute output with flash attention for performance while
+                # retaining the attention map from the fallback path.
+                q_heads = q.permute(0, 2, 1)
+                k_heads = k.permute(0, 2, 1)
+                v_heads = v.permute(0, 2, 1)
+                y_flash = self._flash_attention(q_heads, k_heads, v_heads, adj)
+                y = y_flash.permute(0, 2, 1)
 
         out = self.proj(y.reshape(N, -1))
 
