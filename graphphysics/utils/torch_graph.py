@@ -30,6 +30,7 @@ def compute_k_hop_edge_index(
         edge_index,
         values=torch.ones(edge_index.size(1), dtype=torch.float32, device=device),
         size=(num_nodes, num_nodes),
+        device=device,
     ).coalesce()
 
     adj_k = adj.clone()
