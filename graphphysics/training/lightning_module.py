@@ -120,8 +120,10 @@ class LightningModule(L.LightningModule):
         return self.model(graph)
 
     def _batch_device(self) -> torch.device:
-        model_device = getattr(self.model, "device", None)
-        return torch.device(model_device if model_device is not None else self.device)
+        try:
+            return next(self.model.parameters()).device
+        except (AttributeError, StopIteration):
+            return torch.device(self.device)
 
     def training_step(self, batch: Batch):
         batch = batch.to(self._batch_device(), non_blocking=True)
