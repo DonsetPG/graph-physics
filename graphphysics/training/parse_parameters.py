@@ -8,6 +8,7 @@ from graphphysics.dataset.h5_dataset import H5Dataset
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
 from graphphysics.models.processors import (
+    EncodeLocalFlashDecode,
     EncodeProcessDecode,
     EncodeTransformDecode,
     TransolverProcessor,
@@ -107,6 +108,23 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
+            only_processor=only_processor,
+        )
+    elif model_type == "local_flash_k8":
+        model_cfg = param["model"]
+        return EncodeLocalFlashDecode(
+            message_passing_num=model_cfg["message_passing_num"],
+            node_input_size=node_input_size,
+            output_size=model_cfg["output_size"],
+            hidden_size=model_cfg["hidden_size"],
+            num_heads=model_cfg["num_heads"],
+            mlp_ratio=model_cfg.get("mlp_ratio", 4.0),
+            dropout=model_cfg.get("dropout", 0.0),
+            chunk_nodes=model_cfg.get("chunk_nodes"),
+            include_self=model_cfg.get("include_self", True),
+            sort_neighbors=model_cfg.get("sort_neighbors", True),
+            use_triton=model_cfg.get("use_triton", True),
+            use_flash_attn=model_cfg.get("use_flash_attn", True),
             only_processor=only_processor,
         )
     elif model_type == "transolver":

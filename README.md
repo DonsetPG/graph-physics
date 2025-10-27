@@ -32,6 +32,23 @@ At the moment, the repository supports the following:
   * [x] Augmented Adjacency Matrix
   * [ ] Sub-meshs
 
+## Local FlashAttention (K = 8)
+
+The repository now includes a Triton-powered FlashAttention path tailored for fixed-fanout neighbourhoods:
+
+- `LocalFlashK8` (see `graphphysics/models/local_flash_attn_k8.py`) fuses QKV projection, a Triton gather-pack kernel, and FlashAttention v2 with a PyTorch fallback.
+- Datasets automatically derive or load `idx_k8` caches (`idx_k8_cache/`) alongside CSR tensors so neighbourhoods are ready at batch time.
+- `HybridGraphBlockK8` wraps LayerNorm → LocalFlashK8 → residual → MLP → residual and can be selected via `"model": { "type": "local_flash_k8", ... }` in a training config.
+- Training enables bf16 mixed precision on CUDA, allows TF32 matmuls, and optionally compiles the simulator when `"optimizations": { "compile_model": true }` is provided.
+
+### Tools & Benchmarks
+
+- Precompute neighbours: `python tools/build_fixed_fanout_k8.py --edge-index edge.pt --output idx_k8.pt`
+- Microbenchmark throughput: `python -m graphphysics.training.benchmark_local_flash_k8 --num-nodes 32768 --d-model 512 --n-heads 8 --head-dim 64`
+- Profile hotspots (emits Chrome trace): `python -m graphphysics.training.profile_local_flash_k8 --num-nodes 24576 --trace flash_trace.json`
+
+> Tip: install Triton and FlashAttention wheels to access the fast path on NVIDIA A100 GPUs; otherwise the layer transparently falls back to PyTorch.
+
 Feel free to open a PR if you want to implement a new feature, or an issue to request one.
 
 ## Datasets

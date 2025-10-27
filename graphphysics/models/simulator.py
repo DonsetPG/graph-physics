@@ -173,6 +173,13 @@ class Simulator(nn.Module):
             edge_index=inputs.edge_index,
         )
 
+        if hasattr(inputs, "idx_k8"):
+            graph.idx_k8 = inputs.idx_k8
+        if hasattr(inputs, "rowptr"):
+            graph.rowptr = inputs.rowptr
+        if hasattr(inputs, "col"):
+            graph.col = inputs.col
+
         return graph, target_delta_normalized
 
     def build_outputs(self, inputs: Data, network_output: torch.Tensor) -> torch.Tensor:

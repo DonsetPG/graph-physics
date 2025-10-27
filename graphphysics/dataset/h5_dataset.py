@@ -182,6 +182,10 @@ class H5Dataset(BaseDataset):
             graph = self._apply_k_hop(graph, traj_index)
             graph = self._may_remove_edges_attr(graph)
             graph = self._add_random_edges(graph)
+            idx_cache_key = (
+                f"{traj_number}_kh{self.khop}"
+            )
+            graph = self._attach_idx_k8(graph, cache_key=idx_cache_key)
             selected_indices = self._get_masked_indexes(graph)
 
             graph.edge_index = (

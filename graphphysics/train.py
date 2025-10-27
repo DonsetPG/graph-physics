@@ -25,7 +25,12 @@ warnings.filterwarnings(
     "ignore", ".*Trying to infer the `batch_size` from an ambiguous collection.*"
 )
 
+os.environ.setdefault("CUDA_DEVICE_MAX_CONNECTIONS", "1")
+os.environ.setdefault("PYTORCH_CUDA_ALLOC_CONF", "expandable_segments:True")
+
 torch.set_float32_matmul_precision("high")
+if torch.cuda.is_available():
+    torch.backends.cuda.matmul.allow_tf32 = True
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 FLAGS = flags.FLAGS
@@ -78,6 +83,17 @@ def main(argv):
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    optim_params = parameters.get("optimizations", {})
+    bf16_supported = bool(
+        torch.cuda.is_available()
+        and hasattr(torch.cuda, "is_bf16_supported")
+        and torch.cuda.is_bf16_supported()
+    )
+    precision = optim_params.get(
+        "precision",
+        "bf16-mixed" if bf16_supported else "32-true",
+    )
+    compile_model = optim_params.get("compile_model", False)
 
     wandb_project_name = FLAGS.project_name
     num_epochs = FLAGS.num_epochs
@@ -204,6 +220,15 @@ def main(argv):
             **prev_data_kwargs,
         )
 
+    if compile_model and hasattr(lightning_module.model, "model"):
+        try:
+            lightning_module.model.model = torch.compile(
+                lightning_module.model.model
+            )
+            logger.info("torch.compile enabled for simulator model")
+        except Exception as exc:
+            logger.warning(f"torch.compile failed ({exc}); continuing without it")
+
     # Initialize WandbLogger
     if resume_training:
         wandb_run = wandb.init(
@@ -230,6 +255,7 @@ def main(argv):
             "#_hops": parameters["dataset"]["khop"],
             "max_lr": initial_lr,
             "batch_size": batch_size,
+            "precision": precision,
         }
     )
 
@@ -247,6 +273,7 @@ def main(argv):
         ],
         log_every_n_steps=100,
         gradient_clip_val=1.0,
+        precision=precision,
     )
 
     # Resuming training from a checkpoint

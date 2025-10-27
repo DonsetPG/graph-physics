@@ -1,4 +1,5 @@
 venv/*
+/.venv/
 venvuys/*
 jax/*
 dgl/
@@ -17,3 +18,4 @@ meshes/
 predictions/
 wandb/
 checkpoints/
+**/idx_k8_cache/

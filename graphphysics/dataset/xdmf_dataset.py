@@ -190,6 +190,10 @@ class XDMFDataset(BaseDataset):
         graph = self._apply_k_hop(graph, traj_index)
         graph = self._may_remove_edges_attr(graph)
         graph = self._add_random_edges(graph)
+        cache_key = (
+            f"{mesh_id}_kh{self.khop}"
+        )
+        graph = self._attach_idx_k8(graph, cache_key=cache_key)
         selected_indices = self._get_masked_indexes(graph)
 
         graph.edge_index = (

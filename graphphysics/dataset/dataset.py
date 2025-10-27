@@ -5,9 +5,11 @@ from typing import Any, Callable, Dict, Optional, Tuple
 import torch
 import torch_geometric.transforms as T
 from loguru import logger
+from pathlib import Path
 from torch_geometric.data import Data, Dataset
 from torch_geometric.utils import add_random_edge
 
+from graphphysics.models.utils_csr import build_fixed_fanout_k8, edge_index_to_csr
 from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
     compute_k_hop_graph,
@@ -61,6 +63,11 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
+
+        self.idx_cache_dir = Path(meta_path).resolve().parent / "idx_k8_cache"
+        self.idx_cache_enabled = (
+            self.idx_cache_dir is not None and self.new_edges_ratio <= 0.0
+        )
 
         self.world_pos_index_start = None
         self.world_pos_index_end = None
@@ -197,6 +204,50 @@ class BaseDataset(Dataset, ABC):
         """
         if not self.add_edge_features:
             graph.edge_attr = None
+        return graph
+
+    def _attach_idx_k8(
+        self, graph: Data, cache_key: Optional[str] = None
+    ) -> Data:
+        """Attach or load idx_k8/CSR tensors on the graph."""
+        if getattr(graph, "edge_index", None) is None:
+            return graph
+        if getattr(graph, "idx_k8", None) is not None:
+            return graph
+
+        cache_path: Optional[Path] = None
+        if (
+            self.idx_cache_enabled
+            and cache_key
+            and self.idx_cache_dir is not None
+        ):
+            cache_path = self.idx_cache_dir / f"{cache_key}.pt"
+            if cache_path.exists():
+                payload = torch.load(cache_path, map_location="cpu")
+                graph.idx_k8 = payload["idx_k8"]
+                graph.rowptr = payload.get("rowptr")
+                graph.col = payload.get("col")
+                return graph
+
+        rowptr, col = edge_index_to_csr(graph.edge_index, graph.num_nodes)
+        idx_k8 = build_fixed_fanout_k8(
+            rowptr=rowptr,
+            col=col,
+            include_self=True,
+            sort_neighbors=True,
+        )
+        graph.rowptr = rowptr
+        graph.col = col
+        graph.idx_k8 = idx_k8
+
+        if cache_path is not None:
+            payload = {
+                "idx_k8": idx_k8.cpu(),
+                "rowptr": rowptr.cpu(),
+                "col": col.cpu(),
+            }
+            torch.save(payload, cache_path)
+
         return graph
 
     def _get_masked_indexes(self, graph: Data) -> Optional[torch.Tensor]:

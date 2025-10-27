@@ -4,6 +4,7 @@ from loguru import logger
 from torch_geometric.data import Data
 from torch_geometric.nn import TransformerConv
 
+from graphphysics.models.blocks_hybrid_k8 import HybridGraphBlockK8
 from graphphysics.models.layers import (
     GraphNetBlock,
     Transformer,
@@ -109,6 +110,92 @@ class EncodeProcessDecode(nn.Module):
         else:
             x_decoded = self.decode_module(x)
             return x_decoded
+
+
+class EncodeLocalFlashDecode(nn.Module):
+    """Encode-process-decode stack using LocalFlashK8 attention blocks."""
+
+    def __init__(
+        self,
+        message_passing_num: int,
+        node_input_size: int,
+        output_size: int,
+        hidden_size: int = 128,
+        num_heads: int = 4,
+        mlp_ratio: float = 4.0,
+        dropout: float = 0.0,
+        chunk_nodes: int | None = None,
+        include_self: bool = True,
+        sort_neighbors: bool = True,
+        use_triton: bool = True,
+        use_flash_attn: bool = True,
+        only_processor: bool = False,
+    ):
+        super().__init__()
+        if hidden_size % num_heads != 0:
+            raise ValueError("hidden_size must be divisible by num_heads.")
+
+        self.hidden_size = hidden_size
+        self.only_processor = only_processor
+        self.d = output_size
+
+        head_dim = hidden_size // num_heads
+
+        if not self.only_processor:
+            self.nodes_encoder = build_mlp(
+                in_size=node_input_size,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+            )
+            self.decode_module = build_mlp(
+                in_size=hidden_size,
+                hidden_size=hidden_size,
+                out_size=output_size,
+                layer_norm=False,
+            )
+
+        self.processor_list = nn.ModuleList(
+            [
+                HybridGraphBlockK8(
+                    d_model=hidden_size,
+                    n_heads=num_heads,
+                    head_dim=head_dim,
+                    dropout=dropout,
+                    mlp_ratio=mlp_ratio,
+                    chunk_nodes=chunk_nodes,
+                    include_self=include_self,
+                    sort_neighbors=sort_neighbors,
+                    use_triton=use_triton,
+                    use_flash_attn=use_flash_attn,
+                )
+                for _ in range(message_passing_num)
+            ]
+        )
+
+    def forward(self, graph: Data) -> torch.Tensor:
+        if self.only_processor:
+            x = graph.x
+        else:
+            x = self.nodes_encoder(graph.x)
+
+        idx = getattr(graph, "idx_k8", None)
+        rowptr = getattr(graph, "rowptr", None)
+        col = getattr(graph, "col", None)
+        edge_index = getattr(graph, "edge_index", None)
+
+        for block in self.processor_list:
+            x = block(
+                x,
+                idx_k8=idx,
+                rowptr=rowptr,
+                col=col,
+                edge_index=edge_index,
+            )
+
+        if self.only_processor:
+            return x
+        else:
+            return self.decode_module(x)
 
 
 class EncodeTransformDecode(nn.Module):
