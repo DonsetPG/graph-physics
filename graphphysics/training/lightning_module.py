@@ -119,14 +119,8 @@ class LightningModule(L.LightningModule):
     def forward(self, graph: Batch):
         return self.model(graph)
 
-    def _batch_device(self) -> torch.device:
-        try:
-            return next(self.model.parameters()).device
-        except (AttributeError, StopIteration):
-            return torch.device(self.device)
-
     def training_step(self, batch: Batch):
-        batch = batch.to(self._batch_device(), non_blocking=True)
+        batch = batch.to(self.device, non_blocking=True)
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
 
@@ -206,11 +200,13 @@ class LightningModule(L.LightningModule):
         logger.info(
             f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
         )
-        h5_filename = xdmf_filename.replace(".xdmf", ".h5")
-        src = os.path.join(os.getcwd(), os.path.basename(h5_filename))
-        # The h5 file may be in the cwd (meshio bug), move it to xdmf location
-        if os.path.exists(src):
-            shutil.move(src=src, dst=h5_filename)
+        # The H5 archive is systematically created in cwd, we just need to move it
+        shutil.move(
+            src=os.path.join(
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
+            ),
+            dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
+        )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
@@ -254,7 +250,7 @@ class LightningModule(L.LightningModule):
         )
 
     def validation_step(self, batch: Batch, batch_idx: int):
-        batch = batch.to(self._batch_device(), non_blocking=True)
+        batch = batch.to(self.device, non_blocking=True)
         # Determine if we need to reset the trajectory
         if batch.traj_index > self.current_val_trajectory:
             self._reset_validation_trajectory()
@@ -372,7 +368,7 @@ class LightningModule(L.LightningModule):
         If the next step is in the next trajectory, save the current trajectory
         to xdmf and reset the trajectory.
         """
-        batch = batch.to(self._batch_device(), non_blocking=True)
+        batch = batch.to(self.device, non_blocking=True)
         if batch.traj_index > self.current_pred_trajectory:
             # save
             self._save_trajectory_to_xdmf(
