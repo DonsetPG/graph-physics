@@ -184,16 +184,16 @@ class XDMFDataset(BaseDataset):
                 and self.meta["features"][k]["type"] == "dynamic"
             }    
         # --- DEBUG PRINT ESSENTIEL ---
-        print('-----DEBUG--------')
-        def summarize_data(name, data_dict):
-            print(f"\n{name} summary:")
-            for k, v in data_dict.items():
-                print(f"  {k:<20} shape={v.shape}, dtype={v.dtype}")
-            print(f"Total {len(data_dict)} features.\n")
+        #print('-----DEBUG--------')
+        #def summarize_data(name, data_dict):
+        #    print(f"\n{name} summary:")
+        #    for k, v in data_dict.items():
+        #        print(f"  {k:<20} shape={v.shape}, dtype={v.dtype}")
+        #    print(f"Total {len(data_dict)} features.\n")
 
-        summarize_data("point_data", point_data)
-        summarize_data("target_data", target_data)
-        print('-----------------')
+        #summarize_data("point_data", point_data)
+        #summarize_data("target_data", target_data)
+        #print('-----------------')
         # --- FIN DEBUG ---
 
 
