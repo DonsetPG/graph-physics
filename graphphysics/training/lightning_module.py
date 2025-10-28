@@ -252,7 +252,8 @@ class LightningModule(L.LightningModule):
         last_prediction = predicted_outputs
         if self.use_previous_data:
             last_previous_data_prediction = predicted_outputs - current_output
-
+        # add predic velocity to batch
+        batch.x[:,0:3] = predicted_outputs
         return (
             batch,
             predicted_outputs,
