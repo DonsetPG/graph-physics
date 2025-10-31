@@ -20,6 +20,7 @@ from graphphysics.utils.loss import L2Loss, MultiLoss
 from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
+from graphphysics.utils.volume import compute_volume
 
 
 def build_mask(param: dict, graph: Batch):
@@ -81,7 +82,11 @@ class LightningModule(L.LightningModule):
         self.is_multiloss = False
         if isinstance(self.loss, MultiLoss):
             self.is_multiloss = True
-
+            if "VOLUMELOSS" in self.loss_name:
+                logger.info("Volume loss detected in MultiLoss.")
+                self.use_volume_loss = True
+            else:
+                self.use_volume_loss = False
         self.loss_masks = masks
         self.val_loss = L2Loss()
         self.gradient_method = get_gradient_method(
@@ -265,6 +270,10 @@ class LightningModule(L.LightningModule):
         if self.is_multiloss:
             network_output_physical = self.model.build_outputs(batch, network_output)
             target_physical = self.model.build_outputs(batch, target_delta_normalized)
+            if self.use_volume_loss:
+                tets = getattr(batch, "tetra") if hasattr(batch, "tetra") else print("WTFF")
+                volume_target = compute_volume(target_physical, tets)
+                volume = compute_volume(network_output_physical, tets)
             loss, train_losses = self.loss(
                 graph=batch,
                 target=target_delta_normalized,
@@ -275,6 +284,8 @@ class LightningModule(L.LightningModule):
                 target_physical=target_physical,
                 gradient_method=self.gradient_method,
                 return_all_losses=True,
+                volume_target=volume_target if self.use_volume_loss else None,
+                volume=volume if self.use_volume_loss else None,
             )
             for train_loss, loss_name in zip(train_losses, self.loss_name):
                 self.log(

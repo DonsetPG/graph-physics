@@ -425,6 +425,37 @@ class DivergenceL1SmoothLoss(_Loss):
         ]
         return torch.mean(errors)
 
+class VolumeLoss(_Loss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+
+    @property
+    def __name__(self):
+        return "VolumeLoss"
+
+    def forward(
+        self,
+        target: torch.Tensor,
+        network_output: torch.Tensor,
+        node_type: torch.Tensor,
+        masks: list[NodeType],
+        selected_indexes: torch.Tensor = None,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Computes loss between target and predicted volume.
+
+        Args:
+            volume_target (torch.Tensor): The target volume.
+            volume (torch.Tensor): The predicted volume.
+
+        Returns:
+            torch.Tensor: The loss between the target and predicted volume.
+        """
+
+        volume = kwargs.get("volume")
+        volume_target = kwargs.get("volume_target")
+        return abs(volume - volume_target)
 
 class MultiLoss(_Loss):
     def __init__(self, losses, weights, **kwargs):
@@ -448,6 +479,10 @@ class MultiLoss(_Loss):
         """
         Combines multiple loss, weighted with fixed weights.
         """
+
+        network_output_gradient: torch.Tensor | None = None
+        target_gradient: torch.Tensor | None = None
+
         if gradient_method is not None:
             network_output_gradient = compute_gradient(
                 graph=graph,
@@ -491,3 +526,4 @@ class LossType(enum.Enum):
     DIVERGENCEL2LOSS = DivergenceL2Loss
     DIVERGENCEL1LOSS = DivergenceL1Loss
     DIVERGENCEL1SMOOTHLOSS = DivergenceL1SmoothLoss
+    VOLUMELOSS = VolumeLoss
