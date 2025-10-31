@@ -19,7 +19,7 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
     "graphphysics.utils.scheduler.CosineWarmupScheduler"
 ) as MockCosineWarmupScheduler:
 
-    device = "cuda" if torch.cuda.is_available() else "cpu"
+    device = "cpu"
 
     class MockDataset(Dataset):
         def __len__(self):
@@ -95,14 +95,15 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
 
             self.trajectory_length = 599
 
-            self.model = LightningModule(
-                parameters=self.parameters,
-                learning_rate=self.learning_rate,
-                num_steps=self.num_steps,
-                warmup=self.warmup,
-                only_processor=self.only_processor,
-                trajectory_length=self.trajectory_length,
-            )
+            with patch("torch.cuda.is_available", return_value=False):
+                self.model = LightningModule(
+                    parameters=self.parameters,
+                    learning_rate=self.learning_rate,
+                    num_steps=self.num_steps,
+                    warmup=self.warmup,
+                    only_processor=self.only_processor,
+                    trajectory_length=self.trajectory_length,
+                )
 
             self.dataset = MockDataset()
             self.dataloader = DataLoader(self.dataset, batch_size=2)
