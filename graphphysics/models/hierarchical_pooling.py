@@ -4,7 +4,7 @@ from typing import Optional
 
 import torch
 import torch.nn as nn
-from torch_geometric.data import Batch
+from torch_geometric.data import Data
 from torch_geometric.nn.pool.select import SelectTopK
 from torch_geometric.nn.unpool import knn_interpolate
 from torch_geometric.transforms import KNNGraph
@@ -37,41 +37,48 @@ class UpSampler(nn.Module):
 
 
 class DownSampler(nn.Module):
-
-    def __init__(self, d_in: int, d_out: int, ratio: int = 0.25):
-
+    def __init__(
+        self,
+        d_in: int,
+        d_out: int,
+        edge_dim: int,
+        ratio: float = 0.25,
+        k: int = 6,
+    ):
         super().__init__()
-
         self.ratio = ratio
         self.lin = nn.Linear(d_in, d_out)
         self.min_score = None
         self.nonlinearity = "softmax"
-
+        self.edge_dim = edge_dim
         self.select = SelectTopK(d_in, self.ratio, self.min_score, self.nonlinearity)
-        self.remesher = KNNGraph(k=6, force_undirected=True)
+        self.remesher = KNNGraph(k=k, force_undirected=True)
+
+    def _build_edge_features(self, graph: Data) -> torch.Tensor:
+        senders, receivers = graph.edge_index
+        rel_pos = graph.pos[senders] - graph.pos[receivers]
+        rel_norm = torch.norm(rel_pos, p=2, dim=-1, keepdim=True)
+        features = torch.cat([rel_pos, rel_norm], dim=-1)
+        return features
 
     @torch.compiler.disable
     def forward(
         self,
-        x: torch.Tensor,
-        pos: torch.Tensor,
-        batch: torch.Tensor,
+        graph: Data,
         attn: Optional[torch.Tensor] = None,
-    ) -> torch.Tensor:
+    ) -> Data:
 
-        attn = x if attn is None else attn
-        select_out = self.select(attn, batch)
-
+        scores = graph.x if attn is None else attn
+        select_out = self.select(scores, None)
         perm = select_out.node_index
 
-        x_c = self.lin(x[perm])
-        pos_c = pos[perm]
-        batch_c = batch[perm]
+        x_c = self.lin(graph.x[perm])
+        pos_c = graph.pos[perm]
 
-        coarse_graph = Batch(
+        coarse_graph = Data(
             x=x_c,
-            batch=batch_c,
             pos=pos_c,
         )
-
-        return self.remesher(coarse_graph)
+        coarse_graph = self.remesher(coarse_graph)
+        coarse_graph.edge_attr = self._build_edge_features(coarse_graph)
+        return coarse_graph

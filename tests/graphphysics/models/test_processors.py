@@ -5,6 +5,7 @@ from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
     TransolverProcessor,
+    HierarchicalPooler,
 )
 
 
@@ -296,6 +297,53 @@ class TestTransolverProcessor(unittest.TestCase):
         x_decoded = model(graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
+class TestHierarchicalPooler(unittest.TestCase):
+    def setUp(self):
+        self.num_nodes = 20
+        self.node_input_size = 8
+        self.edge_input_size = 4
+        self.output_size = 3
+        self.hidden_size = 16
+        self.message_passing_num_down = 4
+        self.message_passing_num_up = 1
+        self.pool_ratio = 0.5
+        self.pool_knn = 4
+
+        x = torch.randn(self.num_nodes, self.node_input_size)
+        pos = torch.randn(self.num_nodes, 3)
+        num_edges = self.num_nodes * 2
+        edge_attr = torch.randn(num_edges, self.edge_input_size)
+        edge_index = torch.randint(0, self.num_nodes, (2, num_edges))
+        self.graph = Data(x=x, pos=pos, edge_index=edge_index, edge_attr=edge_attr)
+
+    def test_hierarchical_pooler_forward(self):
+        model = HierarchicalPooler(
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            message_passing_num_down=self.message_passing_num_down,
+            message_passing_num_up=self.message_passing_num_up,
+            ratio=self.pool_ratio,
+            k=self.pool_knn,
+        )
+        x_decoded = model(self.graph)
+        # x_decoded should have shape [num_nodes, output_size]
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+    def test_multiple_message_passing_steps(self):
+        model = HierarchicalPooler(
+            node_input_size=self.node_input_size,
+            edge_input_size=self.edge_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            message_passing_num_down=6,
+            message_passing_num_up=3,
+            ratio=self.pool_ratio,
+            k=self.pool_knn,
+        )
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
 
 if __name__ == "__main__":
     unittest.main()

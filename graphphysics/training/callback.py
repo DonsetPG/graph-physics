@@ -1,5 +1,5 @@
 import os
-from typing import List
+from typing import List, Optional
 
 import lightning.pytorch as pl
 import numpy as np
@@ -10,6 +10,7 @@ from torch_geometric.data import Data, Dataset
 
 import wandb
 from graphphysics.training.lightning_module import build_mask
+from graphphysics.models.hierarchical_pooling import DownSampler
 from graphphysics.utils.pyvista_mesh import convert_to_pyvista_mesh
 
 
@@ -25,15 +26,32 @@ class LogPyVistaPredictionsCallback(Callback):
         dataset (Dataset): The dataset to fetch data samples from.
         indices (List[int]): List of indices specifying which data samples to use.
         output_dir (str, optional): Directory to save the generated images. Defaults to 'predictions'.
+        compare_downsampling (bool, optional): If True, log PyVista overlays of the original graph
+            versus its downsampled counterpart. Defaults to False.
+        downsample_ratio (Optional[float], optional): Override the downsampling ratio instead
+            of reading it from the LightningModule configuration. Defaults to None.
+        downsample_k (Optional[int], optional): Override the number of neighbors used while
+            remeshing the downsampled graph. Defaults to None.
     """
 
     def __init__(
-        self, dataset: Dataset, indices: List[int], output_dir: str = "predictions"
+        self,
+        dataset: Dataset,
+        indices: List[int],
+        output_dir: str = "predictions",
+        compare_downsampling: bool = False,
+        downsample_ratio: Optional[float] = None,
+        downsample_k: Optional[int] = None,
     ):
         super().__init__()
         self.dataset = dataset
         self.indices = indices
         self.output_dir = output_dir
+        self.compare_downsampling = compare_downsampling
+        self.downsample_ratio = downsample_ratio
+        self.downsample_k = downsample_k
+        self._downsampler: Optional[DownSampler] = None
+        self._downsampler_device = torch.device("cpu")
 
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
@@ -51,10 +69,13 @@ class LogPyVistaPredictionsCallback(Callback):
 
         images = []
         ground_truth = []
+        downsampled_images: List[wandb.Image] = []
 
         with torch.no_grad():
             for idx in self.indices:
-                graph = self.dataset[idx].to(device)
+                graph = self.dataset[idx]
+                viz_graph = graph.clone()
+                graph = graph.to(device)
                 _, _, predicted_outputs = model(graph)
 
                 graph.x = predicted_outputs
@@ -79,9 +100,25 @@ class LogPyVistaPredictionsCallback(Callback):
                     wandb.Image(img, caption=f"Ground Truth: Sample Index: {idx}"),
                 )
 
+                if self.compare_downsampling:
+                    comparison_img = self._maybe_create_downsampling_image(
+                        viz_graph, pl_module
+                    )
+                    if comparison_img is not None:
+                        downsampled_images.append(
+                            wandb.Image(
+                                comparison_img,
+                                caption=f"Downsampling: Sample Index: {idx}",
+                            )
+                        )
+
         wandb_logger = trainer.logger
         wandb_logger.experiment.log({"pyvista_predictions": images})
         wandb_logger.experiment.log({"pyvista_ground_truth": ground_truth})
+        if self.compare_downsampling and downsampled_images:
+            wandb_logger.experiment.log(
+                {"pyvista_downsampling": downsampled_images}
+            )
 
         frames_predictions = []
         frames_ground_truth = []
@@ -182,6 +219,107 @@ class LogPyVistaPredictionsCallback(Callback):
         """
         plotter = pv.Plotter(off_screen=True)
         plotter.add_mesh(predicted_mesh, scalars="x0", label="graph.x[0]", opacity=0.8)
+        plotter.add_legend()
+        img = plotter.screenshot(return_img=True)
+        plotter.close()
+        return img
+
+    def _maybe_create_downsampling_image(
+        self, graph: Data, pl_module: pl.LightningModule
+    ):
+        if not self.compare_downsampling:
+            return None
+        coarse_graph = self._downsample_graph(graph, pl_module)
+        if coarse_graph is None:
+            return None
+
+        try:
+            fine_mesh = self._convert_to_pyvista_mesh(graph)
+            coarse_mesh = self._convert_to_pyvista_mesh(coarse_graph)
+        except ValueError:
+            return None
+        return self._generate_downsampling_image(fine_mesh, coarse_mesh)
+
+    def _downsample_graph(
+        self, graph: Data, pl_module: pl.LightningModule
+    ) -> Optional[Data]:
+        if not hasattr(graph, "pos") or graph.pos is None:
+            return None
+        if not hasattr(graph, "edge_index") or graph.edge_index is None:
+            return None
+
+        self._ensure_downsampler(graph, pl_module)
+        if self._downsampler is None:
+            return None
+
+        working_graph = graph.clone()
+        working_graph = working_graph.to(self._downsampler_device)
+        coarse_graph = self._downsampler(working_graph)
+        coarse_graph = coarse_graph.to(torch.device("cpu"))
+        return coarse_graph
+
+    def _ensure_downsampler(
+        self, graph: Data, pl_module: pl.LightningModule
+    ) -> None:
+        if not self.compare_downsampling or self._downsampler is not None:
+            return
+
+        model_cfg = {}
+        if hasattr(pl_module, "param"):
+            model_cfg = pl_module.param.get("model", {})
+
+        ratio = (
+            self.downsample_ratio
+            if self.downsample_ratio is not None
+            else model_cfg.get("pool_ratio", 0.5)
+        )
+        k = (
+            self.downsample_k
+            if self.downsample_k is not None
+            else model_cfg.get("pool_knn", 6)
+        )
+
+        if not hasattr(graph, "x") or graph.x is None:
+            return
+
+        feature_dim = graph.x.shape[1]
+        edge_dim = (
+            graph.edge_attr.shape[1]
+            if hasattr(graph, "edge_attr") and graph.edge_attr is not None
+            else 4
+        )
+        self._downsampler = DownSampler(
+            d_in=feature_dim,
+            d_out=feature_dim,
+            edge_dim=edge_dim,
+            ratio=ratio,
+            k=k,
+        ).to(graph.x.device)
+        with torch.no_grad():
+            eye = torch.eye(feature_dim, device=self._downsampler.lin.weight.device)
+            self._downsampler.lin.weight.copy_(eye)
+            self._downsampler.lin.bias.zero_()
+        self._downsampler_device = graph.x.device
+
+    def _generate_downsampling_image(
+        self, fine_mesh: pv.PolyData, coarse_mesh: pv.PolyData
+    ):
+        plotter = pv.Plotter(off_screen=True)
+        plotter.add_mesh(
+            fine_mesh,
+            color="#94c6ff",
+            show_edges=True,
+            opacity=0.35,
+            label="Original Mesh",
+        )
+        plotter.add_mesh(
+            coarse_mesh,
+            style="points",
+            color="#d62728",
+            point_size=10,
+            render_points_as_spheres=True,
+            label="Downsampled Points",
+        )
         plotter.add_legend()
         img = plotter.screenshot(return_img=True)
         plotter.close()

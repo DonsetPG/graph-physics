@@ -1,34 +1,42 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "tests/mock_xdmf_aneurysm",
-        "meta_path": "tests/mock_h5/meta_aneurysm.json",
+        "xdmf_folder": "dataset/train",
+        "meta_path": "dataset_config/rode_meta.json",
         "khop": 1
     },
     "model": {
-        "type": "transformer",
-        "message_passing_num": 1,
-        "hidden_size": 16,
-        "node_input_size": 13,
+        "type": "hierarchical",
+        "message_passing_num": 15,
+        "message_passing_num_down": 15,
+        "message_passing_num_up": 2,
+        "pool_ratio": 0.5,
+        "pool_knn": 6,
+        "hidden_size": 128,
+        "node_input_size": 9,
         "output_size": 3,
-        "edge_input_size": 0,
-        "num_heads": 4,
+        "edge_input_size": 4,
+        "num_heads": 0,
         "use_silu_activation": false,
         "use_rope_embeddings": false,
         "use_gated_attention": false
     },
+    "loss": {
+        "type": ["l2loss"],
+        "weights": [1]
+    },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 13,
+        "feature_index_end": 9,
         "output_index_start": 0,
         "output_index_end": 3,
-        "node_type_index": 13
+        "node_type_index": 9
     },
     "transformations": {
         "preprocessing": {
-            "noise": 0.02,
+            "noise": 0.002,
             "noise_index_start": [0],
-            "noise_index_end": [2],
+            "noise_index_end": [3],
             "masking": 0
         },
         "world_pos_parameters": {

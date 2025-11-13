@@ -11,6 +11,7 @@ from graphphysics.models.layers import (
     Transformer,
     build_mlp,
 )
+from graphphysics.models.hierarchical_pooling import DownSampler, UpSampler
 
 try:
     import dgl.sparse as dglsp
@@ -429,3 +430,92 @@ class TransolverProcessor(nn.Module):
         out = self.model.forward(x_batched, pos_batched, condition)
         out = out.squeeze(0)  # (N, out_dim)
         return out
+
+class HierarchicalPooler(nn.Module):
+    """
+
+    A hierarchical pooling module that downsamples a graph and then applies EncodeProcessDecode. Then upsamples back to the original mesh where. And then goes into the decoder where we apply an EncodeProcessDecode with a less number of message passing.
+
+    """
+
+    def __init__(
+        self,
+        node_input_size: int,
+        edge_input_size: int,
+        output_size: int,
+        hidden_size: int = 128,
+        message_passing_num_down: int = 15,
+        message_passing_num_up: int = 2,
+        ratio: float = 0.25,
+        k: int = 6,
+    ):
+        super().__init__()
+
+        self.edge_input_size = edge_input_size
+
+        self.downsampler = DownSampler(
+            d_in=node_input_size,
+            d_out=hidden_size,
+            edge_dim=edge_input_size,
+            ratio=ratio,
+            k=k,
+        )
+
+        self.encode_process_decode = EncodeProcessDecode(
+            message_passing_num=message_passing_num_down,
+            node_input_size=hidden_size,
+            edge_input_size=edge_input_size,
+            output_size=hidden_size,
+            hidden_size=hidden_size,
+            only_processor=False,
+        )
+
+        self.up_sampler = UpSampler(
+            d_in=hidden_size,
+            d_out=hidden_size,
+            k=k,
+        )
+
+        self.decode_module = EncodeProcessDecode(
+            message_passing_num=message_passing_num_up,
+            node_input_size=hidden_size,
+            edge_input_size=edge_input_size,
+            output_size=output_size,
+            hidden_size=hidden_size,
+            only_processor=False,
+        )
+
+    def forward(self, graph: Data) -> torch.Tensor:
+        batch = getattr(graph, "batch", None)
+
+        fine_graph = Data(
+            x=graph.x,
+            edge_index=graph.edge_index,
+            edge_attr=graph.edge_attr,
+            pos=graph.pos,
+        )
+        if batch is not None:
+            fine_graph.batch = batch
+
+        downsampled_graph = self.downsampler(fine_graph)
+        encoded_nodes = self.encode_process_decode(downsampled_graph)
+        downsampled_graph.x = encoded_nodes
+
+        upsampled_x = self.up_sampler(
+            x_coarse=downsampled_graph.x,
+            pos_coarse=downsampled_graph.pos,
+            pos_fine=fine_graph.pos,
+            batch_coarse=getattr(downsampled_graph, "batch", None),
+            batch_fine=batch,
+        )
+
+        decoded_graph = Data(
+            x=upsampled_x,
+            edge_index=fine_graph.edge_index,
+            edge_attr=fine_graph.edge_attr,
+            pos=fine_graph.pos,
+        )
+        if batch is not None:
+            decoded_graph.batch = batch
+        output = self.decode_module(decoded_graph)
+        return output

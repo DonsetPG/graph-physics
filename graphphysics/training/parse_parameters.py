@@ -12,6 +12,7 @@ from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
     TransolverProcessor,
+    HierarchicalPooler,
 )
 from graphphysics.models.simulator import Simulator
 from graphphysics.utils.loss import LossType, MultiLoss
@@ -152,6 +153,23 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             rope_pos_dimension=rope_pos_dimension,
             rope_base=rope_base,
             use_temporal_block=use_temporal_block,
+        )
+    elif model_type == "hierarchical":
+        mpn_down = param["model"].get(
+            "message_passing_num_down", param["model"].get("message_passing_num", 15)
+        )
+        mpn_up = param["model"].get("message_passing_num_up", 2)
+        pool_ratio = param["model"].get("pool_ratio", 0.25)
+        pool_k = param["model"].get("pool_knn", 6)
+        return HierarchicalPooler(
+            node_input_size=node_input_size,
+            edge_input_size=param["model"]["edge_input_size"],
+            output_size=param["model"]["output_size"],
+            hidden_size=param["model"]["hidden_size"],
+            message_passing_num_down=mpn_down,
+            message_passing_num_up=mpn_up,
+            ratio=pool_ratio,
+            k=pool_k,
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
