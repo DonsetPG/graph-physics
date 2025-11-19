@@ -195,7 +195,7 @@ class XDMFDataset(BaseDataset):
         #summarize_data("target_data", target_data)
         #print('-----------------')
         # --- FIN DEBUG ---
-
+        #print(f"[DEBUG] GPU Mem Alloc: {torch.cuda.memory_allocated()/1024**2:.1f} MB, Reserved: {torch.cuda.memory_reserved()/1024**2:.1f} MB")
 
         def _reshape_array(a: dict):
             for k, v in a.items():

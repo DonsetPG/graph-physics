@@ -5,6 +5,59 @@ import torch
 import torch.nn as nn
 from torch_geometric.nn import MessagePassing
 
+# --- Helper SpMM: force l'op en FP32 pour éviter mismatch sous BF16 ---
+import torch
+from contextlib import contextmanager
+
+# Activation checkpoint 
+from torch.utils.checkpoint import checkpoint
+
+@contextmanager
+def _no_autocast_cuda():
+    # évite que autocast BF16 ré-intercepte SpMM
+    if torch.is_autocast_enabled():
+        with torch.cuda.amp.autocast(enabled=False):
+            yield
+    else:
+        yield
+
+def spmm_fp32(adj, x):
+    """
+    Effectue Y = adj @ x en FP32 (hors autocast), puis cast Y vers x.dtype.
+    Pourquoi: DGL SpMM exige même dtype entre valeurs(A) et X; BF16 n'est pas toujours supporté.
+    """
+    x32 = x.float()
+    # Certaines versions DGL ont .astype ; sinon, le backend convertira côté C.
+    try:
+        adj32 = adj.astype(torch.float32)  # DGL SparseMatrix
+    except AttributeError:
+        adj32 = adj  # fallback: beaucoup de builds acceptent A en fp32 par défaut
+
+    with _no_autocast_cuda():
+        y32 = adj32 @ x32  # déclenche torch.ops.dgl_sparse.spmm(...)
+    return y32.to(x.dtype)
+
+# --- Helpers DGL sparse en FP32 (BF16-safe) ---
+def bsddmm_fp32(mask, q, kT):
+    q32, kT32 = q.float(), kT.float()
+    try:
+        mask32 = mask.astype(torch.float32)
+    except AttributeError:
+        mask32 = mask
+    with _no_autocast_cuda():
+        out = dglsp.bsddmm(mask32, q32, kT32)
+    return out  # SparseMatrix (valeurs fp32)
+
+def bspmm_fp32(attn, v, out_dtype):
+    v32 = v.float()
+    try:
+        attn32 = attn.astype(torch.float32)
+    except AttributeError:
+        attn32 = attn
+    with _no_autocast_cuda():
+        y32 = dglsp.bspmm(attn32, v32)
+    return y32.to(out_dtype)
+
 try:
     import dgl.sparse as dglsp
     from dgl.sparse import SparseMatrix
@@ -343,7 +396,8 @@ def scaled_query_key_softmax(
     q = q / scaling_factor
 
     if att_mask is not None and HAS_DGL_SPARSE:
-        attn = dglsp.bsddmm(att_mask, q, k.transpose(1, 0))
+        #attn = dglsp.bsddmm(att_mask, q, k.transpose(1, 0))
+        attn = bsddmm_fp32(att_mask, q, k.transpose(1, 0)).softmax()
         attn = attn.softmax()
     else:
         attn = q @ k.transpose(-2, -1)
@@ -378,7 +432,8 @@ def scaled_dot_product_attention(
 
     # Compute the output
     if att_mask is not None and HAS_DGL_SPARSE:
-        y = dglsp.bspmm(attn, v)
+        #y = dglsp.bspmm(attn, v)
+        y = bspmm_fp32(attn, v, v.dtype)
     else:
         y = attn @ v
 
@@ -520,12 +575,14 @@ class Transformer(nn.Module):
         self.activation = activation_layer()
         self.norm1, self.norm2 = RMSNorm(output_dim), RMSNorm(output_dim)
         self.gated_mlp = build_gated_mlp(
-            in_size=output_dim, hidden_size=output_dim, out_size=output_dim
+            in_size=output_dim, hidden_size=output_dim, out_size=output_dim,
+            expansion_factor=2   # <-- change clé : 3 -> 2
         )
 
         self.use_adjacency = HAS_DGL_SPARSE
+        self.use_activation_checkpointing = False  # togglé depuis l'extérieur
 
-    def forward(
+    '''def forward(
         self, x: torch.Tensor, adj, return_attention: bool = False
     ) -> torch.Tensor:
         """
@@ -556,7 +613,38 @@ class Transformer(nn.Module):
             return x, attn
         else:
             return x
+    '''
+    def forward(self, x: torch.Tensor, adj, return_attention: bool = False) -> torch.Tensor:
+        if not self.use_adjacency:
+            adj = None
 
+        if return_attention:
+            # En validation/diag, on évite le checkpoint pour récupérer les poids d’attention
+            x_, attn = self.attention(self.norm1(x), adj, return_attention=True)
+            x = x + x_
+            x = x + self.gated_mlp(self.norm2(x))
+            return x, attn
+
+        # --- En TRAIN: checkpoint fin pour réduire les activations gardées en mémoire ---
+
+        # 1) Attention
+        def _attn_only(tensor_x):
+            # adj est capturé par la closure (non Tensor) => OK pour checkpoint
+            return self.attention(self.norm1(tensor_x), adj, return_attention=False)
+
+        # 2) MLP
+        def _mlp_only(tensor_x):
+            return self.gated_mlp(self.norm2(tensor_x))
+
+        if self.training:
+            # use_reentrant=False consomme moins de mémoire avec PyTorch ≥1.12/2.0
+            x = x + checkpoint(_attn_only, x, use_reentrant=False)
+            x = x + checkpoint(_mlp_only,  x, use_reentrant=False)
+        else:
+            x = x + self.attention(self.norm1(x), adj, return_attention=False)
+            x = x + self.gated_mlp(self.norm2(x))
+
+        return x
 
 class GraphNetBlock(MessagePassing):
     """

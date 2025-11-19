@@ -76,6 +76,10 @@ class LightningModule(L.LightningModule):
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
 
+        for m in getattr(self.model, "processor_list", []):
+            if hasattr(m, "use_activation_checkpointing"):
+                m.use_activation_checkpointing = True
+
         self.loss, self.loss_name = get_loss(param=parameters)
         logger.info(f"Using loss {self.loss_name}")
         self.is_multiloss = False
@@ -102,6 +106,9 @@ class LightningModule(L.LightningModule):
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
 
+        self._last_val_num_nodes = None
+        self._last_pred_num_nodes = None
+
         self.use_previous_data = use_previous_data
         self.previous_data_start = previous_data_start
         self.previous_data_end = previous_data_end
@@ -116,10 +123,44 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
+    # === DIAG: hooks concis pour voir où ça bloque ===
+    def on_fit_start(self):
+        if self.trainer.is_global_zero:
+            print("[diag] fit_start", flush=True)
+
+    def on_train_epoch_start(self):
+        if self.trainer.is_global_zero:
+            print(f"[diag] epoch_start={self.current_epoch}", flush=True)
+
+    def on_train_batch_start(self, batch, batch_idx):
+        # on log uniquement le tout 1er batch pour éviter le spam
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            print("[diag] first_batch_start", flush=True)
+
+    def on_after_backward(self):
+        # valider que le 1er backward/allreduce passe
+        if self.global_step == 0 and self.trainer.is_global_zero:
+            print("[diag] first_backward_done", flush=True)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            print("[diag] first_batch_end", flush=True)
+
+    def on_train_epoch_end(self):
+        if self.trainer.is_global_zero:
+            print(f"[diag] epoch_end={self.current_epoch}", flush=True)
+    ##########################################################
+
     def forward(self, graph: Batch):
         return self.model(graph)
 
     def training_step(self, batch: Batch):
+        if self.global_step == 0 and self.trainer.is_global_zero:
+            print(
+                f"[diag] cuda reserved={torch.cuda.memory_reserved()/1e9:.2f} GB "
+                f"allocated={torch.cuda.memory_allocated()/1e9:.2f} GB",
+                flush=True,
+            )
         batch = batch.to(self.device, non_blocking=True)
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
@@ -145,9 +186,10 @@ class LightningModule(L.LightningModule):
                     on_step=True,
                     on_epoch=True,
                     prog_bar=False,
+                    sync_dist=True,
                 )
             self.log(
-                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
+                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
             )
 
         else:  # Will raise an error if the single loss needs physical outputs.
@@ -166,6 +208,7 @@ class LightningModule(L.LightningModule):
                 on_step=True,
                 on_epoch=True,
                 prog_bar=True,
+                sync_dist=True,
             )
         return loss
 
@@ -228,6 +271,12 @@ class LightningModule(L.LightningModule):
     def _make_prediction(self, batch, last_prediction, last_previous_data_prediction):
         batch = batch.clone()
         # Prepare the batch for the current step
+        N = batch.x.shape[0]
+        # reset history if graph size changed
+        if last_prediction is not None and last_prediction.shape[0] != N:
+            last_prediction = None
+            last_previous_data_prediction = None
+            
         if last_prediction is not None:
             # Update the batch with the last prediction
             batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
@@ -268,7 +317,12 @@ class LightningModule(L.LightningModule):
         if batch.traj_index > self.current_val_trajectory:
             self._reset_validation_trajectory()
             self.step_counter = 0
-
+        # Also reset the carry if num_nodes changes within a trajectory
+        if self._last_val_num_nodes is not None and self._last_val_num_nodes != batch.x.shape[0]:
+             self.last_val_prediction = None
+             self.last_previous_data_prediction = None
+ 
+        self._last_val_num_nodes = batch.x.shape[0]    
         (
             batch,
             predicted_outputs,
@@ -283,26 +337,30 @@ class LightningModule(L.LightningModule):
             self.trajectory_to_save.append(batch)
         node_type = batch.x[:, self.model.node_type_index]
 
-        self.val_step_outputs.append(predicted_outputs.cpu())
-        self.val_step_targets.append(target.cpu())
+        #self.val_step_outputs.append(predicted_outputs.cpu())
+        #self.val_step_targets.append(target.cpu())
+        self.val_step_outputs.append(predicted_outputs.detach())  # rester sur GPU
+        self.val_step_targets.append(target.detach())              # rester sur GPU
         val_loss = self.val_loss(
             target,
             predicted_outputs,
             node_type,
             masks=self.loss_masks,
         )
-        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # compute RMSE for the first step
         if self.step_counter == 0:
             squared_diff = (predicted_outputs - target) ** 2
-            rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
+            #rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
+            rmse = torch.sqrt(squared_diff.mean()).detach()  # rester sur GPU
             self.first_step_losses.append(rmse)
         self.step_counter += 1
 
     def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
         self.val_step_targets.clear()
+        self._last_val_num_nodes = None
         self.current_val_trajectory = 0
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
@@ -310,7 +368,11 @@ class LightningModule(L.LightningModule):
         self.step_counter = 0
         self.first_step_losses = []
 
+    '''
     def on_validation_epoch_end(self):
+        # n’exécuter la logique que sur le rank global 0
+        if getattr(self.trainer, "is_global_zero", False) is False:
+            return
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
         targets = torch.cat(self.val_step_targets, dim=0)
@@ -325,13 +387,14 @@ class LightningModule(L.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
+            sync_dist=True,
         )
 
         # Compute RMSE for the first step
         if self.first_step_losses:
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
-                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True, sync_dist=True
             )
 
         # Save trajectory graphs
@@ -349,7 +412,67 @@ class LightningModule(L.LightningModule):
 
         # Clear stored outputs
         self._reset_validation_epoch_end()
+    '''
+    def on_validation_epoch_end(self):
+        # >>> Ne PAS sortir tôt sur les non-zero ranks si on utilise sync_dist=True <<<
+        # (on veut que tous les ranks exécutent les self.log(..., sync_dist=True))
+        device = self.device
+        # 1) concat locales (par-rank)
+        predicteds = torch.cat(self.val_step_outputs, dim=0) if self.val_step_outputs else None
+        targets    = torch.cat(self.val_step_targets, dim=0)  if self.val_step_targets else None
+        
+        
 
+        # 2) calc locales puis log avec sync_dist=True (Lightning fera la réduction)
+        if predicteds is not None and targets is not None:
+            # sécurité si jamais quelque chose est revenu sur CPU
+            if predicteds.device.type != "cuda":
+                predicteds = predicteds.to(device, non_blocking=True)
+            if targets.device.type != "cuda":
+                targets = targets.to(device, non_blocking=True)
+
+            squared_diff = (predicteds - targets) ** 2
+            all_rollout_rmse = torch.sqrt(squared_diff.mean())
+            # ### IMPORTANT: laisser sync_dist=True mais appeler depuis TOUS les ranks
+            self.log(
+                "val_all_rollout_rmse",
+                all_rollout_rmse,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+
+        if self.first_step_losses:
+            mean_first_step_loss = torch.stack(self.first_step_losses).mean()
+            if mean_first_step_loss.device.type != "cuda":
+                mean_first_step_loss= m.to(device, non_blocking=True)
+            # ### idem, log sur tous les ranks
+            self.log(
+                "val_1step_rmse",
+                mean_first_step_loss,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+
+        # 3) Sauvegardes disque UNIQUEMENT sur rank 0 (I/O non distribuée)
+        if getattr(self.trainer, "is_global_zero", False):
+            save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
+            self._save_trajectory_to_xdmf(
+                self.trajectory_to_save,
+                save_dir,
+                self._get_traj_savename(
+                    self.trajectory_to_save,
+                    self.current_val_trajectory,
+                    prefix=f"graph_epoch_{self.current_epoch}",
+                ),
+                timestep=self.timestep,
+            )
+
+        # 4) reset buffers sur TOUS les ranks (pour éviter de trainer des tensors entre epochs)
+        self._reset_validation_epoch_end()
+        
     def configure_optimizers(self):
         """Initialize the optimizer"""
         opt = torch.optim.AdamW(
@@ -394,6 +517,12 @@ class LightningModule(L.LightningModule):
             )
             # reset
             self._reset_prediction_trajectory()
+            self._last_pred_num_nodes = None
+
+        # If graph size changed inside a trajectory, drop the carry
+        if self._last_pred_num_nodes is not None and self._last_pred_num_nodes != batch.x.shape[0]:
+            self.last_pred_prediction = None
+            self.last_previous_data_pred_prediction = None
 
         # predict
         (
@@ -405,6 +534,7 @@ class LightningModule(L.LightningModule):
         ) = self._make_prediction(
             batch, self.last_pred_prediction, self.last_previous_data_pred_prediction
         )
+        self._last_pred_num_nodes = batch.x.shape[0]
         self.prediction_trajectory.append(batch)
 
     def _reset_predict_epoch_end(self):

@@ -21,6 +21,12 @@ from graphphysics.training.parse_parameters import (
 )
 from graphphysics.utils.progressbar import ColabProgressBar
 
+import socket
+import torch.distributed as dist
+from lightning.pytorch.strategies import DDPStrategy
+from datetime import timedelta  # si tu ne l’as pas déjà
+
+
 warnings.filterwarnings(
     "ignore", ".*Trying to infer the `batch_size` from an ambiguous collection.*"
 )
@@ -59,6 +65,24 @@ flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
 
+def print_dist_info(stage: str):
+    """Affiche les variables de distribution pour debug (appel court)."""
+    hostname = socket.gethostname()
+    env = os.environ
+    rank = int(env.get("RANK", env.get("SLURM_PROCID", -1)))
+    local_rank = int(env.get("LOCAL_RANK", env.get("SLURM_LOCALID", -1)))
+    node_rank = int(env.get("NODE_RANK", env.get("SLURM_NODEID", -1)))
+    world_size = int(env.get("WORLD_SIZE", env.get("SLURM_NTASKS", -1)))
+    initialized = dist.is_available() and dist.is_initialized()
+    num_gpus = torch.cuda.device_count()
+    curr = torch.cuda.current_device() if torch.cuda.is_available() and num_gpus > 0 else -1
+    gpu_name = torch.cuda.get_device_name(curr) if curr != -1 else "CPU"
+    print(
+        f"[{stage}] host={hostname} rank={rank} local_rank={local_rank} node_rank={node_rank} "
+        f"world_size={world_size} dist_init={initialized} gpus_on_node={num_gpus} "
+        f"current_device={curr} device_name={gpu_name}",
+        flush=True,
+    )
 
 def main(argv):
     del argv
@@ -78,6 +102,7 @@ def main(argv):
         return
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    preproc_device = torch.device("cpu")
 
     #wandb_project_name = FLAGS.project_name
     num_epochs = FLAGS.num_epochs
@@ -96,10 +121,14 @@ def main(argv):
 
     seed_everything(FLAGS.seed, workers=True)
 
+    print_dist_info("startup")
+
+
     # Build preprocessing function
     train_preprocessing = get_preprocessing(
         param=parameters,
-        device=device,
+        #device=device,
+        device=preproc_device,
         use_edge_feature=use_edge_feature,
         extra_node_features=build_features,
     )
@@ -114,7 +143,8 @@ def main(argv):
 
     val_preprocessing = get_preprocessing(
         param=parameters,
-        device=device,
+        #device=device,
+        device=preproc_device,
         use_edge_feature=use_edge_feature,
         remove_noise=True,
         extra_node_features=build_features,
@@ -142,12 +172,30 @@ def main(argv):
     
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)
 
+    rank_env = int(os.environ.get("RANK", os.environ.get("SLURM_PROCID", 0)))
+    if rank_env == 0:
+        print("---- DEBUG (rank 0) ----")
+        print("TRAIN Dataset type:", type(train_dataset))
+        print("Number of XDMF files:", train_dataset.size_dataset)
+        print("Trajectory length:", train_dataset.trajectory_length)
+        print("Computed len(train_dataset):", len(train_dataset))
+        print("----------------")
+        print("VAL Dataset type:", type(val_dataset))
+        print("Number of XDMF files:", val_dataset.size_dataset)
+        print("Trajectory length:", val_dataset.trajectory_length)
+        print("Computed len(val_dataset):", len(val_dataset))
+        print("----------------")
+    else:
+        # Court message pour confirmer la présence des autres ranks
+        print(f"[rank {rank_env}] len(train)={len(train_dataset)} len(val)={len(val_dataset)}", flush=True)
+
     train_dataloader_kwargs = {
         "dataset": train_dataset,
         "shuffle": True,
         "batch_size": batch_size,
         "num_workers": num_workers,
         "exclude_keys": ["tetra"],
+        "drop_last": True,
     }
 
     valid_dataloader_kwargs = {
@@ -247,6 +295,7 @@ def main(argv):
         }
     )
     '''
+    '''
     # Configure Trainer
     trainer = Trainer(
         accelerator="gpu" if torch.cuda.is_available() else "cpu",
@@ -262,6 +311,38 @@ def main(argv):
         log_every_n_steps=100,
         gradient_clip_val=1.0,
     )
+    '''
+    # === Trainer DDP ===
+    num_nodes = int(os.environ.get("SLURM_NNODES", 1))
+    devices = torch.cuda.device_count() if torch.cuda.is_available() else 0
+    if devices == 0:
+        raise RuntimeError("Aucun GPU visible alors que DDP/gpu est demandé. Vérifie l'allocation SLURM.")
+
+    trainer = Trainer(
+        accelerator="gpu",
+        devices=devices,               # 1 GPU par process (PL mappe LOCAL_RANK -> CUDA)
+        num_nodes=num_nodes,
+        strategy=DDPStrategy(
+            process_group_backend="nccl",   # explicite
+            find_unused_parameters=False,   # évite des allreduces non appariés
+            static_graph=True,              # exige même graphe/chemin à chaque itération
+            timeout=timedelta(minutes=15),  # fail > deadlock
+        ),
+        precision="bf16-mixed",      # <-- AJOUT: H100 supporte BF16 nativement
+        max_epochs=num_epochs,
+        num_sanity_val_steps=0,
+        callbacks=[
+            ColabProgressBar(),
+            checkpoint_callback,
+            lr_monitor,
+        ],
+        log_every_n_steps=1,
+        gradient_clip_val=1.0,
+        # --- SMOKE TEST: borner provisoirement le # de batches ---
+        #limit_train_batches=5,              # <--- TEMP pour diagnostiquer (remets 1.0 après)
+        #limit_val_batches=2,                # <--- TEMP remettre a 2
+    )
+    print_dist_info("trainer_built")
 
     # Resuming training from a checkpoint
     if model_path and os.path.isfile(model_path) and resume_training:
@@ -280,6 +361,7 @@ def main(argv):
             val_dataloaders=valid_dataloader,
         )
 
+    print_dist_info("fit_done")
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")
