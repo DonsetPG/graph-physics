@@ -16,6 +16,7 @@ from graphphysics.models.simulator import Simulator
 from graphphysics.utils.loss import LossType, MultiLoss
 from graphphysics.utils.nodetype import NodeType
 
+from graphphysics.models.layers import set_use_silu_activation
 
 def get_preprocessing(
     param: Dict[str, Any],
@@ -90,6 +91,12 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     """
     model_type = param.get("model", {}).get("type", "")
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
+    use_silu = param.get("model", {}).get("use_silu_activation", True)
+    training_params = param.get("training", {})
+    use_rope = param.get("model", {}).get("use_rope_embeddings", True)
+    rope_pos_dimension = param.get("model", {}).get("rope_pos_dimension", 3)
+    rope_base = param.get("model", {}).get("rope_base", 10000.0)
+    set_use_silu_activation(use_silu)
 
     if model_type == "epd":
         return EncodeProcessDecode(
@@ -108,6 +115,9 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             hidden_size=param["model"]["hidden_size"],
             num_heads=param["model"]["num_heads"],
             only_processor=only_processor,
+            use_rope_embeddings=use_rope,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
         )
     elif model_type == "transolver":
         return TransolverProcessor(

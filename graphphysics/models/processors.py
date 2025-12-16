@@ -41,6 +41,9 @@ class EncodeProcessDecode(nn.Module):
         output_size: int,
         hidden_size: int = 128,
         only_processor: bool = False,
+        use_rope_embeddings: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
     ):
         """
         Initializes the EncodeProcessDecode model.
@@ -57,6 +60,14 @@ class EncodeProcessDecode(nn.Module):
         self.only_processor = only_processor
         self.hidden_size = hidden_size
         self.d = output_size
+
+        self.use_rope = use_rope_embeddings
+        self.rope_axes = rope_pos_dimension
+        self.rope_base = rope_base
+        if self.use_rope and self.rope_axes not in (2, 3):
+            raise ValueError(
+                "rope_pos_dimension must be 2 or 3 when use_rope_embeddings=True."
+            )
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -131,6 +142,9 @@ class EncodeTransformDecode(nn.Module):
         only_processor: bool = False,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
     ):
         """
         Initializes the EncodeTransformDecode model.
@@ -151,6 +165,9 @@ class EncodeTransformDecode(nn.Module):
         self.hidden_size = hidden_size
         self.only_processor = only_processor
         self.d = output_size
+
+        self.use_rope_embeddings = use_rope_embeddings and HAS_DGL_SPARSE
+        self._requested_rope = use_rope_embeddings
 
         if not self.only_processor:
             self.nodes_encoder = build_mlp(
@@ -175,6 +192,9 @@ class EncodeTransformDecode(nn.Module):
                         num_heads=num_heads,
                         use_proj_bias=use_proj_bias,
                         use_separate_proj_weight=use_separate_proj_weight,
+                        use_rope_embeddings=self.use_rope_embeddings,
+                        pos_dimension=rope_pos_dimension,
+                        rope_base=rope_base,
                     )
                     for _ in range(message_passing_num)
                 ]
@@ -211,10 +231,16 @@ class EncodeTransformDecode(nn.Module):
         else:
             x = self.nodes_encoder(graph.x)
 
+        pos = getattr(graph, "pos", None)
+        if self.use_rope_embeddings and pos is None:
+            raise ValueError(
+                "use_rope_embeddings=True requires 'pos' attribute in the input graph."
+            )
+
         if HAS_DGL_SPARSE:
             adj = dglsp.spmatrix(indices=edge_index, shape=(x.shape[0], x.shape[0]))
             for block in self.processor_list:
-                x = block(x, adj)
+                x = block(x, adj, pos=pos)
         else:
             for block in self.processor_list:
                 x = block(x, edge_index)

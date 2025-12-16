@@ -15,7 +15,9 @@
         "output_size": 3,
         "edge_input_size": 0,
         "num_heads": 4,
-	"use_previous_data": false
+	    "use_previous_data": false,
+        "use_silu_activation": true,
+        "use_rope_embeddings": true
     },
     "index": {
         "feature_index_start": 0,
@@ -23,6 +25,10 @@
         "output_index_start": 0,
         "output_index_end": 3,
         "node_type_index": 3
+    },
+    "loss": {
+        "type": ["l2loss", "cosineloss"],
+        "weights": [0.5, 0.5]
     },
     "transformations": {
         "preprocessing": {

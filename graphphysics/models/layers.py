@@ -131,7 +131,31 @@ class RMSNorm(nn.Module):
 ACTIVATION = {
     "relu": nn.ReLU,
     "gelu": nn.GELU,
+    "silu": nn.SiLU,
 }
+
+_USE_SILU_ACTIVATION: bool = True
+
+
+def set_use_silu_activation(use_silu: bool) -> None:
+    """
+    Toggles whether SiLU should be used as the default activation across MLP utilities.
+    """
+    global _USE_SILU_ACTIVATION
+    _USE_SILU_ACTIVATION = use_silu
+
+
+def use_silu_activation() -> bool:
+    """
+    Returns True if SiLU activations are globally enabled.
+    """
+    return _USE_SILU_ACTIVATION
+
+
+def _resolve_activation(act: Optional[str]) -> str:
+    if act is None:
+        return "silu" if _USE_SILU_ACTIVATION else "relu"
+    return act
 
 
 def build_mlp(
@@ -140,7 +164,7 @@ def build_mlp(
     out_size: int,
     nb_of_layers: int = 4,
     layer_norm: bool = True,
-    act: str = "relu",
+    act: Optional[str] = None,
 ) -> nn.Module:
     """
     Builds a Multilayer Perceptron.
@@ -160,9 +184,13 @@ def build_mlp(
     """
     assert nb_of_layers >= 2, "The MLP must have at least 2 layers (input and output)."
 
-    if act not in ACTIVATION:
-        raise NotImplementedError(f"Activation '{act}' not supported.")
-    activation = ACTIVATION[act]
+    act_key = _resolve_activation(act)
+
+    if act_key not in ACTIVATION:
+        raise NotImplementedError(
+            f"Activation '{act_key}' not supported. Available: {list(ACTIVATION)}."
+        )
+    activation = ACTIVATION[act_key]
 
     layers = [nn.Linear(in_size, hidden_size), activation()]
 
@@ -200,7 +228,8 @@ class GatedMLP(nn.Module):
         self.linear1 = nn.Linear(in_size, expansion_factor * hidden_size)
         self.linear2 = nn.Linear(in_size, expansion_factor * hidden_size)
 
-        self.activation = nn.GELU()
+        activation_cls = nn.SiLU if use_silu_activation() else nn.GELU
+        self.activation = activation_cls()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """
@@ -375,6 +404,87 @@ class Normalizer(nn.Module):
             "name": self.name,
         }
 
+def _make_inv_freq(m: int, base: float, device: torch.device) -> torch.Tensor:
+    """
+    Precomputes inverse frequencies for rotary positional embeddings.
+    """
+    if m <= 0:
+        return torch.empty(0, device=device, dtype=torch.float32)
+    step = math.log(base) / max(m, 1)
+    return torch.exp(-torch.arange(m, device=device, dtype=torch.float32) * step)
+
+
+def _apply_rope_with_inv(
+    q: torch.Tensor,
+    k: torch.Tensor,
+    pos: torch.Tensor,
+    inv_freq: torch.Tensor,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """
+    Applies rotary positional embeddings to query and key tensors.
+
+    Args:
+        q (torch.Tensor): Query tensor of shape (N, D, H).
+        k (torch.Tensor): Key tensor of shape (N, D, H).
+        pos (torch.Tensor): Positional tensor of shape (N, pos_dim).
+        inv_freq (torch.Tensor): Precomputed inverse frequencies of shape (m,).
+
+    Returns:
+        Tuple[torch.Tensor, torch.Tensor]: Rotated query and key tensors.
+    """
+    N, D, H = q.shape
+    pos_dimension = pos.shape[1]
+    m = D // (pos_dimension * 2)
+    if m == 0 or inv_freq.numel() == 0:
+        return q, k
+
+    d_rope = pos_dimension * 2 * m
+    q_dtype = q.dtype
+
+    pos_f32 = pos[:, :pos_dimension].to(torch.float32)
+    inv_freq_f32 = inv_freq.to(pos.device, dtype=torch.float32)
+    angles = pos_f32.unsqueeze(-1) * inv_freq_f32.view(1, 1, m)
+
+    if hasattr(torch, "sincos"):
+        sin_f32, cos_f32 = torch.sincos(angles)
+    else:
+        cos_f32, sin_f32 = torch.cos(angles), torch.sin(angles)
+
+    sin = sin_f32.to(dtype=q_dtype, device=q.device)
+    cos = cos_f32.to(dtype=q_dtype, device=q.device)
+
+    def _apply(x: torch.Tensor) -> torch.Tensor:
+        part = (
+            x[:, :d_rope, :]
+            .contiguous()
+            .view(N, pos_dimension, 2 * m, H)
+            .view(N, pos_dimension, m, 2, H)
+        )
+        rest = x[:, d_rope:, :]
+
+        even = part[..., 0, :]
+        odd = part[..., 1, :]
+
+        cos_b = cos.unsqueeze(-1)
+        sin_b = sin.unsqueeze(-1)
+
+        rot_even = even * cos_b - odd * sin_b
+        rot_odd = even * sin_b + odd * cos_b
+
+        rot = (
+            torch.stack((rot_even, rot_odd), dim=3)
+            .reshape(N, pos_dimension, 2 * m, H)
+            .reshape(N, d_rope, H)
+        )
+
+        out = torch.empty_like(x)
+        out[:, :d_rope, :] = rot
+        if D > d_rope:
+            out[:, d_rope:, :] = rest
+        return out
+
+    return _apply(q), _apply(k)
+
 
 def scaled_query_key_softmax(
     q: torch.Tensor,
@@ -397,7 +507,7 @@ def scaled_query_key_softmax(
 
     if att_mask is not None and HAS_DGL_SPARSE:
         #attn = dglsp.bsddmm(att_mask, q, k.transpose(1, 0))
-        attn = bsddmm_fp32(att_mask, q, k.transpose(1, 0)).softmax()
+        attn = bsddmm_fp32(att_mask, q, k.transpose(1, 0))
         attn = attn.softmax()
     else:
         attn = q @ k.transpose(-2, -1)
@@ -450,8 +560,12 @@ class Attention(nn.Module):
         input_dim=512,
         output_dim=512,
         num_heads=4,
+        pos_dimension: int = 3,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        rope_base: float = 10000.0,
     ):
         """
         Initializes the Attention module.
@@ -475,10 +589,30 @@ class Attention(nn.Module):
         self.num_heads = num_heads
         self.head_dim = output_dim // num_heads
 
+        self.use_rope_embeddings = use_rope_embeddings
+        self.use_gated_attention = use_gated_attention
+        self.pos_dimension = pos_dimension
+        self.rope_base = rope_base
+
         self.q_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.k_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.v_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
         self.proj = nn.Linear(output_dim, output_dim, bias=use_proj_bias)
+
+        if self.use_rope_embeddings:
+            self.m = self.head_dim // max(self.pos_dimension * 2, 1)
+            inv = _make_inv_freq(self.m, self.rope_base, torch.device("cpu"))
+            self.register_buffer("rope_inv_freq", inv, persistent=True)
+        else:
+            self.m = 0
+            self.register_buffer(
+                "rope_inv_freq", torch.empty(0, dtype=torch.float32), persistent=False
+            )
+
+        if self.use_gated_attention:
+            self.gate_proj = nn.Linear(input_dim, output_dim, bias=use_proj_bias)
+        else:
+            self.gate_proj = None
 
         if not use_separate_proj_weight:
             # Compute optimization used at times, share the parameters in between Q/K/V
@@ -490,6 +624,7 @@ class Attention(nn.Module):
         self,
         x: torch.Tensor,
         adj,
+        pos: Optional[torch.Tensor] = None,
         return_attention: bool = False,
     ):
         """
@@ -505,6 +640,11 @@ class Attention(nn.Module):
             Union[torch.Tensor, Tuple[torch.Tensor, torch.Tensor]]:
                 The output tensor, and optionally the attention weights.
         """
+        if self.use_rope_embeddings:
+            if pos is None:
+                raise ValueError(
+                    "RoPE embeddings require positional information when enabled."
+                )
         N = x.size(0)
         query, key, value = x, x, x
 
@@ -517,6 +657,9 @@ class Attention(nn.Module):
         q = q.reshape(N, self.head_dim, self.num_heads)
         k = k.reshape(N, self.head_dim, self.num_heads)
         v = v.reshape(N, self.head_dim, self.num_heads)
+
+        if self.use_rope_embeddings and self.rope_inv_freq.numel() > 0:
+            q, k = _apply_rope_with_inv(q, k, pos, self.rope_inv_freq)
 
         if return_attention:
             y, attn = scaled_dot_product_attention(q, k, v, adj, return_attention=True)
@@ -546,6 +689,10 @@ class Transformer(nn.Module):
         activation_layer: torch.nn.Module = nn.ReLU,
         use_proj_bias: bool = True,
         use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        pos_dimension: int = 3,
+        rope_base: float = 10000.0,
     ):
         """
         Initializes the Transformer module.
@@ -563,12 +710,20 @@ class Transformer(nn.Module):
         """
         super().__init__()
 
+        self.use_rope_embeddings = use_rope_embeddings
+        self.use_gated_attention = use_gated_attention
+        self.pos_dimension = pos_dimension
+
         self.attention = Attention(
             input_dim=input_dim,
             output_dim=output_dim,
             num_heads=num_heads,
+            pos_dimension=pos_dimension,
             use_proj_bias=use_proj_bias,
             use_separate_proj_weight=use_separate_proj_weight,
+            use_rope_embeddings=use_rope_embeddings,
+            use_gated_attention=use_gated_attention,
+            rope_base=rope_base,
         )
 
         # initialize mlp
@@ -614,13 +769,25 @@ class Transformer(nn.Module):
         else:
             return x
     '''
-    def forward(self, x: torch.Tensor, adj, return_attention: bool = False) -> torch.Tensor:
+    def forward(
+            self, 
+            x: torch.Tensor, 
+            adj, 
+            pos: Optional[torch.Tensor] = None,
+            return_attention: bool = False
+        ) -> torch.Tensor:
         if not self.use_adjacency:
             adj = None
 
+        if self.use_rope_embeddings:
+            if pos is None:
+                raise ValueError(
+                    "Transformer blocks require node positions when use_rope_embeddings=True."
+                )
+
         if return_attention:
             # En validation/diag, on évite le checkpoint pour récupérer les poids d’attention
-            x_, attn = self.attention(self.norm1(x), adj, return_attention=True)
+            x_, attn = self.attention(self.norm1(x), adj, pos=pos, return_attention=True)
             x = x + x_
             x = x + self.gated_mlp(self.norm2(x))
             return x, attn
@@ -630,7 +797,7 @@ class Transformer(nn.Module):
         # 1) Attention
         def _attn_only(tensor_x):
             # adj est capturé par la closure (non Tensor) => OK pour checkpoint
-            return self.attention(self.norm1(tensor_x), adj, return_attention=False)
+            return self.attention(self.norm1(tensor_x), adj, pos=pos, return_attention=False)
 
         # 2) MLP
         def _mlp_only(tensor_x):
@@ -641,7 +808,7 @@ class Transformer(nn.Module):
             x = x + checkpoint(_attn_only, x, use_reentrant=False)
             x = x + checkpoint(_mlp_only,  x, use_reentrant=False)
         else:
-            x = x + self.attention(self.norm1(x), adj, return_attention=False)
+            x = x + self.attention(self.norm1(x), adj, pos=pos, return_attention=False)
             x = x + self.gated_mlp(self.norm2(x))
 
         return x

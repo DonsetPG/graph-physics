@@ -11,6 +11,7 @@ from graphphysics.utils.vectorial_operators import (
     compute_gradient,
     compute_vector_gradient_product,
 )
+import torch.nn as nn
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
@@ -73,7 +74,49 @@ class L2Loss(_Loss):
         errors = ((network_output - target) ** 2)[mask]
         return torch.mean(errors)
 
+class CosineLoss(_Loss):
+    def __init__(self, **kwargs):
+        super().__init__(**kwargs)
+        self.cos = nn.CosineEmbeddingLoss(reduction="none")
 
+    @property
+    def __name__(self):
+        return "Cosine"
+
+    def forward(
+        self,
+        target: torch.Tensor,
+        network_output: torch.Tensor,
+        node_type: torch.Tensor,
+        masks: list[NodeType],
+        selected_indexes: torch.Tensor = None,
+        **kwargs
+    ) -> torch.Tensor:
+        """
+        Computes a cosine similarity loss for nodes of specific types.
+
+        Args:
+            target (torch.Tensor): The target values.
+            network_output (torch.Tensor): The predicted values from the network.
+            node_type (torch.Tensor): Tensor containing the type of each node.
+            masks (list[NodeType]): List of NodeTypes to include in the loss calculation.
+            selected_indexes (torch.Tensor, optional): Indexes of nodes to exclude from the loss calculation.
+
+        Returns:
+            torch.Tensor: The mean cosine embedding loss for the specified node types.
+
+        Note:
+            This method calculates the cosine loss only for nodes of the types specified in 'masks'.
+            If 'selected_indexes' is provided, those nodes are excluded from the loss calculation.
+        """
+        mask = _prepare_mask_for_loss(
+            network_output, node_type, masks, selected_indexes
+        )
+        target_tensor = torch.ones(
+            target.shape[0], device=mask.device, dtype=target.dtype
+        )
+        errors = self.cos(network_output, target, target_tensor)[mask]
+        return torch.mean(errors)
 class L1SmoothLoss(_Loss):
     def __init__(self, beta: float = 1.0, **kwargs):
         super().__init__(**kwargs)
@@ -438,6 +481,7 @@ class MultiLoss(_Loss):
 
 class LossType(enum.Enum):
     L2LOSS = L2Loss
+    COSINEL2LOSS = CosineLoss
     L1SMOOTHLOSS = L1SmoothLoss
     GRADIENTL2LOSS = GradientL2Loss
     CONVECTIONL2LOSS = ConvectionL2Loss
