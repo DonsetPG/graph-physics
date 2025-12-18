@@ -5,6 +5,7 @@ from torch_geometric.data import Data
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.loss import (
     L2Loss,
+    CosineLoss,
     L1SmoothLoss,
     GradientL2Loss,
     ConvectionL2Loss,
@@ -19,6 +20,7 @@ class TestLossFunctions(unittest.TestCase):
     def setUp(self):
         self.loss_functions = [
             L2Loss(),
+            CosineLoss(),
             L1SmoothLoss(),
             GradientL2Loss(),
             ConvectionL2Loss(),
@@ -77,6 +79,20 @@ class TestLossFunctions(unittest.TestCase):
                 self.assertFalse(
                     torch.isinf(loss_val).any(), f"Loss value is Inf for {loss_name}."
                 )
+
+    def test_cosine_loss_identical_vectors(self):
+        loss_fn = CosineLoss()
+        target = torch.tensor([[1.0, 0.0], [0.0, 1.0]], dtype=torch.float32)
+        network_output = target.clone()
+        node_type = torch.full((2,), NodeType.NORMAL)
+
+        loss_val = loss_fn(
+            target=target,
+            network_output=network_output,
+            node_type=node_type,
+            masks=[NodeType.NORMAL],
+        )
+        self.assertAlmostEqual(loss_val.item(), 0.0, places=6)
 
     def test_masked_nodes(self):
         masked_node_type = self.node_type
