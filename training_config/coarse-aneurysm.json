@@ -30,7 +30,7 @@
         "num_batches": 1,
         "orders": ["node", "edge", "1hop", "2hop"],
 
-        "noise_std": 1.0,
+        "noise_std": 0.1,
         "num_trajectories": 64,
         "proj_dim": 64,
 

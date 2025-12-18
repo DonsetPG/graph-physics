@@ -63,6 +63,10 @@ class TestTransformerComponents(unittest.TestCase):
     def test_normalizer(self):
         size = 5
         normalizer = Normalizer(size, device="cpu")
+        buffers = dict(normalizer.named_buffers())
+        self.assertIn("_std_epsilon", buffers)
+        self.assertEqual(buffers["_std_epsilon"].device, normalizer._acc_count.device)
+
         x = torch.randn(10, size)
         normalized_x = normalizer(x)
         self.assertEqual(normalized_x.shape, x.shape)

@@ -43,18 +43,18 @@ Order = Literal["node", "edge", "1hop", "2hop"]
 @dataclass
 class EPEstimationConfig:
     # Sampling
-    num_trajectories: int = 32
-    max_nodes_per_traj: Optional[int] = 1024
-    max_edges_per_traj: Optional[int] = 2048
+    num_trajectories: int = 64
+    max_nodes_per_traj: Optional[int] = -1
+    max_edges_per_traj: Optional[int] = -1
     seed: int = 0
 
     # Noise injected *before each layer* to make layer-to-layer transitions stochastic.
     # If the model already exposes `noise_std`, we will temporarily set it to this value
     # during estimation. Otherwise, we will inject noise via forward-pre-hooks.
-    noise_std: float = 1e-2
+    noise_std: float = 0.1
 
     # State compression
-    proj_dim: int = 8  # project hidden features to this dim before building observables
+    proj_dim: int = 64  # project hidden features to this dim before building observables
     standardize: bool = True  # z-score X0/X1 coordinates before EP estimation
 
     # Estimator
@@ -70,7 +70,7 @@ class EPEstimationConfig:
 
     # Hook fallback: where to find the list/ModuleList of per-layer blocks.
     # Examples: "processor_list", "model.blocks", "encoder.layers".
-    layer_modules_attr: Optional[str] = None
+    layer_modules_attr: Optional[str] = "model.processor_list"
 
 
 def _row_normalized_adj(edge_index: torch.Tensor, num_nodes: int, device: torch.device) -> torch.Tensor:

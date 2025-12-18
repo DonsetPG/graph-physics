@@ -225,8 +225,13 @@ class Normalizer(nn.Module):
         self.name = name
         self.device = device
         self._max_accumulations = max_accumulations
-        self._std_epsilon = torch.tensor(
-            std_epsilon, dtype=torch.float32, requires_grad=False, device=device
+        # Keep epsilon as a (non-persistent) buffer so it follows `.to(...)` calls.
+        # Otherwise, it can end up on a different device than accumulated stats,
+        # causing device-mismatch errors during inference/diagnostics.
+        self.register_buffer(
+            "_std_epsilon",
+            torch.tensor(std_epsilon, dtype=torch.float32, requires_grad=False, device=device),
+            persistent=False,
         )
         self.register_buffer("_acc_count", torch.tensor(0.0, device=device))
         self.register_buffer("_num_accumulations", torch.tensor(0.0, device=device))

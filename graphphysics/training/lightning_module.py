@@ -374,11 +374,7 @@ class LightningModule(L.LightningModule):
         self.step_counter = 0
         self.first_step_losses = []
 
-    '''
     def on_validation_epoch_end(self):
-        # n’exécuter la logique que sur le rank global 0
-        if getattr(self.trainer, "is_global_zero", False) is False:
-            return
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
         targets = torch.cat(self.val_step_targets, dim=0)
@@ -393,14 +389,13 @@ class LightningModule(L.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
-            sync_dist=True,
         )
 
         # Compute RMSE for the first step
         if self.first_step_losses:
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
-                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True, sync_dist=True
+                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
             )
 
         # Save trajectory graphs
@@ -418,67 +413,8 @@ class LightningModule(L.LightningModule):
 
         # Clear stored outputs
         self._reset_validation_epoch_end()
-    '''
-    def on_validation_epoch_end(self):
-        # >>> Ne PAS sortir tôt sur les non-zero ranks si on utilise sync_dist=True <<<
-        # (on veut que tous les ranks exécutent les self.log(..., sync_dist=True))
-        device = self.device
-        # 1) concat locales (par-rank)
-        predicteds = torch.cat(self.val_step_outputs, dim=0) if self.val_step_outputs else None
-        targets    = torch.cat(self.val_step_targets, dim=0)  if self.val_step_targets else None
-        
-        
 
-        # 2) calc locales puis log avec sync_dist=True (Lightning fera la réduction)
-        if predicteds is not None and targets is not None:
-            # sécurité si jamais quelque chose est revenu sur CPU
-            if predicteds.device.type != "cuda":
-                predicteds = predicteds.to(device, non_blocking=True)
-            if targets.device.type != "cuda":
-                targets = targets.to(device, non_blocking=True)
-
-            squared_diff = (predicteds - targets) ** 2
-            all_rollout_rmse = torch.sqrt(squared_diff.mean())
-            # ### IMPORTANT: laisser sync_dist=True mais appeler depuis TOUS les ranks
-            self.log(
-                "val_all_rollout_rmse",
-                all_rollout_rmse,
-                on_step=False,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-            )
-
-        if self.first_step_losses:
-            mean_first_step_loss = torch.stack(self.first_step_losses).mean()
-            if mean_first_step_loss.device.type != "cuda":
-                mean_first_step_loss= m.to(device, non_blocking=True)
-            # ### idem, log sur tous les ranks
-            self.log(
-                "val_1step_rmse",
-                mean_first_step_loss,
-                on_epoch=True,
-                prog_bar=True,
-                sync_dist=True,
-            )
-
-        # 3) Sauvegardes disque UNIQUEMENT sur rank 0 (I/O non distribuée)
-        if getattr(self.trainer, "is_global_zero", False):
-            save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
-            self._save_trajectory_to_xdmf(
-                self.trajectory_to_save,
-                save_dir,
-                self._get_traj_savename(
-                    self.trajectory_to_save,
-                    self.current_val_trajectory,
-                    prefix=f"graph_epoch_{self.current_epoch}",
-                ),
-                timestep=self.timestep,
-            )
-
-        # 4) reset buffers sur TOUS les ranks (pour éviter de trainer des tensors entre epochs)
-        self._reset_validation_epoch_end()
-        
+ 
     def configure_optimizers(self):
         """Initialize the optimizer"""
         opt = torch.optim.AdamW(
@@ -646,12 +582,12 @@ class LightningModule(L.LightningModule):
 
         # --- configure EP estimation ---
         cfg = EPEstimationConfig(
-            num_trajectories=int(ep_cfg.get("num_trajectories", 16)),
-            max_nodes_per_traj=ep_cfg.get("max_nodes_per_traj", 1024),
-            max_edges_per_traj=ep_cfg.get("max_edges_per_traj", 2048),
+            num_trajectories=int(ep_cfg.get("num_trajectories", 64)),
+            max_nodes_per_traj=ep_cfg.get("max_nodes_per_traj", -1),
+            max_edges_per_traj=ep_cfg.get("max_edges_per_traj", -1),
             seed=int(ep_cfg.get("seed", 0)),
-            noise_std=float(ep_cfg.get("noise_std", 1e-2)),
-            proj_dim=int(ep_cfg.get("proj_dim", 8)),
+            noise_std=float(ep_cfg.get("noise_std", 0.1)),
+            proj_dim=int(ep_cfg.get("proj_dim", 64)),
             standardize=bool(ep_cfg.get("standardize", True)),
             estimator=str(ep_cfg.get("estimator", "MaxEnt")),
             optimizer=str(ep_cfg.get("optimizer", "Adam")),
@@ -685,6 +621,7 @@ class LightningModule(L.LightningModule):
 
             # Build normalized graph inputs as expected by the Simulator
             batch = batch.to(self.device, non_blocking=True)
+            self.model = self.model.to(self.device, non_blocking=True)
             graph, _ = self.model._build_input_graph(inputs=batch, is_training=False)
 
             try:
@@ -816,19 +753,19 @@ class LightningModule(L.LightningModule):
         except Exception:
             pass
 
-def _get_traj_savename(
-        self, traj: list[Batch], traj_idx: int, prefix: str = "graph"
-    ) -> str:
-        """
-        Get the name of the trajectory to save (id if provided in attributes, index otherwise).
-        Args:
-            traj (list[Batch]): List of Batch objects representing the trajectory.
-            traj_idx (int): Index of the current trajectory.
-            prefix (str): Prefix for the trajectory filename. (does not include trailing '_')
-        Returns:
-            str: The name of the trajectory to save (no extensions).
-        """
-        if hasattr(traj[0], "id") and traj[0].id[0] is not None:
-            return f"{prefix}_{traj[0].id[0]}"
-        else:
-            return f"{prefix}_{traj_idx}"
+    def _get_traj_savename(
+            self, traj: list[Batch], traj_idx: int, prefix: str = "graph"
+        ) -> str:
+            """
+            Get the name of the trajectory to save (id if provided in attributes, index otherwise).
+            Args:
+                traj (list[Batch]): List of Batch objects representing the trajectory.
+                traj_idx (int): Index of the current trajectory.
+                prefix (str): Prefix for the trajectory filename. (does not include trailing '_')
+            Returns:
+                str: The name of the trajectory to save (no extensions).
+            """
+            if hasattr(traj[0], "id") and traj[0].id[0] is not None:
+                return f"{prefix}_{traj[0].id[0]}"
+            else:
+                return f"{prefix}_{traj_idx}"
