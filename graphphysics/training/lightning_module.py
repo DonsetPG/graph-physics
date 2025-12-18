@@ -8,6 +8,12 @@ import torch
 from loguru import logger
 from torch_geometric.data import Batch
 
+from graphphysics.diagnostics.entropy_production.graph_ep import (
+    EPEstimationConfig,
+    estimate_graph_ep_all_orders,
+)
+
+
 from graphphysics.training.parse_parameters import (
     get_gradient_method,
     get_loss,
@@ -76,6 +82,10 @@ class LightningModule(L.LightningModule):
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
 
+        for m in getattr(self.model, "processor_list", []):
+            if hasattr(m, "use_activation_checkpointing"):
+                m.use_activation_checkpointing = True
+
         self.loss, self.loss_name = get_loss(param=parameters)
         logger.info(f"Using loss {self.loss_name}")
         self.is_multiloss = False
@@ -102,6 +112,9 @@ class LightningModule(L.LightningModule):
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
 
+        self._last_val_num_nodes = None
+        self._last_pred_num_nodes = None
+
         self.use_previous_data = use_previous_data
         self.previous_data_start = previous_data_start
         self.previous_data_end = previous_data_end
@@ -116,10 +129,44 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
+    # === DIAG: hooks concis pour voir où ça bloque ===
+    def on_fit_start(self):
+        if self.trainer.is_global_zero:
+            print("[diag] fit_start", flush=True)
+
+    def on_train_epoch_start(self):
+        if self.trainer.is_global_zero:
+            print(f"[diag] epoch_start={self.current_epoch}", flush=True)
+
+    def on_train_batch_start(self, batch, batch_idx):
+        # on log uniquement le tout 1er batch pour éviter le spam
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            print("[diag] first_batch_start", flush=True)
+
+    def on_after_backward(self):
+        # valider que le 1er backward/allreduce passe
+        if self.global_step == 0 and self.trainer.is_global_zero:
+            print("[diag] first_backward_done", flush=True)
+
+    def on_train_batch_end(self, outputs, batch, batch_idx):
+        if batch_idx == 0 and self.trainer.is_global_zero:
+            print("[diag] first_batch_end", flush=True)
+
+    def on_train_epoch_end(self):
+        if self.trainer.is_global_zero:
+            print(f"[diag] epoch_end={self.current_epoch}", flush=True)
+    ##########################################################
+
     def forward(self, graph: Batch):
         return self.model(graph)
 
     def training_step(self, batch: Batch):
+        if self.global_step == 0 and self.trainer.is_global_zero:
+            print(
+                f"[diag] cuda reserved={torch.cuda.memory_reserved()/1e9:.2f} GB "
+                f"allocated={torch.cuda.memory_allocated()/1e9:.2f} GB",
+                flush=True,
+            )
         batch = batch.to(self.device, non_blocking=True)
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
@@ -145,9 +192,10 @@ class LightningModule(L.LightningModule):
                     on_step=True,
                     on_epoch=True,
                     prog_bar=False,
+                    sync_dist=True,
                 )
             self.log(
-                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True
+                "train_multiloss", loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True
             )
 
         else:  # Will raise an error if the single loss needs physical outputs.
@@ -166,6 +214,7 @@ class LightningModule(L.LightningModule):
                 on_step=True,
                 on_epoch=True,
                 prog_bar=True,
+                sync_dist=True,
             )
         return loss
 
@@ -182,6 +231,18 @@ class LightningModule(L.LightningModule):
         init_mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
         points = init_mesh.points
         cells = init_mesh.cells
+
+        # --- Option: without time series (single frame only) ---
+        target_same_frame: bool = True
+        if getattr(self, "target_same_frame", True):
+            mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
+            meshio.write(xdmf_filename, mesh)
+            logger.info(
+                f"[No Time Series] Single frame saved at {xdmf_filename}"
+            )
+            return
+
+
         try:
             with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
                 # Write the mesh (points and cells) once
@@ -200,11 +261,13 @@ class LightningModule(L.LightningModule):
         logger.info(
             f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
         )
-        h5_filename = xdmf_filename.replace(".xdmf", ".h5")
-        src = os.path.join(os.getcwd(), os.path.basename(h5_filename))
-        # The h5 file may be in the cwd (meshio bug), move it to xdmf location
-        if os.path.exists(src):
-            shutil.move(src=src, dst=h5_filename)
+        # The H5 archive is systematically created in cwd, we just need to move it
+        shutil.move(
+            src=os.path.join(
+                os.getcwd(), os.path.split(f"{xdmf_filename.replace('xdmf', 'h5')}")[1]
+            ),
+            dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
+        )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
@@ -214,6 +277,12 @@ class LightningModule(L.LightningModule):
     def _make_prediction(self, batch, last_prediction, last_previous_data_prediction):
         batch = batch.clone()
         # Prepare the batch for the current step
+        N = batch.x.shape[0]
+        # reset history if graph size changed
+        if last_prediction is not None and last_prediction.shape[0] != N:
+            last_prediction = None
+            last_previous_data_prediction = None
+            
         if last_prediction is not None:
             # Update the batch with the last prediction
             batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
@@ -238,7 +307,8 @@ class LightningModule(L.LightningModule):
         last_prediction = predicted_outputs
         if self.use_previous_data:
             last_previous_data_prediction = predicted_outputs - current_output
-
+        # add predic velocity to batch
+        batch.x[:,0:3] = predicted_outputs
         return (
             batch,
             predicted_outputs,
@@ -253,7 +323,12 @@ class LightningModule(L.LightningModule):
         if batch.traj_index > self.current_val_trajectory:
             self._reset_validation_trajectory()
             self.step_counter = 0
-
+        # Also reset the carry if num_nodes changes within a trajectory
+        if self._last_val_num_nodes is not None and self._last_val_num_nodes != batch.x.shape[0]:
+             self.last_val_prediction = None
+             self.last_previous_data_prediction = None
+ 
+        self._last_val_num_nodes = batch.x.shape[0]    
         (
             batch,
             predicted_outputs,
@@ -268,26 +343,30 @@ class LightningModule(L.LightningModule):
             self.trajectory_to_save.append(batch)
         node_type = batch.x[:, self.model.node_type_index]
 
-        self.val_step_outputs.append(predicted_outputs.cpu())
-        self.val_step_targets.append(target.cpu())
+        #self.val_step_outputs.append(predicted_outputs.cpu())
+        #self.val_step_targets.append(target.cpu())
+        self.val_step_outputs.append(predicted_outputs.detach())  # rester sur GPU
+        self.val_step_targets.append(target.detach())              # rester sur GPU
         val_loss = self.val_loss(
             target,
             predicted_outputs,
             node_type,
             masks=self.loss_masks,
         )
-        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True)
+        self.log("val_loss", val_loss, on_step=True, on_epoch=True, prog_bar=True, sync_dist=True)
 
         # compute RMSE for the first step
         if self.step_counter == 0:
             squared_diff = (predicted_outputs - target) ** 2
-            rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
+            #rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
+            rmse = torch.sqrt(squared_diff.mean()).detach()  # rester sur GPU
             self.first_step_losses.append(rmse)
         self.step_counter += 1
 
     def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
         self.val_step_targets.clear()
+        self._last_val_num_nodes = None
         self.current_val_trajectory = 0
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
@@ -295,7 +374,11 @@ class LightningModule(L.LightningModule):
         self.step_counter = 0
         self.first_step_losses = []
 
+    '''
     def on_validation_epoch_end(self):
+        # n’exécuter la logique que sur le rank global 0
+        if getattr(self.trainer, "is_global_zero", False) is False:
+            return
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
         targets = torch.cat(self.val_step_targets, dim=0)
@@ -310,13 +393,14 @@ class LightningModule(L.LightningModule):
             on_step=False,
             on_epoch=True,
             prog_bar=True,
+            sync_dist=True,
         )
 
         # Compute RMSE for the first step
         if self.first_step_losses:
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
-                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True, sync_dist=True
             )
 
         # Save trajectory graphs
@@ -334,7 +418,67 @@ class LightningModule(L.LightningModule):
 
         # Clear stored outputs
         self._reset_validation_epoch_end()
+    '''
+    def on_validation_epoch_end(self):
+        # >>> Ne PAS sortir tôt sur les non-zero ranks si on utilise sync_dist=True <<<
+        # (on veut que tous les ranks exécutent les self.log(..., sync_dist=True))
+        device = self.device
+        # 1) concat locales (par-rank)
+        predicteds = torch.cat(self.val_step_outputs, dim=0) if self.val_step_outputs else None
+        targets    = torch.cat(self.val_step_targets, dim=0)  if self.val_step_targets else None
+        
+        
 
+        # 2) calc locales puis log avec sync_dist=True (Lightning fera la réduction)
+        if predicteds is not None and targets is not None:
+            # sécurité si jamais quelque chose est revenu sur CPU
+            if predicteds.device.type != "cuda":
+                predicteds = predicteds.to(device, non_blocking=True)
+            if targets.device.type != "cuda":
+                targets = targets.to(device, non_blocking=True)
+
+            squared_diff = (predicteds - targets) ** 2
+            all_rollout_rmse = torch.sqrt(squared_diff.mean())
+            # ### IMPORTANT: laisser sync_dist=True mais appeler depuis TOUS les ranks
+            self.log(
+                "val_all_rollout_rmse",
+                all_rollout_rmse,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+
+        if self.first_step_losses:
+            mean_first_step_loss = torch.stack(self.first_step_losses).mean()
+            if mean_first_step_loss.device.type != "cuda":
+                mean_first_step_loss= m.to(device, non_blocking=True)
+            # ### idem, log sur tous les ranks
+            self.log(
+                "val_1step_rmse",
+                mean_first_step_loss,
+                on_epoch=True,
+                prog_bar=True,
+                sync_dist=True,
+            )
+
+        # 3) Sauvegardes disque UNIQUEMENT sur rank 0 (I/O non distribuée)
+        if getattr(self.trainer, "is_global_zero", False):
+            save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
+            self._save_trajectory_to_xdmf(
+                self.trajectory_to_save,
+                save_dir,
+                self._get_traj_savename(
+                    self.trajectory_to_save,
+                    self.current_val_trajectory,
+                    prefix=f"graph_epoch_{self.current_epoch}",
+                ),
+                timestep=self.timestep,
+            )
+
+        # 4) reset buffers sur TOUS les ranks (pour éviter de trainer des tensors entre epochs)
+        self._reset_validation_epoch_end()
+        
     def configure_optimizers(self):
         """Initialize the optimizer"""
         opt = torch.optim.AdamW(
@@ -379,6 +523,12 @@ class LightningModule(L.LightningModule):
             )
             # reset
             self._reset_prediction_trajectory()
+            self._last_pred_num_nodes = None
+
+        # If graph size changed inside a trajectory, drop the carry
+        if self._last_pred_num_nodes is not None and self._last_pred_num_nodes != batch.x.shape[0]:
+            self.last_pred_prediction = None
+            self.last_previous_data_pred_prediction = None
 
         # predict
         (
@@ -390,6 +540,7 @@ class LightningModule(L.LightningModule):
         ) = self._make_prediction(
             batch, self.last_pred_prediction, self.last_previous_data_pred_prediction
         )
+        self._last_pred_num_nodes = batch.x.shape[0]
         self.prediction_trajectory.append(batch)
 
     def _reset_predict_epoch_end(self):
@@ -429,7 +580,243 @@ class LightningModule(L.LightningModule):
         """
         self.wandb_run_id = checkpoint.get("wandb_run_id", None)
 
-    def _get_traj_savename(
+    
+    def on_fit_end(self):
+        """Compute and log entropy production + oversmoothing after training.
+
+        Controlled by the training parameters JSON:
+
+        parameters:
+          diagnostics:
+            entropy_production:
+              enabled: true
+              noise_std: 0.01
+              num_trajectories: 16
+              proj_dim: 8
+              orders: ["node", "edge", "1hop", "2hop"]
+              max_nodes_per_traj: 1024
+              max_edges_per_traj: 2048
+              estimator: "MaxEnt"        # or "MTUR"
+              optimizer: "Adam"
+              max_iter: 500
+
+        Notes:
+        - Runs only on global rank 0.
+        - Uses the *first* batch from the first val dataloader as the reference graph.
+        - This is intended as a diagnostic; adjust sampling knobs to control runtime.
+        """
+        # --- rank guard (important for DDP) ---
+        if not getattr(self.trainer, "is_global_zero", True):
+            return
+
+        params = getattr(self.hparams, "parameters", None)
+        if not isinstance(params, dict):
+            return
+        ep_cfg = (
+            params.get("diagnostics", {}).get("entropy_production", None)
+            if isinstance(params.get("diagnostics", {}), dict)
+            else None
+        )
+        if ep_cfg is None:
+            ep_cfg = params.get("entropy_production", None)
+
+        if not isinstance(ep_cfg, dict) or not ep_cfg.get("enabled", False):
+            return
+
+        # --- get a handle to the first val dataloader (we will sample from it below) ---
+        try:
+            # In Lightning, this is typically a list (one per dataloader)
+            val_dls = getattr(self.trainer, "val_dataloaders", None)
+            if isinstance(val_dls, list) and len(val_dls) > 0:
+                dl0 = val_dls[0]
+            else:
+                dl0 = val_dls
+        except Exception as e:
+            logger.warning(f"[entropy_production] Could not access val_dataloader: {e}")
+            return
+        if dl0 is None:
+            logger.warning("[entropy_production] No val_dataloader available; skipping diagnostics.")
+            return
+
+        # Underlying processor model (EncodeProcessDecode / EncodeTransformDecode / etc.)
+        processor = getattr(self.model, "model", None)
+        if processor is None:
+            logger.warning("[entropy_production] Simulator has no attribute `.model` (processor). Skipping.")
+            return
+
+        # --- configure EP estimation ---
+        cfg = EPEstimationConfig(
+            num_trajectories=int(ep_cfg.get("num_trajectories", 16)),
+            max_nodes_per_traj=ep_cfg.get("max_nodes_per_traj", 1024),
+            max_edges_per_traj=ep_cfg.get("max_edges_per_traj", 2048),
+            seed=int(ep_cfg.get("seed", 0)),
+            noise_std=float(ep_cfg.get("noise_std", 1e-2)),
+            proj_dim=int(ep_cfg.get("proj_dim", 8)),
+            standardize=bool(ep_cfg.get("standardize", True)),
+            estimator=str(ep_cfg.get("estimator", "MaxEnt")),
+            optimizer=str(ep_cfg.get("optimizer", "Adam")),
+            max_iter=int(ep_cfg.get("max_iter", 500)),
+            verbose=int(ep_cfg.get("verbose", 0)),
+            optimizer_kwargs=ep_cfg.get("optimizer_kwargs", None),
+            val_fraction=float(ep_cfg.get("val_fraction", 0.1)),
+            test_fraction=float(ep_cfg.get("test_fraction", 0.1)),
+            layer_modules_attr=ep_cfg.get("layer_modules_attr", None),
+        )
+
+        orders = tuple(ep_cfg.get("orders", ["node", "edge", "1hop", "2hop"]))
+        # Safety: filter invalid order strings
+        allowed = {"node", "edge", "1hop", "2hop"}
+        orders = tuple([o for o in orders if o in allowed])
+
+        num_batches = int(ep_cfg.get("num_batches", 1))
+        if num_batches <= 0:
+            num_batches = 1
+
+        results_list = []
+        it = iter(dl0)
+        for bi in range(num_batches):
+            try:
+                batch = next(it)
+            except StopIteration:
+                break
+            except Exception as e:
+                logger.warning(f"[entropy_production] Failed to fetch batch {bi} from val_dataloader: {e}")
+                break
+
+            # Build normalized graph inputs as expected by the Simulator
+            batch = batch.to(self.device, non_blocking=True)
+            graph, _ = self.model._build_input_graph(inputs=batch, is_training=False)
+
+            try:
+                res_b = estimate_graph_ep_all_orders(
+                    model=processor,
+                    graph=graph,
+                    cfg=cfg,
+                    orders=orders,
+                    device=self.device,
+                )
+                results_list.append(res_b)
+            except Exception as e:
+                logger.exception(f"[entropy_production] EP estimation failed on batch {bi}: {e}")
+                break
+
+        if len(results_list) == 0:
+            return
+
+        # Average results across batches (elementwise for per-layer arrays)
+        if len(results_list) == 1:
+            results = results_list[0]
+        else:
+            import numpy as _np
+
+            results = {}
+            base = results_list[0]
+            for order, base_res in base.items():
+                res_avg = dict(base_res)
+
+                # Per-layer EP
+                per_layer = _np.mean([r[order]["per_layer"] for r in results_list], axis=0).tolist()
+                res_avg["per_layer"] = [float(v) for v in per_layer]
+                res_avg["total"] = float(_np.sum(per_layer))
+
+                # Oversmoothing arrays (may be missing if order config differs)
+                if isinstance(base_res.get("V_per_layer", None), list):
+                    V_per_layer = _np.mean([r[order]["V_per_layer"] for r in results_list], axis=0).tolist()
+                    res_avg["V_per_layer"] = [float(v) for v in V_per_layer]
+                    res_avg["V_final"] = float(res_avg["V_per_layer"][-1]) if len(res_avg["V_per_layer"]) else res_avg.get("V_final")
+                if isinstance(base_res.get("V_det_per_layer", None), list):
+                    V_det_per_layer = _np.mean([r[order]["V_det_per_layer"] for r in results_list], axis=0).tolist()
+                    res_avg["V_det_per_layer"] = [float(v) for v in V_det_per_layer]
+                    res_avg["V_det_final"] = float(res_avg["V_det_per_layer"][-1]) if len(res_avg["V_det_per_layer"]) else res_avg.get("V_det_final")
+
+                # Scalar oversmoothing (average across graphs)
+                for k in ["V_input", "V_final", "V_det_final"]:
+                    if k in base_res and base_res[k] is not None:
+                        try:
+                            res_avg[k] = float(_np.mean([r[order][k] for r in results_list]))
+                        except Exception:
+                            pass
+
+                res_avg["num_batches"] = int(len(results_list))
+                results[order] = res_avg
+
+        # --- persist raw results (arrays) to JSON for post-hoc analysis ---
+        try:
+            import json as _json
+            import os as _os
+
+            out_dir = None
+            # Prefer logger log_dir if available
+            if getattr(self.trainer, "logger", None) is not None and hasattr(self.trainer.logger, "log_dir"):
+                out_dir = getattr(self.trainer.logger, "log_dir", None)
+            if out_dir is None:
+                out_dir = getattr(self.trainer, "default_root_dir", None)
+            if out_dir is None:
+                out_dir = "."
+            _os.makedirs(out_dir, exist_ok=True)
+            out_path = _os.path.join(out_dir, "entropy_production_results.json")
+            with open(out_path, "w") as f:
+                _json.dump({"config": ep_cfg, "results": results}, f, indent=2)
+            logger.info(f"[entropy_production] Wrote diagnostics to {out_path}")
+        except Exception as e:
+            logger.warning(f"[entropy_production] Failed to write results JSON: {e}")
+
+        # --- flatten metrics for logging ---
+        metrics = {}
+        # Oversmoothing metrics are order-independent; use the first order (if any)
+        if len(results) > 0:
+            any_order = next(iter(results.keys()))
+            V_input = results[any_order].get("V_input", None)
+            V_per_layer = results[any_order].get("V_per_layer", None)
+            V_final = results[any_order].get("V_final", None)
+            V_det_per_layer = results[any_order].get("V_det_per_layer", None)
+            V_det_final = results[any_order].get("V_det_final", None)
+            if V_input is not None:
+                metrics["oversmoothing/V_input"] = float(V_input)
+            if V_final is not None:
+                metrics["oversmoothing/V_final"] = float(V_final)
+            if V_det_final is not None:
+                metrics["oversmoothing_det/V_final"] = float(V_det_final)
+            if isinstance(V_per_layer, list):
+                for li, v in enumerate(V_per_layer):
+                    metrics[f"oversmoothing/V_layer_{li}"] = float(v)
+                    if V_input not in (None, 0.0):
+                        metrics[f"oversmoothing/V_ratio_layer_{li}"] = float(v) / float(V_input)
+
+            if isinstance(V_det_per_layer, list):
+                for li, v in enumerate(V_det_per_layer):
+                    metrics[f"oversmoothing_det/V_layer_{li}"] = float(v)
+                    if V_input not in (None, 0.0):
+                        metrics[f"oversmoothing_det/V_ratio_layer_{li}"] = float(v) / float(V_input)
+
+        for order, res in results.items():
+            total = res.get("total", None)
+            per_layer = res.get("per_layer", None)
+            if total is not None:
+                metrics[f"entropy_production/{order}/total"] = float(total)
+            if isinstance(per_layer, list):
+                for li, ep_li in enumerate(per_layer):
+                    metrics[f"entropy_production/{order}/layer_{li}"] = float(ep_li)
+
+        # --- log to Lightning logger (wandb/tensorboard/etc) ---
+        step = int(getattr(self.trainer, "global_step", 0))
+        try:
+            if getattr(self.trainer, "logger", None) is not None:
+                self.trainer.logger.log_metrics(metrics, step=step)
+                self.trainer.logger.save()
+        except Exception as e:
+            logger.warning(f"[entropy_production] Failed to log metrics via trainer.logger: {e}")
+
+        # Also print a concise summary
+        try:
+            msg_parts = []
+            for order in results.keys():
+                msg_parts.append(f"{order}: total={results[order]['total']:.3f}")
+            logger.info("[entropy_production] " + " | ".join(msg_parts))
+        except Exception:
+            pass
+
+def _get_traj_savename(
         self, traj: list[Batch], traj_idx: int, prefix: str = "graph"
     ) -> str:
         """
