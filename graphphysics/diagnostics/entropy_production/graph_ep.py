@@ -70,7 +70,8 @@ class EPEstimationConfig:
 
     # Hook fallback: where to find the list/ModuleList of per-layer blocks.
     # Examples: "processor_list", "model.blocks", "encoder.layers".
-    layer_modules_attr: Optional[str] = "model.processor_list"
+    # If None, we try to infer a reasonable ModuleList via `_guess_layer_modules`.
+    layer_modules_attr: Optional[str] = None
 
 
 def _row_normalized_adj(edge_index: torch.Tensor, num_nodes: int, device: torch.device) -> torch.Tensor:
@@ -367,10 +368,11 @@ def _collect_X0_X1_for_layer(
             # both z0 and z1 so samples are properly paired.
             if order in ("node", "1hop", "2hop"):
                 n = int(z0.size(0))
-                if cfg.max_nodes_per_traj is not None and cfg.max_nodes_per_traj < n:
-                    idx = rng.choice(n, size=int(cfg.max_nodes_per_traj), replace=False)
-                else:
+                max_nodes = cfg.max_nodes_per_traj
+                if max_nodes is None or int(max_nodes) <= 0 or int(max_nodes) >= n:
                     idx = np.arange(n)
+                else:
+                    idx = rng.choice(n, size=int(max_nodes), replace=False)
                 idx_t = torch.as_tensor(idx, device=z0.device, dtype=torch.long)
 
                 if order == "node":
@@ -391,10 +393,11 @@ def _collect_X0_X1_for_layer(
 
             elif order == "edge":
                 m = int(src_all.numel())
-                if cfg.max_edges_per_traj is not None and cfg.max_edges_per_traj < m:
-                    eidx = rng.choice(m, size=int(cfg.max_edges_per_traj), replace=False)
-                else:
+                max_edges = cfg.max_edges_per_traj
+                if max_edges is None or int(max_edges) <= 0 or int(max_edges) >= m:
                     eidx = np.arange(m)
+                else:
+                    eidx = rng.choice(m, size=int(max_edges), replace=False)
                 eidx_t = torch.as_tensor(eidx, device=z0.device, dtype=torch.long)
                 s0 = _concat(z0[src_all[eidx_t]], z0[dst_all[eidx_t]])
                 s1 = _concat(z1[src_all[eidx_t]], z1[dst_all[eidx_t]])

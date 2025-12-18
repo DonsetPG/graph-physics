@@ -44,7 +44,7 @@
         "standardize": true,
         "seed": 0,
 
-        "layer_modules_attr": "model.processor_list"
+        "layer_modules_attr": "processor_list"
         }
     },
     "transformations": {
