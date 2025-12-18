@@ -1,16 +1,16 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "dataset/train",
-        "meta_path": "dataset/nose.json",
+        "xdmf_folder": "nose_dataset/train",
+        "meta_path": "nose_dataset/nose.json",
         "use_previous_data": false,
         "target_same_frame": true,
         "khop": 1
     },
     "model": {
         "type": "transformer",
-        "message_passing_num": 10,
-        "hidden_size": 64,
+        "message_passing_num": 15,
+        "hidden_size": 256,
         "node_input_size": 3,
         "output_size": 3,
         "edge_input_size": 0,
