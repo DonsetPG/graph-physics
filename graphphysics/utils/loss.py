@@ -445,19 +445,8 @@ class MultiLoss(_Loss):
         """
         Combines multiple loss, weighted with fixed weights.
         """
-        if gradient_method is not None:
-            network_output_gradient = compute_gradient(
-                graph=graph,
-                field=network_output_physical,
-                method=gradient_method,
-                device=device,
-            )
-            target_gradient = compute_gradient(
-                graph=graph,
-                field=target_physical,
-                method=gradient_method,
-                device=device,
-            )
+        network_output_gradient = None
+        target_gradient = None
 
         losses = [
             w
