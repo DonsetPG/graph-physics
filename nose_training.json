@@ -14,8 +14,8 @@
         "node_input_size": 3,
         "output_size": 3,
         "edge_input_size": 0,
-        "num_heads": 4,
-	    "use_previous_data": false,
+        "num_heads": 2,
+	"use_previous_data": false,
         "use_silu_activation": true,
         "use_rope_embeddings": true
     },
