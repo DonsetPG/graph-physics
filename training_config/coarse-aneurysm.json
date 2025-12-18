@@ -28,10 +28,10 @@
         "enabled": true,
 
         "num_batches": 1,
-        "orders": ["node", "edge", "1hop", "2hop"],
+        "orders": ["edge", "1hop"],
 
         "noise_std": 0.1,
-        "num_trajectories": 64,
+        "num_trajectories": 16,
         "proj_dim": 64,
 
         "estimator": "MaxEnt",
