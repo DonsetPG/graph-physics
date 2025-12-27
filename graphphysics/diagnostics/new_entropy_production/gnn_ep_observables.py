@@ -1,26 +1,32 @@
-"""graph_ep.py
+"""gnn_ep.py
 
-Entropy production (EP) + oversmoothing diagnostics for graph-physics models.
+Entropy production (EP) estimation utilities for *trained* (stochastic) GNNs.
 
-This module mirrors `diagnostics/new_entropy_production/gnn_ep_observables.py`,
-with two graphphysics-specific adaptations:
-  1) Accepts a `torch_geometric.data.Data` (or Batch) graph instead of raw
-     (x, edge_index) tensors.
-  2) Falls back to forward hooks when a model does not implement
-     `forward(..., return_states=True, stochastic=...)`.
+This module adapts the Maximum-Entropy / DV variational EP estimator implemented
+in `ep_estimators.py` + `observables.py` to the GNN setting by:
+  1) sampling stochastic layer-to-layer transitions (Gaussian noise each layer)
+  2) building *antisymmetric* cross-correlation observables from projected states
+  3) estimating EP per layer and summing to obtain a *global EP budget*.
+
+We expose four "orders" of observables:
+  - "node"  : per-node state = projected node features
+  - "edge"  : per-edge state = concat(projected src, projected dst)
+  - "1hop"  : per-node state = concat(node, mean_1hop_neighbors)
+  - "2hop"  : per-node state = concat(node, mean_1hop_neighbors, mean_2hop_neighbors)
+
+Each order yields a (lower bound) EP estimate using `observables.CrossCorrelations1`.
 """
 
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Dict, List, Literal, Optional, Tuple, Union
+from typing import Dict, List, Literal, Optional, Tuple
 
 import numpy as np
 import torch
-import torch.nn as nn
-from torch_geometric.data import Data
 
-from . import ep_estimators, observables
+import ep_estimators
+import observables
 
 Order = Literal["node", "edge", "1hop", "2hop"]
 
@@ -45,7 +51,8 @@ class EPEstimationConfig:
     optimizer: str = "Adam"  # used only when estimator == "MaxEnt"
     max_iter: int = 500
     verbose: int = 0
-    clip_objective: bool = True  # cap objective at log(nsamples)
+    clip_objective: bool = True  # cap objective at log(nsamples) (as in original method)
+    # passed to optimizer constructor in optimizers.py
     optimizer_kwargs: Optional[dict] = None
 
     # Dataset split (to reduce overfitting of the variational bound)
@@ -53,29 +60,23 @@ class EPEstimationConfig:
     test_fraction: float = 0.1
 
     # Storage: when None, keep samples on the same device used for estimation.
+    # Set True to offload samples to CPU (lower GPU memory, slower).
     offload_to_cpu: Optional[bool] = None
 
     # Performance: reuse the same stochastic trajectories for all layers.
+    # This is much faster but changes the exact sampling compared to per-layer trajectories.
     share_trajectories_across_layers: bool = True
-
-    # Hook fallback configuration (used when model lacks return_states support).
-    noise_std: float = 0.0
-    layer_modules_attr: Optional[str] = None
-
-
-def _as_node_features(H: torch.Tensor) -> torch.Tensor:
-    """Coerce a captured state tensor into shape (num_nodes, d)."""
-    if H.ndim == 2:
-        return H
-    if H.ndim == 3 and H.size(0) == 1:
-        return H.squeeze(0)
-    raise ValueError(f"Expected a 2D (N,d) or 3D (1,N,d) tensor for a layer state, got {tuple(H.shape)}")
 
 
 def _row_normalized_adj(edge_index: torch.Tensor, num_nodes: int, device: torch.device) -> torch.Tensor:
-    """Return sparse row-normalized adjacency P where (P @ X)[v] = mean_{u in N(v)} X[u]."""
+    """Return sparse row-normalized adjacency P where (P @ X)[v] = mean_{u in N(v)} X[u].
+
+    Assumes `edge_index` uses PyG convention (src=edge_index[0], dst=edge_index[1]).
+    We build P with indices (dst, src).
+    """
     edge_index = edge_index.to(device=device)
     src, dst = edge_index[0], edge_index[1]
+    # degree = in-degree w.r.t dst
     deg = torch.zeros(num_nodes, device=device, dtype=torch.float32)
     deg.scatter_add_(0, dst, torch.ones_like(dst, dtype=torch.float32))
     deg = torch.clamp(deg, min=1.0)
@@ -91,13 +92,21 @@ def _row_normalized_adj(edge_index: torch.Tensor, num_nodes: int, device: torch.
 
 
 def _make_projection(in_dim: int, proj_dim: int, seed: int, device: torch.device) -> torch.Tensor:
-    """Gaussian random projection with orthonormal columns when possible."""
+    """Gaussian random projection.
+
+    If ``in_dim >= proj_dim``, we QR-orthonormalize columns for stability.
+    If ``in_dim < proj_dim``, true column-orthonormality is impossible; we instead
+    return a column-normalized Gaussian matrix to keep a consistent output shape
+    ``(in_dim, proj_dim)`` across layers/states.
+    """
     g = torch.Generator(device=device)
     g.manual_seed(seed)
     W = torch.randn(in_dim, proj_dim, generator=g, device=device, dtype=torch.float32)
     if in_dim >= proj_dim:
+        # Orthonormalize columns for stability (QR)
         Q, _ = torch.linalg.qr(W, mode="reduced")
         return Q
+    # in_dim < proj_dim: keep exact proj_dim output by normalizing columns.
     return torch.nn.functional.normalize(W, p=2, dim=0)
 
 
@@ -106,7 +115,12 @@ def _build_projection_pairs(
     cfg: EPEstimationConfig,
     device: torch.device,
 ) -> List[Tuple[Optional[torch.Tensor], Optional[torch.Tensor]]]:
-    """Build per-layer projection matrices for (h_t, h_{t+1}) pairs."""
+    """Build per-layer projection matrices for (h_t, h_{t+1}) pairs.
+
+    If ``cfg.proj_dim <= 0`` we skip projection and return ``(None, None)`` for each layer.
+    When consecutive states have the same dimensionality, we reuse the same projection
+    matrix so X0/X1 live in the same coordinate system.
+    """
     proj_dim = int(getattr(cfg, "proj_dim", 0) or 0)
     n_layers = len(states) - 1
     if proj_dim <= 0:
@@ -142,231 +156,109 @@ def _concat(*tensors: torch.Tensor) -> torch.Tensor:
 _ORDER_ID: Dict[str, int] = {"node": 0, "edge": 1, "1hop": 2, "2hop": 3}
 
 
-def _get_attr_path(obj: object, path: str) -> object:
-    cur: object = obj
-    for part in path.split("."):
-        if not hasattr(cur, part):
-            raise AttributeError(f"Object of type {type(cur).__name__} has no attribute '{part}' while resolving '{path}'")
-        cur = getattr(cur, part)
-    return cur
-
-
-def _guess_layer_modules(model: nn.Module) -> List[nn.Module]:
-    """Infer which submodules correspond to per-layer blocks."""
-    if hasattr(model, "processor_list") and isinstance(getattr(model, "processor_list"), nn.ModuleList):
-        return list(getattr(model, "processor_list"))
-
-    direct: List[Tuple[str, nn.ModuleList]] = []
-    for name, value in vars(model).items():
-        if isinstance(value, nn.ModuleList) and len(value) > 0:
-            direct.append((name, value))
-    if direct:
-        direct.sort(key=lambda kv: len(kv[1]), reverse=True)
-        return list(direct[0][1])
-
-    nested: List[Tuple[str, nn.ModuleList]] = []
-    for name, mod in model.named_modules():
-        if isinstance(mod, nn.ModuleList) and len(mod) > 0:
-            nested.append((name, mod))
-
-    if nested:
-        def _score(item: Tuple[str, nn.ModuleList]) -> float:
-            name, ml = item
-            lname = name.lower()
-            score = 0.0
-            if lname == "processor_list" or lname.endswith(".processor_list") or lname.endswith("processor_list"):
-                score += 1000.0
-            if "processor" in lname:
-                score += 200.0
-            if "block" in lname:
-                score += 150.0
-            if "layer" in lname:
-                score += 120.0
-            if "encoder" in lname:
-                score += 80.0
-            if "transformer" in lname:
-                score += 80.0
-            score += 10.0 * float(len(ml))
-            return score
-
-        nested.sort(key=_score, reverse=True)
-        return list(nested[0][1])
-
-    raise ValueError(
-        "Could not infer which submodules correspond to per-layer blocks. "
-        "Either implement forward(..., return_states=True, ...) on the model, or "
-        "set cfg.layer_modules_attr to an attribute path containing a ModuleList/list of blocks."
-    )
-
-
-@torch.no_grad()
-def _collect_states_with_hooks(
-    model: nn.Module,
-    forward_args: Tuple[object, ...],
-    *,
-    layers: List[nn.Module],
-    stochastic: bool,
-    noise_std: float,
-) -> List[torch.Tensor]:
-    """Fallback: collect per-layer states via forward hooks."""
-
-    states: List[torch.Tensor] = []
-
-    def _make_pre_hook(capture_input: bool):
-        def _pre_hook(_module: nn.Module, inputs: Tuple[object, ...]):
-            if not inputs:
-                return None
-            x0 = inputs[0]
-            if isinstance(x0, torch.Tensor):
-                if capture_input:
-                    states.append(x0.detach())
-                if stochastic and noise_std > 0.0:
-                    x0 = x0 + torch.randn_like(x0) * float(noise_std)
-                    return (x0,) + inputs[1:]
-            return None
-        return _pre_hook
-
-    def _fwd_hook(_module: nn.Module, _inputs: Tuple[object, ...], output: object):
-        y = output[0] if isinstance(output, (tuple, list)) else output
-        if isinstance(y, torch.Tensor):
-            states.append(y.detach())
-
-    handles: List[torch.utils.hooks.RemovableHandle] = []
-    try:
-        for li, layer in enumerate(layers):
-            handles.append(layer.register_forward_pre_hook(_make_pre_hook(capture_input=(li == 0))))
-            handles.append(layer.register_forward_hook(_fwd_hook))
-
-        _ = model(*forward_args)
-    finally:
-        for h in handles:
-            try:
-                h.remove()
-            except Exception:
-                pass
-
-    if len(states) != len(layers) + 1:
-        raise RuntimeError(
-            f"Hook-based state capture failed: expected {len(layers)+1} states (including input), got {len(states)}. "
-            "You may need to set cfg.layer_modules_attr to the correct layer list."
-        )
-    return states
-
-
-@torch.no_grad()
-def _get_states(
-    model: nn.Module,
-    graph: Optional[Data],
-    *,
-    cfg: EPEstimationConfig,
-    stochastic: bool,
-    x: Optional[torch.Tensor] = None,
-    edge_index: Optional[torch.Tensor] = None,
-) -> List[torch.Tensor]:
-    """Get per-layer node states.
-
-    Preferred: call the model with return_states=True.
-    Fallback: use forward hooks.
-    """
-    # Try Data signature first
-    if graph is not None:
-        try:
-            out = model(graph, return_states=True, stochastic=stochastic)
-            if isinstance(out, (tuple, list)) and len(out) == 2 and isinstance(out[1], (list, tuple)):
-                states = list(out[1])
-                return [_as_node_features(s) for s in states]
-        except TypeError:
-            pass
-
-    # Try (x, edge_index) signature
-    if x is not None and edge_index is not None:
-        try:
-            out = model(x, edge_index, return_states=True, stochastic=stochastic)
-            if isinstance(out, (tuple, list)) and len(out) == 2 and isinstance(out[1], (list, tuple)):
-                states = list(out[1])
-                return [_as_node_features(s) for s in states]
-        except TypeError:
-            pass
-
-    if cfg.layer_modules_attr is not None:
-        layers_obj = _get_attr_path(model, cfg.layer_modules_attr)
-        if isinstance(layers_obj, nn.ModuleList):
-            layers = list(layers_obj)
-        elif isinstance(layers_obj, (list, tuple)) and all(isinstance(m, nn.Module) for m in layers_obj):
-            layers = list(layers_obj)
-        else:
-            raise ValueError(
-                f"cfg.layer_modules_attr='{cfg.layer_modules_attr}' did not resolve to a ModuleList or list of Modules; got {type(layers_obj)}"
-            )
-    else:
-        layers = _guess_layer_modules(model)
-
-    forward_args: Tuple[object, ...]
-    if graph is not None:
-        forward_args = (graph,)
-    elif x is not None and edge_index is not None:
-        forward_args = (x, edge_index)
-    else:
-        raise ValueError("Either graph or (x, edge_index) must be provided for hook-based state capture")
-
-    states = _collect_states_with_hooks(
-        model=model,
-        forward_args=forward_args,
-        layers=layers,
-        stochastic=stochastic,
-        noise_std=cfg.noise_std,
-    )
-    return [_as_node_features(s) for s in states]
-
-
-def _embedding_variance(H: torch.Tensor) -> torch.Tensor:
-    """Compute 𝒱(H) = (1/(2n)) * Σ_v ||h_v - mean(H)||^2 as a scalar tensor."""
-    H = _as_node_features(H)
-    mean = H.mean(dim=0, keepdim=True)
-    centered = H - mean
-    return 0.5 * centered.pow(2).sum(dim=1).mean()
-
-
-def _estimate_expected_V_per_layer(
-    model: nn.Module,
-    graph: Optional[Data],
+def _collect_X0_X1_for_layer(
+    model: torch.nn.Module,
     x: torch.Tensor,
     edge_index: torch.Tensor,
-    n_layers: int,
+    layer_idx: int,
+    order: Order,
+    proj_mats: List[torch.Tensor],
+    P: torch.Tensor,
     cfg: EPEstimationConfig,
-) -> List[float]:
-    """Estimate V(t) = E[𝒱(H_t)] for t=1..n_layers using stochastic trajectories."""
-    if cfg.num_trajectories <= 0:
-        raise ValueError("cfg.num_trajectories must be positive to estimate expected V per layer")
-    if n_layers <= 0:
-        return []
+    device: torch.device,
+) -> Tuple[torch.Tensor, torch.Tensor]:
+    """Collect transition samples (X0,X1) for one layer and one order."""
+    order_id = _ORDER_ID[str(order)]
+    rng = np.random.default_rng(cfg.seed + 1000 * layer_idx + 10 * order_id)
 
-    V_sums = np.zeros((n_layers,), dtype=np.float64)
+    X0_list: List[torch.Tensor] = []
+    X1_list: List[torch.Tensor] = []
+    store_on_cpu = cfg.offload_to_cpu
+    if store_on_cpu is None:
+        store_on_cpu = device.type == "cpu"
 
     model_was_training = model.training
     model.eval()
 
+    # Precompute edge sampling buffers once.
+    if order == "edge":
+        src_all, dst_all = edge_index[0], edge_index[1]
+        mask = src_all != dst_all
+        src_all = src_all[mask]
+        dst_all = dst_all[mask]
+        if src_all.numel() == 0:
+            raise ValueError("No non-self-loop edges available for edge-order EP")
+
     with torch.inference_mode():
         for t in range(cfg.num_trajectories):
-            torch.manual_seed(cfg.seed + 77_777 * t)
-            states = _get_states(
-                model=model,
-                graph=graph,
-                cfg=cfg,
-                stochastic=True,
-                x=x,
-                edge_index=edge_index,
-            )
-            if len(states) != n_layers + 1:
-                raise RuntimeError(f"Unexpected number of states: got {len(states)} expected {n_layers + 1}")
-            for li in range(n_layers):
-                V_val = _embedding_variance(states[li + 1]).detach()
-                V_sums[li] += float(V_val.to(device="cpu").item())
+            # Change torch RNG each trajectory for independent Gaussian noise draws
+            torch.manual_seed(cfg.seed + 10_000 * layer_idx + 17 * t)
+
+            # We assume model.forward supports return_states=True and stochastic=True
+            _, states = model(x, edge_index, return_states=True, stochastic=True)
+            h0 = states[layer_idx]
+            h1 = states[layer_idx + 1]
+
+            # Use raw features directly (no random projection).
+            z0 = h0
+            z1 = h1
+
+            # Sample *entities* once per trajectory and apply the same indices to
+            # both z0 and z1 so samples are properly paired.
+            if order in ("node", "1hop", "2hop"):
+                n = int(z0.size(0))
+                if cfg.max_nodes_per_traj is not None and cfg.max_nodes_per_traj < n:
+                    idx = rng.choice(n, size=cfg.max_nodes_per_traj, replace=False)
+                else:
+                    idx = np.arange(n)
+                idx_t = torch.as_tensor(idx, device=z0.device, dtype=torch.long)
+
+                if order == "node":
+                    s0 = z0[idx_t]
+                    s1 = z1[idx_t]
+                elif order == "1hop":
+                    m10 = torch.sparse.mm(P, z0)
+                    m11 = torch.sparse.mm(P, z1)
+                    s0 = _concat(z0[idx_t], m10[idx_t])
+                    s1 = _concat(z1[idx_t], m11[idx_t])
+                else:  # "2hop"
+                    m10 = torch.sparse.mm(P, z0)
+                    m11 = torch.sparse.mm(P, z1)
+                    m20 = torch.sparse.mm(P, m10)
+                    m21 = torch.sparse.mm(P, m11)
+                    s0 = _concat(z0[idx_t], m10[idx_t], m20[idx_t])
+                    s1 = _concat(z1[idx_t], m11[idx_t], m21[idx_t])
+
+            elif order == "edge":
+                m = int(src_all.numel())
+                if cfg.max_edges_per_traj is not None and cfg.max_edges_per_traj < m:
+                    eidx = rng.choice(m, size=cfg.max_edges_per_traj, replace=False)
+                else:
+                    eidx = np.arange(m)
+                eidx_t = torch.as_tensor(eidx, device=z0.device, dtype=torch.long)
+                s0 = _concat(z0[src_all[eidx_t]], z0[dst_all[eidx_t]])
+                s1 = _concat(z1[src_all[eidx_t]], z1[dst_all[eidx_t]])
+            else:
+                raise ValueError(f"Unknown order: {order}")
+
+            if s0.shape != s1.shape:
+                raise RuntimeError(f"Shape mismatch for order={order}: {s0.shape} vs {s1.shape}")
+
+            if store_on_cpu:
+                X0_list.append(s0.detach().cpu())
+                X1_list.append(s1.detach().cpu())
+            else:
+                X0_list.append(s0.detach())
+                X1_list.append(s1.detach())
 
     if model_was_training:
         model.train()
 
-    return (V_sums / float(cfg.num_trajectories)).tolist()
+    X0 = torch.cat(X0_list, dim=0)
+    X1 = torch.cat(X1_list, dim=0)
+    if cfg.standardize:
+        X0, X1 = _standardize_pair(X0, X1)
+    return X0, X1
 
 
 def _estimate_ep_from_X0_X1(X0: torch.Tensor, X1: torch.Tensor, cfg: EPEstimationConfig) -> float:
@@ -401,51 +293,83 @@ def _estimate_ep_from_X0_X1(X0: torch.Tensor, X1: torch.Tensor, cfg: EPEstimatio
     raise ValueError(f"Unknown estimator: {cfg.estimator}")
 
 
-def _sample_indices(rng: np.random.Generator, n: int, max_n: Optional[int]) -> np.ndarray:
-    """Sample indices with legacy support for <=0 meaning 'use all'."""
-    if max_n is None:
-        return np.arange(n)
-    max_n = int(max_n)
-    if max_n <= 0 or max_n >= n:
-        return np.arange(n)
-    return rng.choice(n, size=max_n, replace=False)
+def _embedding_variance(H: torch.Tensor) -> torch.Tensor:
+    """Compute 𝒱(H) = (1/(2n)) * Σ_v ||h_v - mean(H)||^2 as a scalar tensor."""
+    if H.ndim != 2:
+        raise ValueError(f"Expected H with shape (num_nodes, d), got {tuple(H.shape)}")
+    mean = H.mean(dim=0, keepdim=True)
+    centered = H - mean
+    return 0.5 * centered.pow(2).sum(dim=1).mean()
 
 
-def estimate_graph_ep_all_orders(
-    model: nn.Module,
-    graph: Union[Data, "torch_geometric.data.Batch"],
+def _estimate_expected_V_per_layer(
+    model: torch.nn.Module,
+    x: torch.Tensor,
+    edge_index: torch.Tensor,
+    n_layers: int,
+    cfg: EPEstimationConfig,
+) -> List[float]:
+    """Estimate V(t) = E[𝒱(H_t)] for t=1..n_layers using stochastic trajectories."""
+    if cfg.num_trajectories <= 0:
+        raise ValueError("cfg.num_trajectories must be positive to estimate expected V per layer")
+    if n_layers <= 0:
+        return []
+
+    V_sums = np.zeros((n_layers,), dtype=np.float64)
+
+    model_was_training = model.training
+    model.eval()
+
+    with torch.inference_mode():
+        for t in range(cfg.num_trajectories):
+            torch.manual_seed(cfg.seed + 77_777 * t)
+            _, states = model(x, edge_index, return_states=True, stochastic=True)
+            if len(states) != n_layers + 1:
+                raise RuntimeError(f"Unexpected number of states: got {len(states)} expected {n_layers + 1}")
+            for li in range(n_layers):
+                V_val = _embedding_variance(states[li + 1]).detach()
+                V_sums[li] += float(V_val.to(device="cpu").item())
+
+    if model_was_training:
+        model.train()
+
+    return (V_sums / float(cfg.num_trajectories)).tolist()
+
+
+def estimate_gnn_ep_all_orders(
+    model: torch.nn.Module,
+    x: torch.Tensor,
+    edge_index: torch.Tensor,
     cfg: Optional[EPEstimationConfig] = None,
     orders: Tuple[Order, ...] = ("node", "edge", "1hop", "2hop"),
     device: Optional[torch.device] = None,
 ) -> Dict[str, Dict[str, object]]:
-    """Estimate global EP budget for a trained stochastic graph model."""
+    """Estimate global EP budget for a trained stochastic GNN.
+
+    Returns a nested dict:
+      results[order] = {
+         "per_layer": [ep_0, ep_1, ...],
+         "total": sum(per_layer),
+         "n_layers": L,
+         "proj_dim": cfg.proj_dim,
+      }
+    """
     if cfg is None:
         cfg = EPEstimationConfig()
-
     if device is None:
-        try:
-            device = next(model.parameters()).device
-        except StopIteration:
-            device = graph.x.device  # type: ignore[assignment]
+        device = x.device
 
-    graph = graph.to(device)
-    x = graph.x
-    edge_index = graph.edge_index
+    x = x.to(device)
+    edge_index = edge_index.to(device)
 
     # Basic sanity: EP estimation requires stochasticity.
     noise_std = getattr(model, "noise_std", None)
     if noise_std is not None and float(noise_std) <= 0.0:
+        # Deterministic dynamics: EP is 0 by construction. Still return V stats.
         model_was_training = model.training
         model.eval()
         with torch.inference_mode():
-            states = _get_states(
-                model=model,
-                graph=graph,
-                cfg=cfg,
-                stochastic=False,
-                x=x,
-                edge_index=edge_index,
-            )
+            _, states = model(x, edge_index, return_states=True, stochastic=False)
         if model_was_training:
             model.train()
 
@@ -481,14 +405,7 @@ def estimate_graph_ep_all_orders(
     model_was_training = model.training
     model.eval()
     with torch.inference_mode():
-        states = _get_states(
-            model=model,
-            graph=graph,
-            cfg=cfg,
-            stochastic=False,
-            x=x,
-            edge_index=edge_index,
-        )
+        _, states = model(x, edge_index, return_states=True, stochastic=False)
     if model_was_training:
         model.train()
 
@@ -527,13 +444,18 @@ def estimate_graph_ep_all_orders(
     results: Dict[str, Dict[str, object]] = {}
     per_layer_stats: Dict[str, List[float]] = {order: [] for order in orders}
 
+    # Collect samples for all orders, reusing each stochastic forward pass.
     model_was_training = model.training
     model.eval()
 
     if cfg.share_trajectories_across_layers:
         V_sums = np.zeros((n_layers,), dtype=np.float64)
-        X0_lists: Dict[str, List[List[torch.Tensor]]] = {order: [[] for _ in range(n_layers)] for order in orders}
-        X1_lists: Dict[str, List[List[torch.Tensor]]] = {order: [[] for _ in range(n_layers)] for order in orders}
+        X0_lists: Dict[str, List[List[torch.Tensor]]] = {
+            order: [[] for _ in range(n_layers)] for order in orders
+        }
+        X1_lists: Dict[str, List[List[torch.Tensor]]] = {
+            order: [[] for _ in range(n_layers)] for order in orders
+        }
         rngs = {
             (li, order): np.random.default_rng(cfg.seed + 1000 * li + 10 * _ORDER_ID[order])
             for li in range(n_layers)
@@ -543,22 +465,15 @@ def estimate_graph_ep_all_orders(
         with torch.inference_mode():
             for t in range(cfg.num_trajectories):
                 torch.manual_seed(cfg.seed + 17 * t)
-                stoch_states = _get_states(
-                    model=model,
-                    graph=graph,
-                    cfg=cfg,
-                    stochastic=True,
-                    x=x,
-                    edge_index=edge_index,
-                )
-                if len(stoch_states) != n_layers + 1:
+                _, states = model(x, edge_index, return_states=True, stochastic=True)
+                if len(states) != n_layers + 1:
                     raise RuntimeError(
-                        f"Unexpected number of states: got {len(stoch_states)} expected {n_layers + 1}"
+                        f"Unexpected number of states: got {len(states)} expected {n_layers + 1}"
                     )
                 for layer_idx in range(n_layers):
-                    h0 = stoch_states[layer_idx]
-                    h1 = stoch_states[layer_idx + 1]
-                    proj0, proj1 = None, None
+                    h0 = states[layer_idx]
+                    h1 = states[layer_idx + 1]
+                    proj0, proj1 = proj_pairs[layer_idx]
                     z0 = h0 if proj0 is None else h0 @ proj0
                     z1 = h1 if proj1 is None else h1 @ proj1
 
@@ -573,7 +488,10 @@ def estimate_graph_ep_all_orders(
                         rng = rngs[(layer_idx, order)]
                         if order in ("node", "1hop", "2hop"):
                             n = int(z0.size(0))
-                            idx = _sample_indices(rng, n, cfg.max_nodes_per_traj)
+                            if cfg.max_nodes_per_traj is not None and cfg.max_nodes_per_traj < n:
+                                idx = rng.choice(n, size=cfg.max_nodes_per_traj, replace=False)
+                            else:
+                                idx = np.arange(n)
                             idx_t = torch.as_tensor(idx, device=z0.device, dtype=torch.long)
 
                             if order == "node":
@@ -587,7 +505,10 @@ def estimate_graph_ep_all_orders(
                                 s1 = _concat(z1[idx_t], m11[idx_t], m21[idx_t])
                         elif order == "edge":
                             m = int(src_all.numel())
-                            eidx = _sample_indices(rng, m, cfg.max_edges_per_traj)
+                            if cfg.max_edges_per_traj is not None and cfg.max_edges_per_traj < m:
+                                eidx = rng.choice(m, size=cfg.max_edges_per_traj, replace=False)
+                            else:
+                                eidx = np.arange(m)
                             eidx_t = torch.as_tensor(eidx, device=z0.device, dtype=torch.long)
                             s0 = _concat(z0[src_all[eidx_t]], z0[dst_all[eidx_t]])
                             s1 = _concat(z1[src_all[eidx_t]], z1[dst_all[eidx_t]])
@@ -606,7 +527,7 @@ def estimate_graph_ep_all_orders(
                             X0_lists[order][layer_idx].append(s0.detach())
                             X1_lists[order][layer_idx].append(s1.detach())
 
-                    V_val = _embedding_variance(stoch_states[layer_idx + 1]).detach()
+                    V_val = _embedding_variance(states[layer_idx + 1]).detach()
                     V_sums[layer_idx] += float(V_val.to(device="cpu").item())
 
         V_per_layer = (V_sums / float(cfg.num_trajectories)).tolist()
@@ -622,9 +543,9 @@ def estimate_graph_ep_all_orders(
                 per_layer_stats[order].append(ep)
 
     else:
+        # Estimate expected embedding variance per layer once (independent of observable order).
         V_per_layer = _estimate_expected_V_per_layer(
             model=model,
-            graph=graph,
             x=x,
             edge_index=edge_index,
             n_layers=n_layers,
@@ -643,17 +564,10 @@ def estimate_graph_ep_all_orders(
 
                 for t in range(cfg.num_trajectories):
                     torch.manual_seed(cfg.seed + 10_000 * layer_idx + 17 * t)
-                    stoch_states = _get_states(
-                        model=model,
-                        graph=graph,
-                        cfg=cfg,
-                        stochastic=True,
-                        x=x,
-                        edge_index=edge_index,
-                    )
+                    _, stoch_states = model(x, edge_index, return_states=True, stochastic=True)
                     h0 = stoch_states[layer_idx]
                     h1 = stoch_states[layer_idx + 1]
-                    proj0, proj1 = None, None
+                    proj0, proj1 = proj_pairs[layer_idx]
                     z0 = h0 if proj0 is None else h0 @ proj0
                     z1 = h1 if proj1 is None else h1 @ proj1
 
@@ -668,7 +582,10 @@ def estimate_graph_ep_all_orders(
                         rng = rngs[order]
                         if order in ("node", "1hop", "2hop"):
                             n = int(z0.size(0))
-                            idx = _sample_indices(rng, n, cfg.max_nodes_per_traj)
+                            if cfg.max_nodes_per_traj is not None and cfg.max_nodes_per_traj < n:
+                                idx = rng.choice(n, size=cfg.max_nodes_per_traj, replace=False)
+                            else:
+                                idx = np.arange(n)
                             idx_t = torch.as_tensor(idx, device=z0.device, dtype=torch.long)
 
                             if order == "node":
@@ -682,7 +599,10 @@ def estimate_graph_ep_all_orders(
                                 s1 = _concat(z1[idx_t], m11[idx_t], m21[idx_t])
                         elif order == "edge":
                             m = int(src_all.numel())
-                            eidx = _sample_indices(rng, m, cfg.max_edges_per_traj)
+                            if cfg.max_edges_per_traj is not None and cfg.max_edges_per_traj < m:
+                                eidx = rng.choice(m, size=cfg.max_edges_per_traj, replace=False)
+                            else:
+                                eidx = np.arange(m)
                             eidx_t = torch.as_tensor(eidx, device=z0.device, dtype=torch.long)
                             s0 = _concat(z0[src_all[eidx_t]], z0[dst_all[eidx_t]])
                             s1 = _concat(z1[src_all[eidx_t]], z1[dst_all[eidx_t]])

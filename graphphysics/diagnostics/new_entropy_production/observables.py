@@ -1,17 +1,19 @@
 # This file contains code to calculate observables and define data-based objectives
 
-import os
-import functools
+import os, functools
 import numpy as np
 
+os.environ["PYTORCH_ENABLE_MPS_FALLBACK"]='1'
+import os
+
 # Must be set before importing torch
-os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
 os.environ["PYTORCH_CUDA_ALLOC_CONF"] = "expandable_segments:True"
 
 import torch
 
-from .utils import numpy_to_torch
-from . import optimizers
+from utils import numpy_to_torch
+import optimizers
+
 def theta_cache(method):
     # A simple cache decorator for class methods that saves only the most recent result.
     # Caches based on the object ID of the 'theta' parameter rather than its value or hash.

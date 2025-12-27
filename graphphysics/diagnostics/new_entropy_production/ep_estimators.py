@@ -3,9 +3,10 @@
 # ============================================================
 
 import numpy as np
-from . import optimizers
-from . import linear_solvers
-from .utils import numpy_to_torch, torch_to_numpy
+
+import optimizers
+import linear_solvers
+from utils import numpy_to_torch, torch_to_numpy
 
 
 
@@ -13,17 +14,8 @@ from .utils import numpy_to_torch, torch_to_numpy
 # Entropy production (EP) estimation methods
 # ============================================================
 
-def get_EP_Estimate(
-    data,
-    validation=None,
-    test=None,
-    verbose=0,
-    max_iter=None,
-    optimizer="GradientDescentBB",
-    optimizer_kwargs=None,
-    clip_objective=True,
-    **kwargs,
-):
+def get_EP_Estimate(data, validation=None, test=None, verbose=0, max_iter=None,
+                    optimizer='GradientDescentBB', optimizer_kwargs=None, clip_objective=True, **kwargs):
     # This is the main function used to estimate the EP from data
     #
     # Arguments:

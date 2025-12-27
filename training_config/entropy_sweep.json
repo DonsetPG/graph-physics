@@ -1,0 +1,61 @@
+{
+  "dataset": {
+    "extension": "xdmf",
+    "xdmf_folder": "dataset/train",
+    "meta_path": "dataset_config/aneurysm_meta.json",
+    "targets": ["Vitesse"],
+    "khop": 1,
+    "new_edges_ratio": 0
+  },
+  "model": {
+    "type": "transformer",
+    "message_passing_num": 1,
+    "hidden_size": 16,
+    "node_input_size": 14,
+    "output_size": 3,
+    "edge_input_size": 0,
+    "num_heads": 4
+  },
+  "index": {
+    "feature_index_start": 0,
+    "feature_index_end": 14,
+    "output_index_start": 0,
+    "output_index_end": 3,
+    "node_type_index": 14
+  },
+  "diagnostics": {
+    "entropy_production": {
+      "enabled": true,
+      "num_batches": 1,
+      "orders": ["edge"],
+      "noise_std": 1,
+      "num_trajectories": 256,
+      "proj_dim": 8,
+      "estimator": "MaxEnt",
+      "optimizer": "Adam",
+      "max_iter": 500,
+      "max_nodes_per_traj": -1,
+      "max_edges_per_traj": -1,
+      "standardize": true,
+      "seed": 0,
+      "observable": "antisym",
+      "clip_objective": false,
+      "share_trajectories_across_layers": true,
+      "offload_to_cpu": null,
+      "layer_modules_attr": "processor_list"
+    }
+  },
+  "transformations": {
+    "preprocessing": {
+      "noise": [10.0, 10.0, 1.0, 10.0, 10.0, 1.0],
+      "noise_index_start": [0, 1, 2, 5, 6, 7],
+      "noise_index_end": [1, 2, 3, 6, 7, 8],
+      "masking": 0
+    },
+    "world_pos_parameters": {
+      "use": false,
+      "world_pos_index_start": 0,
+      "world_pos_index_end": 3
+    }
+  }
+}

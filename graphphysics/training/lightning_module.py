@@ -526,8 +526,7 @@ class LightningModule(L.LightningModule):
           diagnostics:
             entropy_production:
               enabled: true
-              noise_std: 0.01
-              num_trajectories: 16
+              num_trajectories: 32
               proj_dim: 8
               orders: ["node", "edge", "1hop", "2hop"]
               max_nodes_per_traj: 1024
@@ -535,6 +534,10 @@ class LightningModule(L.LightningModule):
               estimator: "MaxEnt"        # or "MTUR"
               optimizer: "Adam"
               max_iter: 500
+              observable: "antisym"      # or "non_antisym"
+              clip_objective: true
+              share_trajectories_across_layers: true
+              offload_to_cpu: null
 
         Notes:
         - Runs only on global rank 0.
@@ -582,20 +585,24 @@ class LightningModule(L.LightningModule):
 
         # --- configure EP estimation ---
         cfg = EPEstimationConfig(
-            num_trajectories=int(ep_cfg.get("num_trajectories", 64)),
-            max_nodes_per_traj=ep_cfg.get("max_nodes_per_traj", -1),
-            max_edges_per_traj=ep_cfg.get("max_edges_per_traj", -1),
+            num_trajectories=int(ep_cfg.get("num_trajectories", 32)),
+            max_nodes_per_traj=ep_cfg.get("max_nodes_per_traj", 1024),
+            max_edges_per_traj=ep_cfg.get("max_edges_per_traj", 2048),
             seed=int(ep_cfg.get("seed", 0)),
-            noise_std=float(ep_cfg.get("noise_std", 0.1)),
-            proj_dim=int(ep_cfg.get("proj_dim", 64)),
+            proj_dim=int(ep_cfg.get("proj_dim", 8)),
             standardize=bool(ep_cfg.get("standardize", True)),
+            observable=str(ep_cfg.get("observable", "antisym")),
             estimator=str(ep_cfg.get("estimator", "MaxEnt")),
             optimizer=str(ep_cfg.get("optimizer", "Adam")),
             max_iter=int(ep_cfg.get("max_iter", 500)),
             verbose=int(ep_cfg.get("verbose", 0)),
+            clip_objective=bool(ep_cfg.get("clip_objective", True)),
             optimizer_kwargs=ep_cfg.get("optimizer_kwargs", None),
             val_fraction=float(ep_cfg.get("val_fraction", 0.1)),
             test_fraction=float(ep_cfg.get("test_fraction", 0.1)),
+            offload_to_cpu=ep_cfg.get("offload_to_cpu", None),
+            share_trajectories_across_layers=bool(ep_cfg.get("share_trajectories_across_layers", True)),
+            noise_std=float(ep_cfg.get("noise_std", 0.0)),
             layer_modules_attr=ep_cfg.get("layer_modules_attr", None),
         )
 
@@ -667,7 +674,7 @@ class LightningModule(L.LightningModule):
                     res_avg["V_det_final"] = float(res_avg["V_det_per_layer"][-1]) if len(res_avg["V_det_per_layer"]) else res_avg.get("V_det_final")
 
                 # Scalar oversmoothing (average across graphs)
-                for k in ["V_input", "V_final", "V_det_final"]:
+                for k in ["V0", "V_input", "V_final", "V_det_final"]:
                     if k in base_res and base_res[k] is not None:
                         try:
                             res_avg[k] = float(_np.mean([r[order][k] for r in results_list]))
@@ -703,11 +710,14 @@ class LightningModule(L.LightningModule):
         # Oversmoothing metrics are order-independent; use the first order (if any)
         if len(results) > 0:
             any_order = next(iter(results.keys()))
-            V_input = results[any_order].get("V_input", None)
+            V0 = results[any_order].get("V0", None)
+            V_input = results[any_order].get("V_input", V0)
             V_per_layer = results[any_order].get("V_per_layer", None)
             V_final = results[any_order].get("V_final", None)
             V_det_per_layer = results[any_order].get("V_det_per_layer", None)
             V_det_final = results[any_order].get("V_det_final", None)
+            if V0 is not None:
+                metrics["oversmoothing/V0"] = float(V0)
             if V_input is not None:
                 metrics["oversmoothing/V_input"] = float(V_input)
             if V_final is not None:
