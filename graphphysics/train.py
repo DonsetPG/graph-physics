@@ -28,6 +28,15 @@ warnings.filterwarnings(
 torch.set_float32_matmul_precision("high")
 torch.multiprocessing.set_sharing_strategy("file_system")
 
+
+def _disable_expandable_segments_in_worker(_worker_id: int) -> None:
+    # Avoid CUDA allocator errors when using DataLoader workers.
+    if torch.cuda.is_available():
+        try:
+            torch.cuda.memory._set_allocator_settings("expandable_segments:False")
+        except Exception:
+            pass
+
 FLAGS = flags.FLAGS
 flags.DEFINE_string("project_name", "transformer_EP", "Name of the WandB project")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
@@ -129,6 +138,11 @@ def main(argv):
     )
 
     num_workers = get_num_workers(param=parameters, default_num_workers=num_workers)
+    disable_persistent_workers = os.environ.get("GRAPH_PHYSICS_DISABLE_PERSISTENT_WORKERS", "").lower() in (
+        "1",
+        "true",
+        "yes",
+    )
 
     train_dataloader_kwargs = {
         "dataset": train_dataset,
@@ -154,15 +168,19 @@ def main(argv):
         train_dataloader_kwargs.update(
             {
                 "prefetch_factor": prefetch_factor,
-                "persistent_workers": True,
+                "worker_init_fn": _disable_expandable_segments_in_worker,
             }
         )
+        if not disable_persistent_workers:
+            train_dataloader_kwargs["persistent_workers"] = True
         valid_dataloader_kwargs.update(
             {
                 "prefetch_factor": prefetch_factor,
-                "persistent_workers": True,
+                "worker_init_fn": _disable_expandable_segments_in_worker,
             }
         )
+        if not disable_persistent_workers:
+            valid_dataloader_kwargs["persistent_workers"] = True
 
     # Create DataLoaders
     train_dataloader = DataLoader(**train_dataloader_kwargs)
@@ -250,24 +268,39 @@ def main(argv):
         limit_val_batches=2,
     )
 
-    # Resuming training from a checkpoint
-    if model_path and os.path.isfile(model_path) and resume_training:
-        logger.success("Resuming training")
-        trainer.fit(
-            model=lightning_module,
-            train_dataloaders=train_dataloader,
-            val_dataloaders=valid_dataloader,
-            ckpt_path=model_path,
-        )
-    else:
-        logger.success("Starting training")
-        trainer.fit(
-            model=lightning_module,
-            train_dataloaders=train_dataloader,
-            val_dataloaders=valid_dataloader,
-        )
+    try:
+        # Resuming training from a checkpoint
+        if model_path and os.path.isfile(model_path) and resume_training:
+            logger.success("Resuming training")
+            trainer.fit(
+                model=lightning_module,
+                train_dataloaders=train_dataloader,
+                val_dataloaders=valid_dataloader,
+                ckpt_path=model_path,
+            )
+            import sys
+            sys.exit(0)
+        else:
+            logger.success("Starting training")
+            trainer.fit(
+                model=lightning_module,
+                train_dataloaders=train_dataloader,
+                val_dataloaders=valid_dataloader,
+            )
+            import sys
+            sys.exit(0)
+    finally:
+        # Ensure wandb terminates so the process can exit cleanly.
+        try:
+            wandb.finish()
+        except Exception:
+            pass
+        import sys
+        sys.exit(0)
 
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")
     app.run(main)
+    import sys
+    sys.exit(0)

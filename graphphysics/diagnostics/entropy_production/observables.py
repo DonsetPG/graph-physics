@@ -75,7 +75,18 @@ class DatasetBase(optimizers.Objective):
         self.device = torch.get_default_device()  # Default device for torch operations
 
     def initialize_parameters(self, theta):  # This method is used to initialize the parameters variable
-        return numpy_to_torch(theta, device=self.device)
+        return self._theta(theta)
+
+    def _theta(self, theta: object) -> torch.Tensor:
+        """Coerce parameters to this dataset's device and dtype."""
+        dtype = None
+        try:
+            gm = self.g_mean
+            if isinstance(gm, torch.Tensor):
+                dtype = gm.dtype
+        except Exception:
+            dtype = None
+        return numpy_to_torch(theta, device=self.device, dtype=dtype)
     
 
     # We should implement the following methods
@@ -93,7 +104,7 @@ class DatasetBase(optimizers.Objective):
         if self.nsamples == 0:
             return float('nan')
 
-        theta = numpy_to_torch(theta)
+        theta = self._theta(theta)
 
         th_g_max, norm_const, _ = self._get_tilted_values(theta)
         log_Z                   = torch.log(norm_const) + th_g_max
@@ -262,7 +273,7 @@ class Dataset(DatasetBase):
     
     # @theta_cache
     def _get_tilted_values(self, theta):  # We cache some slow calculations, e.g., of normalization constants and weight
-        theta = numpy_to_torch(theta)
+        theta = self._theta(theta)
         if self.rev_g_samples is not None:
             th_g = self.rev_g_samples @ theta
         else:
@@ -282,7 +293,7 @@ class Dataset(DatasetBase):
         if self.nsamples == 0:
             return theta * float('nan')
 
-        theta = numpy_to_torch(theta)
+        theta = self._theta(theta)
         _, norm_const, exp_tilt = self._get_tilted_values(theta)
         # the first value (th_g_max) doesn't matter because it is cancelled by dividing by the norm_const
         weights = exp_tilt / norm_const  
@@ -296,7 +307,7 @@ class Dataset(DatasetBase):
         if self.nsamples == 0:
             return torch.zeros((self.nobservables, self.nobservables), dtype=theta.dtype, device=theta.device) * float('nan')
 
-        theta   = numpy_to_torch(theta)
+        theta   = self._theta(theta)
         _, norm_const, exp_tilt = self._get_tilted_values(theta)
         mean    = self.get_tilted_mean(theta)
         weights = exp_tilt / norm_const
@@ -354,7 +365,7 @@ class CrossCorrelations1(DatasetStateSamplesBase):
 
     # @theta_cache
     def _get_tilted_values(self, theta):
-        theta = numpy_to_torch(theta)
+        theta = self._theta(theta)
 
         triu = self.triu_indices
 
@@ -402,7 +413,7 @@ class CrossCorrelations2(CrossCorrelations1):
 
     # @theta_cache
     def _get_tilted_values(self, theta):
-        theta = numpy_to_torch(theta)
+        theta = self._theta(theta)
 
         # 1. θᵀg_k 
         theta2d = torch.reshape(theta, (self.N, self.N))
