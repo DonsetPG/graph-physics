@@ -9,7 +9,7 @@ from loguru import logger
 from torch_geometric.data import Data
 
 from graphphysics.dataset.dataset import BaseDataset
-from graphphysics.utils.torch_graph import meshdata_to_graph
+from graphphysics.utils.torch_graph import meshdata_to_graph, create_subgraphs
 
 
 class XDMFDataset(BaseDataset):
@@ -27,6 +27,8 @@ class XDMFDataset(BaseDataset):
         switch_to_val: bool = False,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
+        use_partitioning: bool = False,
+        num_partitions: int = 1,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -37,6 +39,8 @@ class XDMFDataset(BaseDataset):
             new_edges_ratio=new_edges_ratio,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
         )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -199,6 +203,20 @@ class XDMFDataset(BaseDataset):
         del graph.next_data
         del graph.previous_data
         graph.traj_index = traj_index
+
+        # TODO: not working with masking and selected_indices yet
+        if self.use_partitioning:
+            traj_index, _ = self.get_traj_frame(index=index)
+            subgraph_idx = index % self.num_partitions
+
+            if traj_index not in self.partitions_nodes_cache:
+                loader, node_ids = create_subgraphs(graph, self.num_partitions)
+                self.partitions_nodes_cache[traj_index] = node_ids
+
+            partitioned_node_ids = self.partitions_nodes_cache[traj_index][
+                subgraph_idx
+            ].to(self.device)
+            graph = self._apply_partition(graph, partitioned_node_ids)
 
         if selected_indices is not None:
             return graph, selected_indices

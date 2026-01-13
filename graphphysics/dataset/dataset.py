@@ -1,12 +1,12 @@
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple
+from typing import Any, Callable, Dict, Optional, Tuple, List
 
 import torch
 import torch_geometric.transforms as T
 from loguru import logger
 from torch_geometric.data import Data, Dataset
-from torch_geometric.utils import add_random_edge
+from torch_geometric.utils import add_random_edge, subgraph
 
 from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
@@ -27,6 +27,8 @@ class BaseDataset(Dataset, ABC):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         world_pos_parameters: Optional[dict] = None,
+        use_partitioning: bool = False,
+        num_partitions: int = 1,
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -61,6 +63,11 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
+        self.use_partitioning = use_partitioning
+        self.num_partitions = num_partitions
+        self.partitions_nodes_cache: Dict[int, List[torch.Tensor]] = (
+            {}
+        )  # Cache for partitioned edge indices per trajectory
 
         self.world_pos_index_start = None
         self.world_pos_index_end = None
@@ -88,12 +95,17 @@ class BaseDataset(Dataset, ABC):
         Returns:
             Tuple[int, int]: A tuple containing the trajectory number and the frame number within that trajectory.
         """
+        if self.use_partitioning:
+            index = index // self.num_partitions
         traj = index // (self.trajectory_length - 1)
         frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
         return traj, frame
 
     def __len__(self) -> int:
-        return self.size_dataset * (self.trajectory_length - 1)
+        num_frames = self.size_dataset * (self.trajectory_length - 1)
+        if self.use_partitioning:
+            return num_frames * self.num_partitions
+        return num_frames
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
@@ -185,6 +197,37 @@ class BaseDataset(Dataset, ABC):
                     self.khop_edge_index_cache[traj_index] = khop_edge_index.cpu()
                     graph.edge_index = khop_edge_index.to(graph.edge_index.device)
         return graph
+
+    def _apply_partition(self, graph: Data, node_ids: torch.Tensor):
+        # TODO: preserve face, tetra is not needed (I think?)
+        node_ids, _ = node_ids.sort()
+        x = graph.x[node_ids]
+        y = graph.y[node_ids]
+        pos = graph.pos[node_ids]
+
+        edge_index, edge_attr = subgraph(
+            subset=node_ids,
+            edge_index=graph.edge_index,
+            edge_attr=graph.edge_attr,
+            relabel_nodes=True,
+            num_nodes=graph.num_nodes
+        )
+
+        sub_graph = Data(
+                x=x,
+                y=y,
+                pos=pos,
+                edge_index=edge_index,
+                edge_attr=edge_attr,
+                # face=face,
+                # tetra=tetra,
+                num_nodes=x.size(0),
+                id=graph.id,
+                target_dt=graph.target_dt,
+                previous_dt=graph.previous_dt,
+                traj_index=graph.traj_index,
+            )
+        return sub_graph
 
     def _may_remove_edges_attr(self, graph: Data) -> Data:
         """Removes edge attributes if they are not needed.

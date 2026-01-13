@@ -6,6 +6,7 @@ import torch
 import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
+from torch_geometric.loader import ClusterData, ClusterLoader, LinkNeighborLoader
 
 
 def compute_k_hop_edge_index(
@@ -100,6 +101,47 @@ def compute_k_hop_graph(
         khop_mesh_graph = edge_feature_computer(khop_mesh_graph).to(device)
 
     return khop_mesh_graph
+
+
+def create_subgraphs(
+    graph: Data, num_partitions: int, partition_method: str = "metis"
+):
+    """
+    Create subgraphs from the input graph for partitioning.
+
+    Parameters:
+        graph (Data): The input graph data.
+        num_partitions (int): The number of partitions to create.
+        partition_method (str): The method to use for partitioning ('metis' or 'linkneighbor').
+
+    Returns:
+        Loader: A DataLoader for the partitioned subgraphs.
+        List[Tensor]: A list of tensors containing the node IDs for each partition.
+    """
+    if partition_method not in ["metis", "random"]:
+        raise ValueError(
+            f"Unsupported partition method: {partition_method}. Supported methods are 'metis' and 'linkneighbor'."
+        )
+    if partition_method == "metis":
+        cluster = ClusterData(graph, num_parts=num_partitions, log=False)
+        loader = ClusterLoader(cluster, batch_size=1, shuffle=False)
+        partition = cluster.partition
+        partitioned_node_ids = [
+            partition.node_perm[partition.partptr[i] : partition.partptr[i + 1]].cpu()
+            for i in range(num_partitions)
+        ]
+        return loader, partitioned_node_ids
+
+    # elif partition_method == "linkneighbor":
+    #     # TODO: change batch size for graph.pos.shape[0] / num_partitions
+    #     # TODO: need a way to get original nodes as well
+    #     loader = LinkNeighborLoader(
+    #         graph,
+    #         num_neighbors=[-1] * 1,
+    #         batch_size=1000,
+    #         edge_label_index=graph.edge_index,
+    #     )
+    # return loader
 
 
 def meshdata_to_graph(
@@ -229,7 +271,8 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
 
     This function takes a graph represented in PyTorch Geometric's `Data` format and
     converts it into a meshio Mesh object. It extracts the positions, faces, and specified
-    node features from the graph and constructs a Mesh object.
+    node features from the graph and constructs a Mesh object. If the graph has no face or
+    tetra attributes, it will use the edge_index to create a line mesh.
 
     Parameters:
         - graph (Data): The graph to convert, represented as a PyTorch Geometric `Data` object.
@@ -252,20 +295,29 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
         for f, indx in node_features_mapping.items()
     }
 
-    cells = graph.face.detach().cpu().numpy()
-    if graph.pos.shape[1] == 2:
-        extra_shape = 3
-        cells_type = "triangle"
-    elif graph.pos.shape[1] == 3:
-        extra_shape = 4
-        cells_type = "tetra"
-    else:
-        raise ValueError(
-            f"Graph Pos does not have the right shape. Expected shape[1] to be 2 or 3. Got {graph.pos.shape[1]}"
-        )
+    if hasattr(graph, "face") and graph.face is not None:
+        cells = graph.face.detach().cpu().numpy()
+        if graph.pos.shape[1] == 2:
+            extra_shape = 3
+            cells_type = "triangle"
+        elif graph.pos.shape[1] == 3:
+            extra_shape = 4
+            cells_type = "tetra"
+        else:
+            raise ValueError(
+                f"Graph Pos does not have the right shape. Expected shape[1] to be 2 or 3. Got {graph.pos.shape[1]}"
+            )
+        if cells.shape[-1] != extra_shape:
+            cells = cells.T
 
-    if cells.shape[-1] != extra_shape:
-        cells = cells.T
+    elif hasattr(graph, "tetra") and graph.tetra is not None:
+        cells = graph.tetra.detach().cpu().numpy()
+        cells_type = "tetra"
+        if cells.shape[-1] != 4:
+            cells = cells.T
+    else:
+        cells = graph.edge_index.detach().cpu().numpy().T
+        cells_type = "line"
 
     return meshio.Mesh(
         graph.pos.detach().cpu().numpy(),

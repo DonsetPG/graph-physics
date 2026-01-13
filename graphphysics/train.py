@@ -58,6 +58,12 @@ flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
+flags.DEFINE_bool(
+    "use_partitioning", True, "Whether to use graph partitioning"
+)
+flags.DEFINE_integer(
+    "num_partitions", 5, "Number of partitions for graph partitioning"
+)
 
 
 def main(argv):
@@ -93,6 +99,8 @@ def main(argv):
     use_previous_data = FLAGS.use_previous_data
     previous_data_start = FLAGS.previous_data_start
     previous_data_end = FLAGS.previous_data_end
+    use_partitioning = FLAGS.use_partitioning
+    num_partitions = FLAGS.num_partitions
 
     seed_everything(FLAGS.seed, workers=True)
 
@@ -110,6 +118,8 @@ def main(argv):
         preprocessing=train_preprocessing,
         use_edge_feature=use_edge_feature,
         use_previous_data=use_previous_data,
+        use_partitioning=use_partitioning,
+        num_partitions=num_partitions
     )
 
     val_preprocessing = get_preprocessing(
