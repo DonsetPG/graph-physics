@@ -28,7 +28,6 @@ class BaseDataset(Dataset, ABC):
         use_previous_data: bool = False,
         world_pos_parameters: Optional[dict] = None,
         use_partitioning: bool = False,
-        num_partitions: int = 1,
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -64,7 +63,6 @@ class BaseDataset(Dataset, ABC):
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
         self.use_partitioning = use_partitioning
-        self.num_partitions = num_partitions
         self.partitions_nodes_cache: Dict[int, List[torch.Tensor]] = (
             {}
         )  # Cache for partitioned edge indices per trajectory
@@ -77,35 +75,9 @@ class BaseDataset(Dataset, ABC):
             )
             self.world_pos_index_end = world_pos_parameters.get("world_pos_index_end")
 
-    @property
     @abstractmethod
-    def size_dataset(self) -> int:
-        """Should return the number of trajectories in the dataset."""
-
-    def get_traj_frame(self, index: int) -> Tuple[int, int]:
-        """Calculate the trajectory and frame number based on the given index.
-
-        This method divides the dataset into trajectories and frames. It calculates
-        which trajectory and frame the given index corresponds to, considering the
-        length of each trajectory.
-
-        Parameters:
-            index (int): The index of the item in the dataset.
-
-        Returns:
-            Tuple[int, int]: A tuple containing the trajectory number and the frame number within that trajectory.
-        """
-        if self.use_partitioning:
-            index = index // self.num_partitions
-        traj = index // (self.trajectory_length - 1)
-        frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
-        return traj, frame
-
     def __len__(self) -> int:
-        num_frames = self.size_dataset * (self.trajectory_length - 1)
-        if self.use_partitioning:
-            return num_frames * self.num_partitions
-        return num_frames
+        """Should return the number of samples in the dataset."""
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:

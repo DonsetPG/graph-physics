@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 
 import wandb
 from graphphysics.external.aneurysm import build_features
-from graphphysics.training.callback import LogPyVistaPredictionsCallback
+# from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
@@ -59,10 +59,10 @@ flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
 flags.DEFINE_bool(
-    "use_partitioning", True, "Whether to use graph partitioning"
+    "use_partitioning", False, "Whether to use graph partitioning"
 )
 flags.DEFINE_integer(
-    "num_partitions", 5, "Number of partitions for graph partitioning"
+    "num_partitions", 1, "Number of partitions for graph partitioning"
 )
 
 
@@ -257,6 +257,7 @@ def main(argv):
         ],
         log_every_n_steps=100,
         gradient_clip_val=1.0,
+        # accumulate_grad_batches=num_partitions
     )
 
     # Resuming training from a checkpoint

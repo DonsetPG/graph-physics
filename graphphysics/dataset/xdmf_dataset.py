@@ -1,6 +1,8 @@
+import math
 import os
 import random
-from typing import Callable, List, Optional, Tuple, Union
+from bisect import bisect_right
+from typing import Callable, List, Optional, Tuple, Union, Dict
 
 import meshio
 import numpy as np
@@ -25,10 +27,11 @@ class XDMFDataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        use_partitioning: bool = False,
+        num_partitions: Optional[int] = None,
+        max_nodes_per_partition: Optional[int] = None,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
-        use_partitioning: bool = False,
-        num_partitions: int = 1,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -40,8 +43,22 @@ class XDMFDataset(BaseDataset):
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
             use_partitioning=use_partitioning,
-            num_partitions=num_partitions,
         )
+        if use_partitioning:
+            if num_partitions is not None and max_nodes_per_partition is not None:
+                raise ValueError(
+                    "Please specify either 'num_partitions' or 'max_nodes_per_partition', not both."
+                )
+            if num_partitions is None and max_nodes_per_partition is None:
+                raise ValueError(
+                    "If 'use_partitioning' is True, please specify either 'num_partitions' or 'max_nodes_per_partition'."
+                )
+
+        self.num_partitions = num_partitions
+        self.max_nodes_per_partition = max_nodes_per_partition
+        self.partitions_edge_index_cache: Dict[int, List[torch.Tensor]] = (
+            {}
+        )  # Cache for partitioned edge indices per trajectory
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.type = "xdmf"
@@ -69,12 +86,61 @@ class XDMFDataset(BaseDataset):
             for f in os.listdir(xdmf_folder)
             if os.path.isfile(os.path.join(xdmf_folder, f)) and f.endswith(".xdmf")
         ]
-        self._size_dataset: int = len(self.file_paths)
+        self._build_index_map()
 
-    @property
-    def size_dataset(self) -> int:
-        """Returns the number of trajectories in the dataset."""
+    def __len__(self) -> int:
         return self._size_dataset
+
+    def _build_index_map(self):
+        """
+        Builds a map from a flat index to trajectory, frame, and partition indices.
+        This is necessary because trajectories can have different numbers of nodes,
+        leading to a variable number of partitions per trajectory.
+        """
+        self.partitions_per_trajectory: Dict[int, int] = {}
+        self.frames_per_trajectory: Dict[int, int] = {}
+        self.cumulative_samples: List[int] = [0]
+        self._size_dataset = 0
+
+        for traj_index, file_path in enumerate(self.file_paths):
+            with meshio.xdmf.TimeSeriesReader(file_path) as reader:
+                points, _ = reader.read_points_cells()
+                num_nodes = len(points)
+                num_steps = reader.num_steps
+
+            if self.use_partitioning:
+                if self.num_partitions is not None:
+                    num_partitions = self.num_partitions
+                else:
+                    num_partitions = math.ceil(num_nodes / self.max_nodes_per_partition)
+            else:
+                num_partitions = 1
+
+            self.partitions_per_trajectory[traj_index] = num_partitions
+            self.frames_per_trajectory[traj_index] = num_steps
+
+            num_valid_frames = num_steps - self.random_next - self.random_prev
+            if num_valid_frames < 0:
+                logger.warning(
+                    f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."
+                )
+                num_valid_frames = 0
+
+            total_samples_in_traj = num_valid_frames * num_partitions
+            self._size_dataset += total_samples_in_traj
+            self.cumulative_samples.append(self._size_dataset)
+
+    def _get_indices(self, index: int) -> Tuple[int, int, int]:
+        """
+        From a global sample index, find the corresponding trajectory, frame, and subgraph indices.
+        """
+        traj_index = bisect_right(self.cumulative_samples, index) - 1
+        local_index = index - self.cumulative_samples[traj_index]
+        num_partitions = self.partitions_per_trajectory[traj_index]
+        frame_in_traj = local_index // num_partitions
+        subgraph_idx = local_index % num_partitions
+        frame = frame_in_traj + int(self.use_previous_data)
+        return traj_index, frame, subgraph_idx
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.
@@ -91,15 +157,13 @@ class XDMFDataset(BaseDataset):
             Union[Data, Tuple[Data, torch.Tensor]]: A graph representation of the specified frame in the trajectory,
             optionally along with selected indices if masking is applied.
         """
-        traj_index, frame = self.get_traj_frame(index=index)
+        traj_index, frame, subgraph_idx = self._get_indices(index)
         xdmf_file = self.file_paths[traj_index]
         mesh_id = os.path.splitext(os.path.basename(xdmf_file))[0].rsplit("_", 1)[-1]
 
-        # Fetch index for previous_data and target
         _target_data_index = random.randint(1, self.random_next)
         _previous_data_index = random.randint(1, self.random_prev)
 
-        # Read XDMF file
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
             num_steps = reader.num_steps
 
@@ -206,11 +270,9 @@ class XDMFDataset(BaseDataset):
 
         # TODO: not working with masking and selected_indices yet
         if self.use_partitioning:
-            traj_index, _ = self.get_traj_frame(index=index)
-            subgraph_idx = index % self.num_partitions
-
             if traj_index not in self.partitions_nodes_cache:
-                loader, node_ids = create_subgraphs(graph, self.num_partitions)
+                num_partitions = self.partitions_per_trajectory[traj_index]
+                loader, node_ids = create_subgraphs(graph, num_partitions)
                 self.partitions_nodes_cache[traj_index] = node_ids
 
             partitioned_node_ids = self.partitions_nodes_cache[traj_index][
