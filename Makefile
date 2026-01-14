@@ -12,7 +12,7 @@ test: ## Run all tests
 	@python3 -m pytest tests/
 
 test-gp: ## Run all tests
-	@python3 -m pytest tests/graphphysics/
+	@GRAPH_PHYSICS_ASSUME_NO_DGL=1 python3 -m pytest tests/graphphysics/
 
 test-jp: ## Run all tests
 	@python3 -m pytest tests/jraphphysics/
