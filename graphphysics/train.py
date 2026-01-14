@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 
 import wandb
 from graphphysics.external.aneurysm import build_features
-# from graphphysics.training.callback import LogPyVistaPredictionsCallback
+from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
@@ -62,7 +62,10 @@ flags.DEFINE_bool(
     "use_partitioning", False, "Whether to use graph partitioning"
 )
 flags.DEFINE_integer(
-    "num_partitions", 1, "Number of partitions for graph partitioning"
+    "num_partitions", None, "Number of partitions for graph partitioning"
+)
+flags.DEFINE_integer(
+    "max_nodes_per_partition", None, "Maximum number of nodes per partition"
 )
 
 
@@ -101,6 +104,7 @@ def main(argv):
     previous_data_end = FLAGS.previous_data_end
     use_partitioning = FLAGS.use_partitioning
     num_partitions = FLAGS.num_partitions
+    max_nodes_per_partition = FLAGS.max_nodes_per_partition
 
     seed_everything(FLAGS.seed, workers=True)
 
@@ -119,7 +123,8 @@ def main(argv):
         use_edge_feature=use_edge_feature,
         use_previous_data=use_previous_data,
         use_partitioning=use_partitioning,
-        num_partitions=num_partitions
+        num_partitions=num_partitions,
+        max_nodes_per_partition=max_nodes_per_partition,
     )
 
     val_preprocessing = get_preprocessing(

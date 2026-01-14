@@ -1,6 +1,7 @@
 import json
 from abc import ABC, abstractmethod
-from typing import Any, Callable, Dict, Optional, Tuple, List
+from bisect import bisect_right
+from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import torch
 import torch_geometric.transforms as T
@@ -12,6 +13,7 @@ from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
     compute_k_hop_graph,
     get_masked_indexes,
+    create_subgraphs,
 )
 
 
@@ -28,6 +30,8 @@ class BaseDataset(Dataset, ABC):
         use_previous_data: bool = False,
         world_pos_parameters: Optional[dict] = None,
         use_partitioning: bool = False,
+        num_partitions: Optional[int] = None,
+        max_nodes_per_partition: Optional[int] = None,
     ):
         with open(meta_path, "r") as fp:
             meta = json.load(fp)
@@ -63,9 +67,25 @@ class BaseDataset(Dataset, ABC):
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
         self.use_partitioning = use_partitioning
-        self.partitions_nodes_cache: Dict[int, List[torch.Tensor]] = (
+
+        if use_partitioning:
+            if num_partitions is not None and max_nodes_per_partition is not None:
+                raise ValueError(
+                    "Specify either 'num_partitions' or 'max_nodes_per_partition', not both."
+                )
+            if num_partitions is None and max_nodes_per_partition is None:
+                raise ValueError(
+                    "If 'use_partitioning' is True, specify either 'num_partitions' or 'max_nodes_per_partition'."
+                )
+
+        self.num_partitions = num_partitions
+        self.max_nodes_per_partition = max_nodes_per_partition
+        self.partitions_node_ids_cache: Dict[int, List[torch.Tensor]] = (
             {}
         )  # Cache for partitioned edge indices per trajectory
+        self.partitions_per_trajectory: Dict[int, int] = {}
+        self.cumulative_samples: List[int] = [0]
+        self._size_dataset = 0
 
         self.world_pos_index_start = None
         self.world_pos_index_end = None
@@ -75,9 +95,25 @@ class BaseDataset(Dataset, ABC):
             )
             self.world_pos_index_end = world_pos_parameters.get("world_pos_index_end")
 
-    @abstractmethod
     def __len__(self) -> int:
-        """Should return the number of samples in the dataset."""
+        return self._size_dataset
+
+    @abstractmethod
+    def _build_index_map(self):
+        """Abstract method to build the index map for the dataset."""
+        raise NotImplementedError
+
+    def _get_indices(self, index: int) -> Tuple[int, int, int]:
+        """
+        From a global sample index, find the corresponding trajectory, frame, and subgraph indices.
+        """
+        traj_index = bisect_right(self.cumulative_samples, index) - 1
+        local_index = index - self.cumulative_samples[traj_index]
+        num_partitions = self.partitions_per_trajectory[traj_index]
+        frame_in_traj = local_index // num_partitions
+        subgraph_idx = local_index % num_partitions
+        frame = frame_in_traj + int(self.use_previous_data)
+        return traj_index, frame, subgraph_idx
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
@@ -200,6 +236,30 @@ class BaseDataset(Dataset, ABC):
                 traj_index=graph.traj_index,
             )
         return sub_graph
+
+    def _get_partition(self, graph, traj_index, subgraph_idx):
+        """
+        Gets the partitioned subgraph for a specific trajectory and subgraph index.
+
+        Parameters:
+            graph (Data): The input graph data.
+            traj_index (int): The index of the trajectory.
+            subgraph_idx (int): The index of the subgraph.
+
+        Returns:
+            Data: The partitioned subgraph.
+        """
+        if traj_index not in self.partitions_node_ids_cache:
+            num_partitions = self.partitions_per_trajectory[traj_index]
+            loader, node_ids = create_subgraphs(graph, num_partitions)
+            self.partitions_node_ids_cache[traj_index] = node_ids
+
+        partitioned_node_ids = self.partitions_node_ids_cache[traj_index][
+            subgraph_idx
+        ].to(self.device)
+        graph = self._apply_partition(graph, partitioned_node_ids)
+
+        return graph
 
     def _may_remove_edges_attr(self, graph: Data) -> Data:
         """Removes edge attributes if they are not needed.

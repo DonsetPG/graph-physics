@@ -1,8 +1,7 @@
 import math
 import os
 import random
-from bisect import bisect_right
-from typing import Callable, List, Optional, Tuple, Union, Dict
+from typing import Callable, Dict, List, Optional, Tuple, Union
 
 import meshio
 import numpy as np
@@ -11,7 +10,7 @@ from loguru import logger
 from torch_geometric.data import Data
 
 from graphphysics.dataset.dataset import BaseDataset
-from graphphysics.utils.torch_graph import meshdata_to_graph, create_subgraphs
+from graphphysics.utils.torch_graph import meshdata_to_graph
 
 
 class XDMFDataset(BaseDataset):
@@ -43,22 +42,9 @@ class XDMFDataset(BaseDataset):
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
             use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
+            max_nodes_per_partition=max_nodes_per_partition,
         )
-        if use_partitioning:
-            if num_partitions is not None and max_nodes_per_partition is not None:
-                raise ValueError(
-                    "Please specify either 'num_partitions' or 'max_nodes_per_partition', not both."
-                )
-            if num_partitions is None and max_nodes_per_partition is None:
-                raise ValueError(
-                    "If 'use_partitioning' is True, please specify either 'num_partitions' or 'max_nodes_per_partition'."
-                )
-
-        self.num_partitions = num_partitions
-        self.max_nodes_per_partition = max_nodes_per_partition
-        self.partitions_edge_index_cache: Dict[int, List[torch.Tensor]] = (
-            {}
-        )  # Cache for partitioned edge indices per trajectory
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
         self.type = "xdmf"
@@ -88,20 +74,8 @@ class XDMFDataset(BaseDataset):
         ]
         self._build_index_map()
 
-    def __len__(self) -> int:
-        return self._size_dataset
-
     def _build_index_map(self):
-        """
-        Builds a map from a flat index to trajectory, frame, and partition indices.
-        This is necessary because trajectories can have different numbers of nodes,
-        leading to a variable number of partitions per trajectory.
-        """
-        self.partitions_per_trajectory: Dict[int, int] = {}
         self.frames_per_trajectory: Dict[int, int] = {}
-        self.cumulative_samples: List[int] = [0]
-        self._size_dataset = 0
-
         for traj_index, file_path in enumerate(self.file_paths):
             with meshio.xdmf.TimeSeriesReader(file_path) as reader:
                 points, _ = reader.read_points_cells()
@@ -129,18 +103,6 @@ class XDMFDataset(BaseDataset):
             total_samples_in_traj = num_valid_frames * num_partitions
             self._size_dataset += total_samples_in_traj
             self.cumulative_samples.append(self._size_dataset)
-
-    def _get_indices(self, index: int) -> Tuple[int, int, int]:
-        """
-        From a global sample index, find the corresponding trajectory, frame, and subgraph indices.
-        """
-        traj_index = bisect_right(self.cumulative_samples, index) - 1
-        local_index = index - self.cumulative_samples[traj_index]
-        num_partitions = self.partitions_per_trajectory[traj_index]
-        frame_in_traj = local_index // num_partitions
-        subgraph_idx = local_index % num_partitions
-        frame = frame_in_traj + int(self.use_previous_data)
-        return traj_index, frame, subgraph_idx
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.
@@ -270,15 +232,7 @@ class XDMFDataset(BaseDataset):
 
         # TODO: not working with masking and selected_indices yet
         if self.use_partitioning:
-            if traj_index not in self.partitions_nodes_cache:
-                num_partitions = self.partitions_per_trajectory[traj_index]
-                loader, node_ids = create_subgraphs(graph, num_partitions)
-                self.partitions_nodes_cache[traj_index] = node_ids
-
-            partitioned_node_ids = self.partitions_nodes_cache[traj_index][
-                subgraph_idx
-            ].to(self.device)
-            graph = self._apply_partition(graph, partitioned_node_ids)
+            graph = self._get_partition(graph, traj_index, subgraph_idx)
 
         if selected_indices is not None:
             return graph, selected_indices

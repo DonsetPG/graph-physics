@@ -1,3 +1,4 @@
+import math
 from collections import OrderedDict
 from typing import Callable, Optional, Tuple, Union
 
@@ -35,6 +36,9 @@ class H5Dataset(BaseDataset):
         switch_to_val: bool = False,
         world_pos_parameters: Optional[dict] = None,
         cache_size: int = 8,
+        use_partitioning: bool = False,
+        num_partitions: Optional[int] = None,
+        max_nodes_per_partition: Optional[int] = None,
     ):
         super().__init__(
             meta_path=meta_path,
@@ -46,6 +50,9 @@ class H5Dataset(BaseDataset):
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
             world_pos_parameters=world_pos_parameters,
+            use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
+            max_nodes_per_partition=max_nodes_per_partition,
         )
 
         self.type = "h5"
@@ -75,11 +82,41 @@ class H5Dataset(BaseDataset):
         self._frame_cache: OrderedDict[
             tuple[str, int], Tuple[Data, Optional[torch.Tensor]]
         ] = OrderedDict()
+        self._build_index_map()
 
     @property
     def size_dataset(self) -> int:
         """Returns the number of trajectories in the dataset."""
         return self._size_dataset
+
+    def _build_index_map(self):
+        self.frames_per_trajectory: dict[int, int] = {}
+        with self._get_file_handle() as f:
+            for traj_index, traj_name in enumerate(self.datasets_index):
+                num_nodes = f[traj_name]["mesh_pos"].shape[-2]
+                num_steps = f[traj_name]["mesh_pos"].shape[0]
+
+                if self.use_partitioning:
+                    if self.num_partitions is not None:
+                        num_partitions = self.num_partitions
+                    else:
+                        num_partitions = math.ceil(num_nodes / self.max_nodes_per_partition)
+                else:
+                    num_partitions = 1
+
+                self.partitions_per_trajectory[traj_index] = num_partitions
+                self.frames_per_trajectory[traj_index] = num_steps
+
+                num_valid_frames = num_steps - self.random_next - self.random_prev
+                if num_valid_frames < 0:
+                    logger.warning(
+                        f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."
+                    )
+                    num_valid_frames = 0
+
+                total_samples_in_traj = num_valid_frames * num_partitions
+                self._size_dataset += total_samples_in_traj
+                self.cumulative_samples.append(self._size_dataset)
 
     def _close_file_handles(self):
         for handle in self._file_handles.values():
@@ -211,7 +248,7 @@ class H5Dataset(BaseDataset):
             Union[Data, Tuple[Data, torch.Tensor]]: A graph representation of the specified frame in the trajectory,
             optionally along with selected indices if masking is applied.
         """
-        traj_index, frame = self.get_traj_frame(index=index)
+        traj_index, frame, subgraph_idx = self._get_indices(index)
         traj_number = self.datasets_index[traj_index]
         traj = self._get_trajectory(traj_number)
 
@@ -224,6 +261,10 @@ class H5Dataset(BaseDataset):
             graph.previous_data = previous_features
 
         graph.traj_index = traj_index
+
+        # TODO: not working with masking and selected_indices yet
+        if self.use_partitioning:
+            graph = self._get_partition(graph, traj_index, subgraph_idx)
 
         if selected_indices is not None:
             return graph, selected_indices
