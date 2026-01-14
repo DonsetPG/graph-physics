@@ -1,8 +1,13 @@
+from typing import Optional
+
 import torch
 import torch.nn as nn
 from loguru import logger
 from torch_geometric.data import Data
+from torch_geometric.utils import subgraph
 from torch_geometric.nn import TransformerConv
+import numpy as np
+from scipy.spatial import Delaunay
 
 import graphphysics.models.transolver as Transolver
 from graphphysics.models.layers import (
@@ -12,6 +17,7 @@ from graphphysics.models.layers import (
     build_mlp,
 )
 from graphphysics.models.hierarchical_pooling import DownSampler, UpSampler
+from graphphysics.utils.physical_loss import HyperelasticResidual
 
 try:
     import dgl.sparse as dglsp
@@ -433,9 +439,15 @@ class TransolverProcessor(nn.Module):
 
 class HierarchicalPooler(nn.Module):
     """
+    V-cycle style hierarchical GNN:
 
-    A hierarchical pooling module that downsamples a graph and then applies EncodeProcessDecode. Then upsamples back to the original mesh where. And then goes into the decoder where we apply an EncodeProcessDecode with a less number of message passing.
-
+      - 4 message-passing steps on the fine graph (pre-down).
+      - Downscale (coarsen) the graph.
+      - 10 message-passing steps on the coarse graph.
+      - Upscale (interpolate) back to the fine graph.
+      - 1 message-passing step on the fine graph (post-up).
+      - Residual connection from pre-down fine features to post-up fine features.
+      - Final MLP decoder on the fine graph node features.
     """
 
     def __init__(
@@ -444,78 +456,307 @@ class HierarchicalPooler(nn.Module):
         edge_input_size: int,
         output_size: int,
         hidden_size: int = 128,
-        message_passing_num_down: int = 15,
-        message_passing_num_up: int = 2,
-        ratio: float = 0.25,
+        use_gated_mlp: bool = False,
+        message_passing_num_coarse: int = 5,
+        ratio: float = 0.5,
         k: int = 6,
+        method: str = "fps",
+        is_remeshing: bool = True,
+        pool_node_mask: str = "normal",
     ):
         super().__init__()
 
+        self.node_input_size = node_input_size
         self.edge_input_size = edge_input_size
+        self.hidden_size = hidden_size
+        self.method = method
+        self.is_remeshing = is_remeshing
+        self.pool_node_mask = pool_node_mask
+        self.residual = HyperelasticResidual()
 
+        # Pour Snapshot
+        self._capture_residual = True
+        self._residual_snapshot = None
+        self._residual_snapshot_downsampled = None
+
+        # Encoder : nodes (node_input_size -> hidden_size), edges (edge_input_size -> hidden_size)
+        self.nodes_encoder = build_mlp(
+            in_size=node_input_size,
+            hidden_size=hidden_size,
+            out_size=hidden_size,
+        )
+
+        self.edges_encoder = build_mlp(
+            in_size=edge_input_size,
+            hidden_size=hidden_size,
+            out_size=hidden_size,
+        )
+
+        # Fine-level message passing before downscaling: 5 steps
+        self.down_processors = nn.ModuleList(
+            [
+                GraphNetBlock(
+                    hidden_size=hidden_size,
+                    use_gated_mlp=use_gated_mlp,
+                    use_rope=False,
+                    rope_axes=3,
+                    rope_base=10000.0,
+                    use_gate=False,
+                )
+                for _ in range(5)
+            ]
+        )
+
+        # # Decoder after first processing used for downsampling (not used currently because we are trying the same decoder as at the end.)
+        # self.downsample_decoder = build_mlp(
+        #     in_size=hidden_size,
+        #     hidden_size=hidden_size,
+        #     out_size=3,
+        #     layer_norm=False,
+        # )
+
+        # Downsampler: fine -> coarse
         self.downsampler = DownSampler(
-            d_in=node_input_size,
+            d_in=hidden_size,
             d_out=hidden_size,
-            edge_dim=edge_input_size,
+            edge_dim=hidden_size,
             ratio=ratio,
             k=k,
+            method=self.method,
+            is_remeshing=self.is_remeshing,
+            node_mask=self.pool_node_mask,
         )
 
-        self.encode_process_decode = EncodeProcessDecode(
-            message_passing_num=message_passing_num_down,
-            node_input_size=hidden_size,
-            edge_input_size=edge_input_size,
-            output_size=hidden_size,
-            hidden_size=hidden_size,
-            only_processor=False,
+        # Coarse-level message passing: 5 steps
+        self.coarse_processors = nn.ModuleList(
+            [
+                GraphNetBlock(
+                    hidden_size=hidden_size,
+                    use_gated_mlp=use_gated_mlp,
+                    use_rope=False,
+                    rope_axes=3,
+                    rope_base=10000.0,
+                    use_gate=False,
+                )
+                for _ in range(5)
+            ]
         )
 
+        # Upsampler: coarse -> fine
         self.up_sampler = UpSampler(
             d_in=hidden_size,
             d_out=hidden_size,
             k=k,
         )
 
-        self.decode_module = EncodeProcessDecode(
-            message_passing_num=message_passing_num_up,
-            node_input_size=hidden_size,
-            edge_input_size=edge_input_size,
-            output_size=output_size,
-            hidden_size=hidden_size,
-            only_processor=False,
+
+        # Fine-level message passing after upscaling: 5 steps
+        self.up_processor = nn.ModuleList(
+            [
+                GraphNetBlock(
+                    hidden_size=hidden_size,
+                    use_gated_mlp=use_gated_mlp,
+                    use_rope=False,
+                    rope_axes=3,
+                    rope_base=10000.0,
+                    use_gate=False,
+                )
+                for _ in range(5)
+            ]
         )
+
+        # Final decoder
+        self.decode_module = build_mlp(
+            in_size=hidden_size,
+            hidden_size=hidden_size,
+            out_size=output_size,
+            layer_norm=False,
+        )
+
+    def enable_residual_capture(self) -> None:
+        self._capture_residual = True
+
+    def pop_residual_snapshot(self) -> Optional[Data]:
+        snapshot = self._residual_snapshot
+        self._residual_snapshot = None
+        return snapshot
+
+    def pop_residual_snapshot_downsampled(self) -> Optional[Data]:
+        snapshot = self._residual_snapshot_downsampled
+        self._residual_snapshot_downsampled = None
+        return snapshot
 
     def forward(self, graph: Data) -> torch.Tensor:
-        batch = getattr(graph, "batch", None)
+        fine_edge_index = graph.edge_index
+        fine_edge_attr_raw = graph.edge_attr
+        fine_node_type = graph.node_type
+        fine_pos = graph.pos
+        face_elements = graph.face
+        fine_batch = graph.batch
+        fine_ptr = graph.ptr
 
-        fine_graph = Data(
-            x=graph.x,
-            edge_index=graph.edge_index,
-            edge_attr=graph.edge_attr,
-            pos=graph.pos,
+        # 1) Encode raw features -> latent space
+        x = self.nodes_encoder(graph.x)            # [N_fine, hidden]
+        e = self.edges_encoder(fine_edge_attr_raw) # [E_fine, hidden]
+
+        # 2) 5 MP steps on fine graph before downscaling
+        for block in self.down_processors:
+            x, e = block(
+                x,
+                fine_edge_index,
+                e,
+                pos=fine_pos,
+                phi=None,
+            )
+
+        # Save fine latent features for residual connection
+        x_fine_skip = x  # [N_fine, hidden]
+        e_fine_skip = e # [E_fine, hidden]
+
+        # # Decode to 3D for downsampling if method=residu
+        if self.method == "residu":
+            fine_graph_for_down = Data(
+                x=self.decode_module(x),
+                edge_index=fine_edge_index,
+                edge_attr=e,
+                pos=fine_pos,
+                face=face_elements,
+                node_type=fine_node_type,
+                batch=fine_batch,
+                ptr=fine_ptr
+                )
+
+        # Build latent fine graph for the downsampler
+        fine_graph_latent = Data(
+            x=x,
+            edge_index=fine_edge_index,
+            edge_attr=e,
+            pos=fine_pos,
+            node_type=fine_node_type,
+            batch=fine_batch,
+            ptr=fine_ptr
         )
-        if batch is not None:
-            fine_graph.batch = batch
 
-        downsampled_graph = self.downsampler(fine_graph)
-        encoded_nodes = self.encode_process_decode(downsampled_graph)
-        downsampled_graph.x = encoded_nodes
+        scores = HyperelasticResidual()(fine_graph_for_down, displacement=fine_graph_for_down.x[:, 0:3]) if self.method == "residu" else None
 
+        # 3) Downscale: fine -> coarse
+        coarse_graph = self.downsampler(
+            fine_graph_latent,
+            attn=scores if self.method == "residu" else None,
+        )
+        # coarse_graph has x=[N_coarse, hidden], pos=[N_coarse,dim], edge_attr geom
+
+        # Save residual snapshot with fine graph+scores and for coarse downsampled graph
+        if self._capture_residual:
+            n0 = fine_graph_latent.num_nodes
+            if getattr(fine_graph_latent, "batch", None) is not None:
+                if getattr(fine_graph_latent, "ptr", None) is not None:
+                    n0 = int(fine_graph_latent.ptr[1])  # first graph size
+                else:
+                    n0 = int((fine_graph_latent.batch == 0).sum())
+
+            if self.method == "residu":
+                snapshot = fine_graph_for_down.clone()
+
+                # Keep only batch 0
+                if getattr(snapshot, "batch", None) is not None:
+                    snapshot.x = snapshot.x[:n0]
+                    snapshot.pos = snapshot.pos[:n0]
+                    snapshot.node_type = snapshot.node_type[:n0]
+                    snapshot.batch = None
+                    snapshot.ptr = None
+
+                    # Filter faces to batch 0
+                    if getattr(snapshot, "face", None) is not None:
+                        face = snapshot.face
+                        if face.dim() == 2 and face.shape[0] not in (3, 4):
+                            face = face.T
+                        mask = (face < n0).all(dim=0)
+                        snapshot.face = face[:, mask]
+
+                snapshot.hyper_residual = scores.detach()[:n0] if scores is not None else None
+                self._residual_snapshot = snapshot
+                self._capture_residual = False
+
+            pool_perm = getattr(coarse_graph, "pool_perm", None)
+            if pool_perm is None:
+                logger.warning(
+                    "Downsampled residual snapshot missing pool_perm stooooop"
+                )
+            else:
+                coarse_mask = pool_perm < n0
+                snapshot_downsampled = coarse_graph.clone()
+
+                edge_index = None
+                edge_attr = None
+                if getattr(snapshot_downsampled, "edge_index", None) is not None:
+                    edge_index, edge_attr = subgraph(
+                        coarse_mask,
+                        snapshot_downsampled.edge_index,
+                        snapshot_downsampled.edge_attr,
+                        relabel_nodes=True,
+                        num_nodes=snapshot_downsampled.num_nodes,
+                    )
+
+                snapshot_downsampled.x = snapshot_downsampled.x[coarse_mask]
+                snapshot_downsampled.pos = snapshot_downsampled.pos[coarse_mask]
+                if getattr(snapshot_downsampled, "node_type", None) is not None:
+                    snapshot_downsampled.node_type = snapshot_downsampled.node_type[
+                        coarse_mask
+                    ]
+                if getattr(snapshot_downsampled, "batch", None) is not None:
+                    snapshot_downsampled.batch = None
+                    snapshot_downsampled.ptr = None
+
+                snapshot_downsampled.edge_index = edge_index
+                snapshot_downsampled.edge_attr = edge_attr
+
+                if self.method == "residu" and scores is not None:
+                    snapshot_downsampled.hyper_residual = scores.detach()[
+                        pool_perm[coarse_mask]
+                    ]
+                else:
+                    snapshot_downsampled.hyper_residual = None
+                self._residual_snapshot_downsampled = snapshot_downsampled
+
+        # Re-encode coarse edges into hidden space
+        e_c = self.edges_encoder(coarse_graph.edge_attr)  # [E_coarse, hidden]
+        x_c = coarse_graph.x                              # [N_coarse, hidden]
+        pos_xc = coarse_graph.pos
+
+        # 4) 5 MP steps on coarse graph
+        for block in self.coarse_processors:
+            x_c, e_c = block(
+                x_c,
+                coarse_graph.edge_index,
+                e_c,
+                pos=pos_xc,
+                phi=None,
+            )
+        coarse_graph.x, coarse_graph.edge_attr = x_c, e_c
+
+        # 5) Upscaling coarse -> fine
         upsampled_x = self.up_sampler(
-            x_coarse=downsampled_graph.x,
-            pos_coarse=downsampled_graph.pos,
-            pos_fine=fine_graph.pos,
-            batch_coarse=getattr(downsampled_graph, "batch", None),
-            batch_fine=batch,
+            x_coarse=coarse_graph.x,
+            pos_coarse=coarse_graph.pos,
+            pos_fine=fine_pos,
+            batch_coarse=coarse_graph.batch,
+            batch_fine=fine_batch,
         )
 
-        decoded_graph = Data(
-            x=upsampled_x,
-            edge_index=fine_graph.edge_index,
-            edge_attr=fine_graph.edge_attr,
-            pos=fine_graph.pos,
+        # 6) Residual connection from pre-down fine features
+        x_f = upsampled_x + x_fine_skip   # [N_fine, hidden]
+
+        # 7) 5 MP steps on fine graph after upscaling
+        for block in self.up_processor:
+            x_f, e_f = block(
+                x_f,
+                fine_edge_index,
+                e_fine_skip,
+                pos=fine_pos,
+                phi=None,
         )
-        if batch is not None:
-            decoded_graph.batch = batch
-        output = self.decode_module(decoded_graph)
+
+        # 8) Final MLP decoder
+        output = self.decode_module(x_f)  # [N_fine, output_size]
         return output

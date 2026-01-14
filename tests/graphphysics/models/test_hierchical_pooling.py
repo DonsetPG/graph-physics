@@ -9,6 +9,7 @@ from graphphysics.models.hierarchical_pooling import DownSampler, UpSampler
 
 class TestHierarchicalPoolingPrimitives(unittest.TestCase):
     def setUp(self):
+        torch.manual_seed(0)
         self.num_nodes = 32
         self.node_input_size = 8
         self.hidden_size = 16
@@ -69,6 +70,112 @@ class TestHierarchicalPoolingPrimitives(unittest.TestCase):
         )
 
         self.assertEqual(upsampled.shape, (self.num_nodes, self.hidden_size))
+
+    def test_downsampler_random_method_shapes(self):
+        downsampler = DownSampler(
+            d_in=self.node_input_size,
+            d_out=self.hidden_size,
+            edge_dim=self.edge_size,
+            ratio=self.ratio,
+            k=self.k,
+            method="random",
+        )
+        coarse_graph = downsampler(self.graph)
+
+        expected_nodes = max(1, int(self.num_nodes * self.ratio))
+        self.assertEqual(coarse_graph.x.shape[0], expected_nodes)
+        self.assertEqual(coarse_graph.x.shape[1], self.hidden_size)
+        self.assertEqual(coarse_graph.edge_attr.shape[1], self.edge_size)
+
+    def test_downsampler_fps_method_shapes(self):
+        downsampler = DownSampler(
+            d_in=self.node_input_size,
+            d_out=self.hidden_size,
+            edge_dim=self.edge_size,
+            ratio=self.ratio,
+            k=self.k,
+            method="fps",
+        )
+        coarse_graph = downsampler(self.graph)
+
+        expected_nodes = math.ceil(self.num_nodes * self.ratio)
+        self.assertEqual(coarse_graph.x.shape[0], expected_nodes)
+        self.assertEqual(coarse_graph.x.shape[1], self.hidden_size)
+        self.assertEqual(coarse_graph.edge_attr.shape[1], self.edge_size)
+
+    def test_topk_sampler_uses_attention_scores(self):
+        num_nodes = 10
+        ratio = 0.3
+        x = torch.zeros(num_nodes, 1)
+        pos = torch.arange(num_nodes, dtype=torch.float).view(-1, 1).repeat(1, 3)
+        batch = torch.zeros(num_nodes, dtype=torch.long)
+        graph = Data(x=x, pos=pos, batch=batch)
+        attn = torch.arange(num_nodes, dtype=torch.float).view(-1, 1)
+
+        downsampler = DownSampler(
+            d_in=1,
+            d_out=2,
+            edge_dim=4,
+            ratio=ratio,
+            k=2,
+            method="topk",
+        )
+        downsampler.select.weight.data.fill_(1.0)
+        coarse_graph = downsampler(graph, attn=attn)
+
+        expected_indices = set(
+            range(num_nodes - math.ceil(num_nodes * ratio), num_nodes)
+        )
+        coarse_indices = set(coarse_graph.pos[:, 0].long().tolist())
+        self.assertSetEqual(coarse_indices, expected_indices)
+
+    def test_upsampler_respects_batch_assignments(self):
+        x_coarse = torch.tensor([[1.0], [10.0]])
+        pos_coarse = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+            ]
+        )
+        pos_fine = torch.tensor(
+            [
+                [0.0, 0.0, 0.0],
+                [1.0, 0.0, 0.0],
+                [5.0, 0.0, 0.0],
+                [6.0, 0.0, 0.0],
+            ]
+        )
+        batch_coarse = torch.tensor([0, 1])
+        batch_fine = torch.tensor([0, 0, 1, 1])
+
+        upsampler = UpSampler(d_in=1, d_out=1, k=1)
+        upsampler.lin.weight.data.fill_(1.0)
+        upsampler.lin.bias.data.zero_()
+
+        upsampled = upsampler(
+            x_coarse=x_coarse,
+            pos_coarse=pos_coarse,
+            pos_fine=pos_fine,
+            batch_coarse=batch_coarse,
+            batch_fine=batch_fine,
+        )
+
+        self.assertTrue(torch.allclose(upsampled[batch_fine == 0], torch.ones(2, 1)))
+        self.assertTrue(
+            torch.allclose(upsampled[batch_fine == 1], torch.full((2, 1), 10.0))
+        )
+
+    def test_downsampler_raises_on_unknown_method(self):
+        downsampler = DownSampler(
+            d_in=self.node_input_size,
+            d_out=self.hidden_size,
+            edge_dim=self.edge_size,
+            ratio=self.ratio,
+            k=self.k,
+            method="invalid",
+        )
+        with self.assertRaises(ValueError):
+            downsampler(self.graph)
 
 
 if __name__ == "__main__":

@@ -124,32 +124,19 @@ class H5Dataset(BaseDataset):
             self._frame_cache.popitem(last=False)
         return None
 
-    def _build_node_features(self, traj: dict, frame: int) -> torch.Tensor:
-        time = frame * self.meta.get("dt", 1)
-
-        point_data = {
-            key: (traj[key][frame] if traj[key].ndim > 1 else traj[key])
-            for key in traj.keys()
-            if key not in ["mesh_pos", "cells", "node_type"]
-        }
-        point_data["node_type"] = traj["node_type"][0]
-
-        arrays = []
-        for data in point_data.values():
-            arr = data
-            if arr.ndim == 1:
-                arr = arr[:, None]
-            arrays.append(arr.astype(np.float32))
-
-        if arrays:
-            node_features = np.concatenate(arrays, axis=1)
-        else:
-            node_features = np.zeros((traj["mesh_pos"].shape[-2], 0), dtype=np.float32)
-
-        time_column = np.full((node_features.shape[0], 1), time, dtype=np.float32)
-        node_features = np.concatenate([node_features, time_column], axis=1)
-
-        return torch.from_numpy(node_features)
+    def _get_dynamic_features_at_frame(
+        self, traj: dict, frame: int
+    ) -> dict[str, np.ndarray]:
+        frame_index = max(frame, 0)
+        previous: dict[str, np.ndarray] = {}
+        for key, field in self.meta["features"].items():
+            if field["type"] != "dynamic":
+                continue
+            values = traj[key][frame_index]
+            if values.ndim == 1:
+                values = values.reshape(-1, 1)
+            previous[key] = np.array(values).astype(field["dtype"])
+        return previous
 
     def _get_processed_graph(
         self,
@@ -214,8 +201,10 @@ class H5Dataset(BaseDataset):
         )
 
         if self.use_previous_data:
-            previous_features = self._build_node_features(traj, frame - 1)
-            graph.previous_data = previous_features
+            graph.previous_data = self._get_dynamic_features_at_frame(traj, frame - 1)
+            graph.previous_previous_data = self._get_dynamic_features_at_frame(
+                traj, frame - 2
+            )
 
         graph.traj_index = traj_index
 

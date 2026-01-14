@@ -17,10 +17,11 @@ from graphphysics.training.parse_parameters import (
     get_simulator,
 )
 from graphphysics.utils.loss import L2Loss, MultiLoss
-from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
+from graphphysics.utils.meshio_mesh import convert_to_meshio_lines, convert_to_meshio_vtu
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 from graphphysics.utils.volume import compute_volume
+from graphphysics.utils.physical_loss import HyperelasticResidual
 
 
 def build_mask(param: dict, graph: Batch):
@@ -28,7 +29,7 @@ def build_mask(param: dict, graph: Batch):
         node_type = graph.x[:, 0, param["index"]["node_type_index"]]
     else:
         node_type = graph.x[:, param["index"]["node_type_index"]]
-    mask = torch.logical_or(node_type == NodeType.NORMAL, node_type == NodeType.OUTFLOW)
+    mask = torch.logical_or(node_type == NodeType.NORMAL, node_type == NodeType.HANDLE)
     mask = torch.logical_not(mask)
 
     return mask
@@ -44,7 +45,7 @@ class LightningModule(L.LightningModule):
         trajectory_length: int = 599,
         timestep: float = 1.0,
         only_processor: bool = False,
-        masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
+        masks: list[NodeType] = [NodeType.NORMAL, NodeType.HANDLE],
         use_previous_data: bool = False,
         previous_data_start: int = None,
         previous_data_end: int = None,
@@ -71,13 +72,24 @@ class LightningModule(L.LightningModule):
         self.param = parameters
         self.wandb_run_id = None
 
-        processor = get_model(param=parameters, only_processor=only_processor)
+        processor = get_model(param=parameters,only_processor=only_processor,)
 
         print(processor)
+        if parameters["model"]["type"] == "hierarchical":
+            logger.info(f"Using hierarchical model processor. The pooling method is {processor.method}")
 
         self.model = get_simulator(param=parameters, model=processor, device=device)
 
         self.loss, self.loss_name = get_loss(param=parameters)
+        self.gradient_method = get_gradient_method(
+            param=parameters
+        )  # finite_diff, least_squares
+        self.is_physical_loss_test = False # Set it true for testing physical loss only
+        self.physical_loss = (
+            HyperelasticResidual(gradient_method=self.gradient_method) # Using HyperelasticResidual for now for deforming plate dataset
+            if self.is_physical_loss_test
+            else None
+        )
         logger.info(f"Using loss {self.loss_name}")
         self.is_multiloss = False
         if isinstance(self.loss, MultiLoss):
@@ -89,9 +101,6 @@ class LightningModule(L.LightningModule):
                 self.use_volume_loss = False
         self.loss_masks = masks
         self.val_loss = L2Loss()
-        self.gradient_method = get_gradient_method(
-            param=parameters
-        )  # finite_diff, least_squares
 
         self.learning_rate = learning_rate
         self.num_steps = num_steps
@@ -138,6 +147,12 @@ class LightningModule(L.LightningModule):
         )
         self.spatial_mtp_max_neighbors: Optional[int] = training_params.get(
             "spatial_mtp_max_neighbors"
+        )
+        self.residual_save_steps = [
+            int(step) for step in training_params.get("residual_save_steps", [])
+        ]
+        self.residual_save_dir: str = training_params.get(
+            "residual_save_dir", os.path.join("meshes", "residuals")
         )
 
         self.output_head: Optional[nn.Module] = None
@@ -259,19 +274,38 @@ class LightningModule(L.LightningModule):
         )
         return aux_loss, stats
 
-    def training_step(self, batch: Batch):
+    def training_step(self, batch: Batch, batch_idx: int):
         batch = batch.to(self.device, non_blocking=True)
+        if batch_idx in self.residual_save_steps:
+            processor = getattr(self.model, "model", None)
+            enable_capture = getattr(processor, "enable_residual_capture", None)
+            if callable(enable_capture):
+                enable_capture()
         if self.use_spatial_mtp:
             self._penultimate_hidden = None
             self._H_nodeenc = None
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
+        mask = build_mask(self.param, batch)
+
+        # This line is for testing physical loss only (with absolute values)
+        if self.is_physical_loss_test:
+            with torch.no_grad():
+                network_output_physical = self.model.build_outputs(batch, network_output)
+                calculate_physical_actual = self.physical_loss(
+                    batch,
+                    network_output_physical,
+                )
+                residual_physical_predicted = calculate_physical_actual
+
+                scores = residual_physical_predicted[~mask]
+                print(f"using{self.gradient_method} scores phys loss: {scores}")
 
         if self.is_multiloss:
             network_output_physical = self.model.build_outputs(batch, network_output)
             target_physical = self.model.build_outputs(batch, target_delta_normalized)
             if self.use_volume_loss:
-                tets = getattr(batch, "tetra") if hasattr(batch, "tetra") else print("WTFF")
+                tets = getattr(batch, "tetra") if hasattr(batch, "tetra") else logger.warning("No tetrahedra found in batch for volume loss.")
                 volume_target = compute_volume(target_physical, tets)
                 volume = compute_volume(network_output_physical, tets)
             loss, train_losses = self.loss(
@@ -337,6 +371,9 @@ class LightningModule(L.LightningModule):
             self._penultimate_hidden = None
             self._H_nodeenc = None
 
+        if batch_idx in self.residual_save_steps:
+            self._save_residual_snapshot(batch_idx)
+
         return loss
 
     def teardown(self, stage: Optional[str] = None) -> None:
@@ -381,6 +418,57 @@ class LightningModule(L.LightningModule):
             ),
             dst=f"{xdmf_filename.replace('xdmf', 'h5')}",
         )
+
+    def _save_residual_snapshot(self, batch_idx: int) -> None:
+        processor = getattr(self.model, "model", None)
+        pop_snapshot = getattr(processor, "pop_residual_snapshot", None)
+        pop_snapshot_downsampled = getattr(
+            processor, "pop_residual_snapshot_downsampled", None
+        )
+
+        if not callable(pop_snapshot) and not callable(pop_snapshot_downsampled):
+            return
+
+        snapshot = pop_snapshot() if callable(pop_snapshot) else None
+        snapshot_downsampled = (
+            pop_snapshot_downsampled() if callable(pop_snapshot_downsampled) else None
+        )
+
+        if snapshot is None and snapshot_downsampled is None:
+            return
+
+        save_dir = os.path.join(self.residual_save_dir, f"epoch_{self.current_epoch}")
+        os.makedirs(save_dir, exist_ok=True)
+
+        if snapshot is not None:
+            snapshot = snapshot.detach().cpu()
+            filename = f"residual_step_{batch_idx}"
+            xdmf_path = os.path.join(save_dir, f"{filename}.xdmf")
+            try:
+                mesh = convert_to_meshio_vtu(snapshot, add_all_data=True)
+                meshio.xdmf.write(xdmf_path, mesh)
+            except Exception as e:
+                logger.error(
+                    f"Error saving residual snapshot {batch_idx} at epoch {self.current_epoch}: {e}"
+                )
+            else:
+                logger.info(f"Residual snapshot {batch_idx} saved at {save_dir}.")
+
+        if snapshot_downsampled is not None:
+            snapshot_downsampled = snapshot_downsampled.detach().cpu()
+            filename = f"residual_step_{batch_idx}_coarse"
+            xdmf_path = os.path.join(save_dir, f"{filename}.xdmf")
+            try:
+                mesh = convert_to_meshio_lines(snapshot_downsampled, add_all_data=True)
+                meshio.xdmf.write(xdmf_path, mesh)
+            except Exception as e:
+                logger.error(
+                    f"Error saving coarse residual snapshot {batch_idx} at epoch {self.current_epoch}: {e}"
+                )
+            else:
+                logger.info(
+                    f"Coarse residual snapshot {batch_idx} saved at {save_dir}."
+                )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1

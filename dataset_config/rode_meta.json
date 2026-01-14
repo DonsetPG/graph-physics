@@ -10,40 +10,71 @@
       ],
       "dtype": "int32"
     },
-    "world_pos": {
+    "Displacement": {
       "type": "dynamic",
       "shape": [
         500,
         -1,
         3
       ],
-      "dtype": "float32"
+      "dtype": "float64"
     },
-    "force": {
-      "type": "static",
+    "Pression": {
+      "type": "dynamic",
       "shape": [
         500,
         -1,
-        3
+        1
       ],
-      "dtype": "float32"
+      "dtype": "float64"
     },
-    "node_type": {
+    "Appartient1": {
       "type": "static",
       "shape": [
         500,
         -1,
         1
       ],
-      "dtype": "int32"
+      "dtype": "float64"
+    },
+    "AppartientACT": {
+      "type": "static",
+      "shape": [
+        500,
+        -1,
+        1
+      ],
+      "dtype": "float64"
+    },
+    "Rho": {
+      "type": "dynamic",
+      "shape": [
+        500,
+        -1,
+        1
+      ],
+      "dtype": "float64"
+    },
+    "Lame": {
+      "type": "dynamic",
+      "shape": [
+        500,
+        -1,
+        1
+      ],
+      "dtype": "float64"
     }
   },
-  "target_features": ["world_pos"],
+
+  "target_features": ["Displacement"],
   "field_names": [
     "cells",
-    "world_pos",
-    "force",
-    "node_type"
+    "Displacement",
+    "Pression",
+    "Appartient1",
+    "AppartientACT",
+    "Rho",
+    "Lame"
   ],
   "trajectory_length": 500
 }

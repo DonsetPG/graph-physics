@@ -25,6 +25,11 @@
         "output_index_end": 3,
         "node_type_index": 6
     },
+    "loss": {
+        "type": ["l2loss"],
+        "weights": [1],
+        "gradient_method": "finite_diff"
+    },
     "transformations": {
         "preprocessing": {
             "noise": 0.003,

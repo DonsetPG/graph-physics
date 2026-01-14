@@ -155,21 +155,27 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             use_temporal_block=use_temporal_block,
         )
     elif model_type == "hierarchical":
-        mpn_down = param["model"].get(
-            "message_passing_num_down", param["model"].get("message_passing_num", 15)
-        )
-        mpn_up = param["model"].get("message_passing_num_up", 2)
-        pool_ratio = param["model"].get("pool_ratio", 0.25)
+        pool_ratio = param["model"].get("pool_ratio", 0.5)
         pool_k = param["model"].get("pool_knn", 6)
+        use_gated_mlp = param["model"].get("use_gated_mlp", False)
+        mpn_coarse = param["model"].get("message_passing_num_coarse", 5)
+        pool_is_remeshing = param["model"].get(
+            "pool_is_remeshing", param["model"].get("is_remeshing", True)
+        )
+        pool_node_mask = param["model"].get("pool_node_mask", "normal")
+        method = param["training"].get("sampling_method", "fps")
         return HierarchicalPooler(
             node_input_size=node_input_size,
             edge_input_size=param["model"]["edge_input_size"],
             output_size=param["model"]["output_size"],
             hidden_size=param["model"]["hidden_size"],
-            message_passing_num_down=mpn_down,
-            message_passing_num_up=mpn_up,
+            use_gated_mlp=use_gated_mlp,
+            message_passing_num_coarse=mpn_coarse,
             ratio=pool_ratio,
             k=pool_k,
+            method=method,
+            is_remeshing=pool_is_remeshing,
+            pool_node_mask=pool_node_mask,
         )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")

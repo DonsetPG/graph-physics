@@ -171,8 +171,11 @@ class Simulator(nn.Module):
             pos=inputs.pos,
             edge_attr=edge_attr,
             edge_index=inputs.edge_index,
+            face=inputs.face,
+            node_type=inputs.x[:, self.node_type_index],
+            batch=inputs.batch,
+            ptr=inputs.ptr
         )
-
         return graph, target_delta_normalized
 
     def build_outputs(self, inputs: Data, network_output: torch.Tensor) -> torch.Tensor:

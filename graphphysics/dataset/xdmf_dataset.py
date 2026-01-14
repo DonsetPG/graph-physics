@@ -92,6 +92,8 @@ class XDMFDataset(BaseDataset):
         # Fetch index for previous_data and target
         _target_data_index = random.randint(1, self.random_next)
         _previous_data_index = random.randint(1, self.random_prev)
+        previous_previous_data = None
+        previous_previous_index = None
 
         # Read XDMF file
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
@@ -113,6 +115,10 @@ class XDMFDataset(BaseDataset):
 
             if self.use_previous_data:
                 _, previous_data, _ = reader.read_data(frame - _previous_data_index)
+                previous_previous_index = min(frame, _previous_data_index + 1)
+                _, previous_previous_data, _ = reader.read_data(
+                    frame - previous_previous_index
+                )
 
         # Prepare the mesh data
         mesh = meshio.Mesh(points, cells, point_data=point_data)
@@ -146,6 +152,14 @@ class XDMFDataset(BaseDataset):
                 if v.ndim == 1:
                     a[k] = v.reshape(-1, 1)
 
+        def _extract_dynamic_data(data: dict) -> dict:
+            return {
+                k: np.array(data[k]).astype(self.meta["features"][k]["dtype"])
+                for k in self.meta["features"]
+                if k in data.keys()
+                and self.meta["features"][k]["type"] == "dynamic"
+            }
+
         _reshape_array(point_data)
         _reshape_array(target_data)
 
@@ -162,15 +176,14 @@ class XDMFDataset(BaseDataset):
         graph.target_dt = _target_data_index * self.dt
 
         if self.use_previous_data:
-            previous = {
-                k: np.array(previous_data[k]).astype(self.meta["features"][k]["dtype"])
-                for k in self.meta["features"]
-                if k in previous_data.keys()
-                and self.meta["features"][k]["type"] == "dynamic"
-            }
+            previous = _extract_dynamic_data(previous_data)
+            previous_previous = _extract_dynamic_data(previous_previous_data)
             _reshape_array(previous)
+            _reshape_array(previous_previous)
             graph.previous_data = previous
+            graph.previous_previous_data = previous_previous
             graph.previous_dt = -_previous_data_index * self.dt
+            graph.previous_previous_dt = -previous_previous_index * self.dt
 
         graph = graph.to(self.device)
 
@@ -184,7 +197,13 @@ class XDMFDataset(BaseDataset):
             graph.edge_index.long() if graph.edge_index is not None else None
         )
 
-        del graph.previous_data
+        print(graph.tetra)
+        # graph.tetra = graph.tetra.tra
+
+        if hasattr(graph, "previous_data"):
+            del graph.previous_data
+        if hasattr(graph, "previous_previous_data"):
+            del graph.previous_previous_data
         graph.traj_index = traj_index
 
         if selected_indices is not None:

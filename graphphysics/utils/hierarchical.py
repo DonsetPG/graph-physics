@@ -108,6 +108,13 @@ def get_frame_as_mesh(
               similar to point_data.
     """
     target_point_data = None
+    # Clamp frame indices to available frames to avoid out-of-bounds on the last step.
+    total_frames = (
+        traj["mesh_pos"].shape[0] if traj["mesh_pos"].ndim > 1 else 1
+    )
+    frame = min(frame, total_frames - 1)
+    if frame_target is not None:
+        frame_target = min(frame_target, total_frames - 1)
 
     if frame_target is not None:
         target_features_names = meta.get("target_features")
