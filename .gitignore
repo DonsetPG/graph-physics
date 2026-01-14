@@ -17,3 +17,7 @@ meshes/
 predictions/
 wandb/
 checkpoints/
+.mplconfig/
+plots/
+scripts/
+wandb_download/
