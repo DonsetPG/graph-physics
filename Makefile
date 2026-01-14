@@ -12,7 +12,7 @@ test: ## Run all tests
 	@python3 -m pytest tests/
 
 test-gp: ## Run all tests
-	@python3 -m pytest tests/graphphysics/
+	@GRAPH_PHYSICS_ASSUME_NO_DGL=1 python3 -m pytest tests/graphphysics/
 
 test-jp: ## Run all tests
 	@python3 -m pytest tests/jraphphysics/
@@ -30,6 +30,6 @@ lint: ## Remove unused imports, run linters Black and isort
 	@make remove-unused-imports && isort graphphysics/ --profile black && black .
 
 train-predict: ## Train a small model, predict and retrain
-	@bash train.sh
-	@bash predict.sh
-	@bash retrain.sh
+	@GRAPH_PHYSICS_ASSUME_NO_DGL=1 bash train.sh
+	@GRAPH_PHYSICS_ASSUME_NO_DGL=1 bash predict.sh
+	@GRAPH_PHYSICS_ASSUME_NO_DGL=1 bash retrain.sh
