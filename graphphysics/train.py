@@ -318,9 +318,14 @@ def main(argv):
     if devices == 0:
         raise RuntimeError("Aucun GPU visible alors que DDP/gpu est demandé. Vérifie l'allocation SLURM.")
 
+    if rank_env == 0:
+        print("CUDA_VISIBLE_DEVICES =", os.environ.get("CUDA_VISIBLE_DEVICES"))
+        print("torch.cuda.device_count() =", torch.cuda.device_count())
+
     trainer = Trainer(
         accelerator="gpu",
-        devices=devices,               # 1 GPU par process (PL mappe LOCAL_RANK -> CUDA)
+        devices=1,          # <-- PAS torch.cuda.device_count()
+        #devices=devices,               # 1 GPU par process (PL mappe LOCAL_RANK -> CUDA)
         num_nodes=num_nodes,
         strategy=DDPStrategy(
             process_group_backend="nccl",   # explicite
@@ -345,6 +350,11 @@ def main(argv):
     print_dist_info("trainer_built")
 
     # Resuming training from a checkpoint
+    if rank_env == 0:
+        print("[diag] resume_training =", resume_training, flush=True)
+        print("[diag] model_path =", model_path, flush=True)
+        print("[diag] isfile(model_path) =", os.path.isfile(model_path) if model_path else None, flush=True)
+
     if model_path and os.path.isfile(model_path) and resume_training:
         logger.success("Resuming training")
         trainer.fit(
