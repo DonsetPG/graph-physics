@@ -86,6 +86,7 @@ class BaseDataset(Dataset, ABC):
         self.partitions_per_trajectory: Dict[int, int] = {}
         self.cumulative_samples: List[int] = [0]
         self._size_dataset = 0
+        self._len_dataset = 0
 
         self.world_pos_index_start = None
         self.world_pos_index_end = None
@@ -95,7 +96,9 @@ class BaseDataset(Dataset, ABC):
             )
             self.world_pos_index_end = world_pos_parameters.get("world_pos_index_end")
 
-    def __len__(self) -> int:
+    @property
+    def size_dataset(self) -> int:
+        """Should return the number of trajectories in the dataset."""
         return self._size_dataset
 
     @abstractmethod
@@ -114,6 +117,9 @@ class BaseDataset(Dataset, ABC):
         subgraph_idx = local_index % num_partitions
         frame = frame_in_traj + int(self.use_previous_data)
         return traj_index, frame, subgraph_idx
+
+    def __len__(self) -> int:
+        return self._len_dataset
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
@@ -230,9 +236,6 @@ class BaseDataset(Dataset, ABC):
                 # face=face,
                 # tetra=tetra,
                 num_nodes=x.size(0),
-                id=graph.id,
-                target_dt=graph.target_dt,
-                previous_dt=graph.previous_dt,
                 traj_index=graph.traj_index,
             )
         return sub_graph

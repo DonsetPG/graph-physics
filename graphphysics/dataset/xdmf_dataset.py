@@ -1,7 +1,7 @@
 import math
 import os
 import random
-from typing import Callable, Dict, List, Optional, Tuple, Union
+from typing import Callable, List, Optional, Tuple, Union
 
 import meshio
 import numpy as np
@@ -98,8 +98,8 @@ class XDMFDataset(BaseDataset):
                 num_valid_frames = 0
 
             total_samples_in_traj = num_valid_frames * num_partitions
-            self._size_dataset += total_samples_in_traj
-            self.cumulative_samples.append(self._size_dataset)
+            self._len_dataset += total_samples_in_traj
+            self.cumulative_samples.append(self._len_dataset)
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.
