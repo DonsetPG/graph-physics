@@ -90,7 +90,6 @@ class H5Dataset(BaseDataset):
         return self._size_dataset
 
     def _build_index_map(self):
-        self.frames_per_trajectory: dict[int, int] = {}
         with self._get_file_handle() as f:
             for traj_index, traj_name in enumerate(self.datasets_index):
                 num_nodes = f[traj_name]["mesh_pos"].shape[-2]
@@ -105,9 +104,7 @@ class H5Dataset(BaseDataset):
                     num_partitions = 1
 
                 self.partitions_per_trajectory[traj_index] = num_partitions
-                self.frames_per_trajectory[traj_index] = num_steps
-
-                num_valid_frames = num_steps - self.random_next - self.random_prev
+                num_valid_frames = self.trajectory_length - int(self.use_previous_data)
                 if num_valid_frames < 0:
                     logger.warning(
                         f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."

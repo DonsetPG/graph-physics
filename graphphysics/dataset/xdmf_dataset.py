@@ -75,7 +75,6 @@ class XDMFDataset(BaseDataset):
         self._build_index_map()
 
     def _build_index_map(self):
-        self.frames_per_trajectory: Dict[int, int] = {}
         for traj_index, file_path in enumerate(self.file_paths):
             with meshio.xdmf.TimeSeriesReader(file_path) as reader:
                 points, _ = reader.read_points_cells()
@@ -91,9 +90,7 @@ class XDMFDataset(BaseDataset):
                 num_partitions = 1
 
             self.partitions_per_trajectory[traj_index] = num_partitions
-            self.frames_per_trajectory[traj_index] = num_steps
-
-            num_valid_frames = num_steps - self.random_next - self.random_prev
+            num_valid_frames = self.trajectory_length - int(self.use_previous_data)
             if num_valid_frames < 0:
                 logger.warning(
                     f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."
