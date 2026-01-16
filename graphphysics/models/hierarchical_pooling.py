@@ -50,13 +50,15 @@ class DownSampler(nn.Module):
         edge_dim: int,
         ratio: float = 0.5,
         k: int = 6,
-        method: str = "fps",  # "topk" , "random" , "fps"
+        method: str = "fps",  # "topk", "random", "fps", "residu", "residu_prob"
         is_remeshing: bool = True,
-        node_mask: str = "normal",
+        node_mask: str = "all",  # "normal", "all"
+        sampling_temperature: float = 100.0,
     ):
         super().__init__()
         self.ratio = ratio
         self.method = method
+        self.sampling_temperature = sampling_temperature
         self.is_remeshing = is_remeshing
         self.node_mask = node_mask
 
@@ -99,6 +101,44 @@ class DownSampler(nn.Module):
             k = max(1, min(num_nodes, k))
             topk = torch.topk(scores[idx], k=k, largest=True).indices
             perm.append(idx[topk])
+
+        if perm:
+            return torch.cat(perm, dim=0)
+        return torch.empty(0, dtype=torch.long, device=scores.device)
+
+    def _prob_sample(self, scores: torch.Tensor, k: int, temperature: float) -> torch.Tensor:
+        scores = scores.view(-1)
+        if scores.numel() == 0 or k <= 0:
+            return torch.empty(0, dtype=torch.long, device=scores.device)
+        if k >= scores.numel():
+            return torch.arange(scores.numel(), device=scores.device)
+        if temperature <= 0:
+            raise ValueError("sampling_temperature must be > 0 for probabilistic sampling.")
+        logits = scores.float() / temperature
+        logits = logits - logits.max()
+        probs = torch.softmax(logits, dim=0)
+        if torch.isnan(probs).any() or probs.sum() <= 0:
+            probs = torch.ones_like(scores, dtype=torch.float)
+            probs = probs / probs.numel()
+        return torch.multinomial(probs, k, replacement=False)
+
+    def _prob_sample_by_batch(
+        self, scores: torch.Tensor, batch: Optional[torch.Tensor], temperature: float
+    ) -> torch.Tensor:
+        scores = scores.view(-1)
+        if batch is None:
+            k = self._num_keep(scores.numel())
+            return self._prob_sample(scores, k, temperature)
+
+        perm = []
+        for batch_idx in batch.unique(sorted=True):
+            mask = batch == batch_idx
+            idx = mask.nonzero(as_tuple=False).view(-1)
+            if idx.numel() == 0:
+                continue
+            k = self._num_keep(idx.numel())
+            sampled = self._prob_sample(scores[idx], k, temperature)
+            perm.append(idx[sampled])
 
         if perm:
             return torch.cat(perm, dim=0)
@@ -161,11 +201,21 @@ class DownSampler(nn.Module):
             return candidate[perm]
 
         if self.method == "residu":
-            scores = attn if attn is not None else print("No attn provided")
+            scores = attn
             if scores is None:
                 raise ValueError("No residual scores provided for 'residu' downsampling.")
             scores = scores.squeeze(-1)[candidate]
             perm = self._topk_by_batch(scores, batch_candidate)
+            return candidate[perm]
+
+        if self.method == "residu_prob":
+            scores = attn
+            if scores is None:
+                raise ValueError("No residual scores provided for 'residu_prob' downsampling.")
+            scores = scores.squeeze(-1)[candidate]
+            perm = self._prob_sample_by_batch(
+                scores, batch_candidate, self.sampling_temperature
+            )
             return candidate[perm]
 
         raise ValueError(f"Unknown method: {self.method}")

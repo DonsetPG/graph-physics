@@ -49,10 +49,10 @@ flags.DEFINE_bool(
 
 flags.DEFINE_bool("use_previous_data", False, "Whether to use previous data or not")
 flags.DEFINE_integer(
-    "previous_data_start", 4, "Index of the start of the previous data in the features"
+    "previous_data_start", 3, "Index of the start of the previous data in the features"
 )
 flags.DEFINE_integer(
-    "previous_data_end", 7, "Index of the end of the previous data in the features"
+    "previous_data_end", 6, "Index of the end of the previous data in the features"
 )
 flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
@@ -101,7 +101,7 @@ def main(argv):
         param=parameters,
         device=device,
         use_edge_feature=use_edge_feature,
-        extra_node_features=rode,
+        extra_node_features=None,
     )
 
     # Get training and validation datasets
@@ -117,7 +117,7 @@ def main(argv):
         device=device,
         use_edge_feature=use_edge_feature,
         remove_noise=True,
-        extra_node_features=rode,
+        extra_node_features=None,
     )
 
     val_dataset = get_dataset(
@@ -242,7 +242,14 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3], compare_downsampling=True,),
+            # LogPyVistaPredictionsCallback(
+            #     dataset=val_dataset,
+            #     indices=[1, 5, 100, 400],
+            #     compare_downsampling=False,
+            #     downsample_traj_index=0,      # trajectory id to log
+            #     downsample_frame_step=5,      # every 5th frame
+            #     downsample_max_frames=100,    # cap frames if desired
+            # ),
             lr_monitor,
         ],
         log_every_n_steps=100,

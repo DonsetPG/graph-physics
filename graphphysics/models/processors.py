@@ -456,6 +456,7 @@ class HierarchicalPooler(nn.Module):
         edge_input_size: int,
         output_size: int,
         hidden_size: int = 128,
+        coarse_hidden_size: Optional[int] = None,
         use_gated_mlp: bool = False,
         message_passing_num_coarse: int = 5,
         ratio: float = 0.5,
@@ -463,13 +464,16 @@ class HierarchicalPooler(nn.Module):
         method: str = "fps",
         is_remeshing: bool = True,
         pool_node_mask: str = "normal",
+        sampling_temperature: float = 1.0,
     ):
         super().__init__()
 
         self.node_input_size = node_input_size
         self.edge_input_size = edge_input_size
         self.hidden_size = hidden_size
+        self.coarse_hidden_size = coarse_hidden_size or hidden_size
         self.method = method
+        self.sampling_temperature = sampling_temperature
         self.is_remeshing = is_remeshing
         self.pool_node_mask = pool_node_mask
         self.residual = HyperelasticResidual()
@@ -491,6 +495,13 @@ class HierarchicalPooler(nn.Module):
             hidden_size=hidden_size,
             out_size=hidden_size,
         )
+        self.edges_encoder_coarse: Optional[nn.Module] = None
+        if self.coarse_hidden_size != hidden_size:
+            self.edges_encoder_coarse = build_mlp(
+                in_size=edge_input_size,
+                hidden_size=self.coarse_hidden_size,
+                out_size=self.coarse_hidden_size,
+            )
 
         # Fine-level message passing before downscaling: 5 steps
         self.down_processors = nn.ModuleList(
@@ -518,11 +529,12 @@ class HierarchicalPooler(nn.Module):
         # Downsampler: fine -> coarse
         self.downsampler = DownSampler(
             d_in=hidden_size,
-            d_out=hidden_size,
-            edge_dim=hidden_size,
+            d_out=self.coarse_hidden_size,
+            edge_dim=self.coarse_hidden_size,
             ratio=ratio,
             k=k,
             method=self.method,
+            sampling_temperature=self.sampling_temperature,
             is_remeshing=self.is_remeshing,
             node_mask=self.pool_node_mask,
         )
@@ -531,7 +543,7 @@ class HierarchicalPooler(nn.Module):
         self.coarse_processors = nn.ModuleList(
             [
                 GraphNetBlock(
-                    hidden_size=hidden_size,
+                    hidden_size=self.coarse_hidden_size,
                     use_gated_mlp=use_gated_mlp,
                     use_rope=False,
                     rope_axes=3,
@@ -544,7 +556,7 @@ class HierarchicalPooler(nn.Module):
 
         # Upsampler: coarse -> fine
         self.up_sampler = UpSampler(
-            d_in=hidden_size,
+            d_in=self.coarse_hidden_size,
             d_out=hidden_size,
             k=k,
         )
@@ -613,8 +625,10 @@ class HierarchicalPooler(nn.Module):
         x_fine_skip = x  # [N_fine, hidden]
         e_fine_skip = e # [E_fine, hidden]
 
-        # # Decode to 3D for downsampling if method=residu
-        if self.method == "residu":
+        use_residual_scores = self.method in ("residu", "residu_prob")
+
+        # Decode to 3D for residual-based downsampling.
+        if use_residual_scores:
             fine_graph_for_down = Data(
                 x=self.decode_module(x),
                 edge_index=fine_edge_index,
@@ -637,12 +651,18 @@ class HierarchicalPooler(nn.Module):
             ptr=fine_ptr
         )
 
-        scores = HyperelasticResidual()(fine_graph_for_down, displacement=fine_graph_for_down.x[:, 0:3]) if self.method == "residu" else None
+        scores = (
+            HyperelasticResidual()(
+                fine_graph_for_down, displacement=fine_graph_for_down.x[:, 0:3]
+            )
+            if use_residual_scores
+            else None
+        )
 
         # 3) Downscale: fine -> coarse
         coarse_graph = self.downsampler(
             fine_graph_latent,
-            attn=scores if self.method == "residu" else None,
+            attn=scores if use_residual_scores else None,
         )
         # coarse_graph has x=[N_coarse, hidden], pos=[N_coarse,dim], edge_attr geom
 
@@ -655,7 +675,7 @@ class HierarchicalPooler(nn.Module):
                 else:
                     n0 = int((fine_graph_latent.batch == 0).sum())
 
-            if self.method == "residu":
+            if use_residual_scores:
                 snapshot = fine_graph_for_down.clone()
 
                 # Keep only batch 0
@@ -711,7 +731,7 @@ class HierarchicalPooler(nn.Module):
                 snapshot_downsampled.edge_index = edge_index
                 snapshot_downsampled.edge_attr = edge_attr
 
-                if self.method == "residu" and scores is not None:
+                if use_residual_scores and scores is not None:
                     snapshot_downsampled.hyper_residual = scores.detach()[
                         pool_perm[coarse_mask]
                     ]
@@ -720,8 +740,9 @@ class HierarchicalPooler(nn.Module):
                 self._residual_snapshot_downsampled = snapshot_downsampled
 
         # Re-encode coarse edges into hidden space
-        e_c = self.edges_encoder(coarse_graph.edge_attr)  # [E_coarse, hidden]
-        x_c = coarse_graph.x                              # [N_coarse, hidden]
+        edge_encoder = self.edges_encoder_coarse or self.edges_encoder
+        e_c = edge_encoder(coarse_graph.edge_attr)  # [E_coarse, coarse_hidden]
+        x_c = coarse_graph.x                        # [N_coarse, coarse_hidden]
         pos_xc = coarse_graph.pos
 
         # 4) 5 MP steps on coarse graph

@@ -388,6 +388,7 @@ class LogPyVistaPredictionsCallback(Callback):
             else model_cfg.get("pool_knn", 6)
         )
         method = training_cfg.get("sampling_method", "fps")
+        sampling_temperature = training_cfg.get("sampling_temperature", 1.0)
         is_remeshing = model_cfg.get(
             "pool_is_remeshing", model_cfg.get("is_remeshing", True)
         )
@@ -409,6 +410,7 @@ class LogPyVistaPredictionsCallback(Callback):
             ratio=ratio,
             k=k,
             method=method,
+            sampling_temperature=sampling_temperature,
             is_remeshing=is_remeshing,
             node_mask=pool_node_mask,
         ).to(graph.x.device)
