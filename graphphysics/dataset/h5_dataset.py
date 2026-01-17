@@ -99,7 +99,7 @@ class H5Dataset(BaseDataset):
                 num_partitions = 1
 
             self.partitions_per_trajectory[traj_index] = num_partitions
-            num_valid_frames = self.trajectory_length - 1 - int(self.use_previous_data)
+            num_valid_frames = self.trajectory_length - int(self.use_previous_data)
             if num_valid_frames < 0:
                 logger.warning(
                     f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."

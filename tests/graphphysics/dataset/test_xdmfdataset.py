@@ -357,7 +357,8 @@ class TestXDMFDatasetPartitioning(unittest.TestCase):
         graph = self.dataset[0]
 
         self.assertEqual(
-            len(partitioned_dataset),  math.ceil(graph.num_nodes / partitioned_dataset.max_nodes_per_partition) * len(self.dataset)
+            len(partitioned_dataset),
+            math.ceil(graph.num_nodes / partitioned_dataset.max_nodes_per_partition) * len(self.dataset)
         )
         self.assertLess(subgraph.num_nodes, graph.num_nodes)
         self.assertEqual(subgraph.x.shape[1], graph.x.shape[1])

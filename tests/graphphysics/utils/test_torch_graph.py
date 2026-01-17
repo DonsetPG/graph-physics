@@ -121,7 +121,7 @@ class TestTorchGraph(unittest.TestCase):
         self.assertTrue(all_partitioned_nodes.min() >= 0)
         self.assertTrue(all_partitioned_nodes.max() < num_nodes)
 
-        partition = loader[0]
+        partition = list(loader)[0]
         self.assertEqual(partition.x.shape[0], partitioned_node_ids[0].shape[0])
 
 
