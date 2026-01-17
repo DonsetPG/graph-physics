@@ -1,4 +1,5 @@
 import json
+import math
 from abc import ABC, abstractmethod
 from bisect import bisect_right
 from typing import Any, Callable, Dict, List, Optional, Tuple
@@ -12,8 +13,8 @@ from torch_geometric.utils import add_random_edge, subgraph
 from graphphysics.utils.torch_graph import (
     compute_k_hop_edge_index,
     compute_k_hop_graph,
-    get_masked_indexes,
     create_subgraphs,
+    get_masked_indexes,
 )
 
 
@@ -110,13 +111,41 @@ class BaseDataset(Dataset, ABC):
         """
         From a global sample index, find the corresponding trajectory, frame, and subgraph indices.
         """
+        # Find the trajectory index in the cumulative samples list
         traj_index = bisect_right(self.cumulative_samples, index) - 1
+
+        # Find the sample index within the trajectory
         local_index = index - self.cumulative_samples[traj_index]
         num_partitions = self.partitions_per_trajectory[traj_index]
+
+        # Use the number of partitions of this trajectory to find the right frame and subgraph
         frame_in_traj = local_index // num_partitions
         subgraph_idx = local_index % num_partitions
         frame = frame_in_traj + int(self.use_previous_data)
         return traj_index, frame, subgraph_idx
+
+    def _add_traj_to_index_map(self, traj_index: int, num_nodes: int):
+        """
+        Adds a trajectory to the index map, updating the cumulative samples, partitions and dataset length.
+
+        Parameters:
+            traj_index (int): The index of the trajectory to add.
+            num_nodes (int): The number of nodes in the trajectory.
+        """
+        if self.use_partitioning:
+            if self.num_partitions is not None:
+                num_partitions = self.num_partitions
+            else:
+                num_partitions = math.ceil(num_nodes / self.max_nodes_per_partition)
+        else:
+            num_partitions = 1
+
+        self.partitions_per_trajectory[traj_index] = num_partitions
+        num_valid_frames = self.trajectory_length - int(self.use_previous_data)
+
+        total_samples_in_traj = num_valid_frames * num_partitions
+        self._len_dataset += total_samples_in_traj
+        self.cumulative_samples.append(self._len_dataset)
 
     def __len__(self) -> int:
         return self._len_dataset
@@ -233,6 +262,9 @@ class BaseDataset(Dataset, ABC):
             relabel_nodes=True,
             num_nodes=graph.num_nodes,
         )
+
+        # UNCOMMENT IF graph.face IS NEEDED DURING TRAINING WITH PARTITIONING
+        # By default, graph.face is not needed. Retreiving it slows down the training (approx 2-5%)
 
         # face = None
         # if hasattr(graph, "face") and graph.face is not None:

@@ -1,4 +1,3 @@
-import math
 from collections import OrderedDict
 from typing import Callable, Optional, Tuple, Union
 
@@ -88,27 +87,7 @@ class H5Dataset(BaseDataset):
         handle = self._get_file_handle()
         for traj_index, traj_name in enumerate(self.datasets_index):
             num_nodes = handle[traj_name]["mesh_pos"].shape[-2]
-            num_steps = handle[traj_name]["mesh_pos"].shape[0]
-
-            if self.use_partitioning:
-                if self.num_partitions is not None:
-                    num_partitions = self.num_partitions
-                else:
-                    num_partitions = math.ceil(num_nodes / self.max_nodes_per_partition)
-            else:
-                num_partitions = 1
-
-            self.partitions_per_trajectory[traj_index] = num_partitions
-            num_valid_frames = self.trajectory_length - int(self.use_previous_data)
-            if num_valid_frames < 0:
-                logger.warning(
-                    f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."
-                )
-                num_valid_frames = 0
-
-            total_samples_in_traj = num_valid_frames * num_partitions
-            self._len_dataset += total_samples_in_traj
-            self.cumulative_samples.append(self._len_dataset)
+            self._add_traj_to_index_map(traj_index, num_nodes)
 
     def _close_file_handles(self):
         for handle in self._file_handles.values():

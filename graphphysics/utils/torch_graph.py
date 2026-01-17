@@ -8,6 +8,8 @@ from meshio import Mesh
 from torch_geometric.data import Data
 from torch_geometric.loader import ClusterData, ClusterLoader
 
+PARTITION_METHODS = ["metis"]
+
 
 def compute_k_hop_edge_index(
     edge_index: torch.Tensor,
@@ -112,22 +114,22 @@ def create_subgraphs(
     Parameters:
         graph (Data): The input graph data.
         num_partitions (int): The number of partitions to create.
-        partition_method (str): The method to use for partitioning ('metis' or 'linkneighbor').
+        partition_method (str): The method to use for partitioning ('metis').
 
     Returns:
         Loader: A DataLoader for the partitioned subgraphs.
         List[Tensor]: A list of tensors containing the node IDs for each partition.
     """
-    if partition_method not in ["metis"]:
+    if partition_method not in PARTITION_METHODS:
         raise ValueError(
-            f"Unsupported partition method: {partition_method}. Supported method is 'metis'."
+            f"Unsupported partition method: {partition_method}. Supported method are {PARTITION_METHODS}."
         )
     if partition_method == "metis":
         cluster = ClusterData(graph, num_parts=num_partitions, log=False)
         loader = ClusterLoader(cluster, batch_size=1, shuffle=False)
         partition = cluster.partition
         partitioned_node_ids = [
-            partition.node_perm[partition.partptr[i]: partition.partptr[i + 1]].cpu()
+            partition.node_perm[partition.partptr[i] : partition.partptr[i + 1]].cpu()
             for i in range(num_partitions)
         ]
         return loader, partitioned_node_ids

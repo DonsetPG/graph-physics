@@ -1,4 +1,3 @@
-import math
 import os
 import random
 from typing import Callable, List, Optional, Tuple, Union
@@ -79,27 +78,7 @@ class XDMFDataset(BaseDataset):
             with meshio.xdmf.TimeSeriesReader(file_path) as reader:
                 points, _ = reader.read_points_cells()
                 num_nodes = len(points)
-                num_steps = reader.num_steps
-
-            if self.use_partitioning:
-                if self.num_partitions is not None:
-                    num_partitions = self.num_partitions
-                else:
-                    num_partitions = math.ceil(num_nodes / self.max_nodes_per_partition)
-            else:
-                num_partitions = 1
-
-            self.partitions_per_trajectory[traj_index] = num_partitions
-            num_valid_frames = self.trajectory_length - int(self.use_previous_data)
-            if num_valid_frames < 0:
-                logger.warning(
-                    f"Trajectory {traj_index} has too few frames ({num_steps}) to be used. Skipping."
-                )
-                num_valid_frames = 0
-
-            total_samples_in_traj = num_valid_frames * num_partitions
-            self._len_dataset += total_samples_in_traj
-            self.cumulative_samples.append(self._len_dataset)
+            self._add_traj_to_index_map(traj_index, num_nodes)
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.

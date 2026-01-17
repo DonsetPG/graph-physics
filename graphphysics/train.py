@@ -58,14 +58,15 @@ flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
-flags.DEFINE_bool(
-    "use_partitioning", False, "Whether to use graph partitioning"
-)
+flags.DEFINE_bool("use_partitioning", False, "Whether to use graph partitioning")
 flags.DEFINE_integer(
     "num_partitions", None, "Number of partitions for graph partitioning"
 )
 flags.DEFINE_integer(
     "max_nodes_per_partition", None, "Maximum number of nodes per partition"
+)
+flags.DEFINE_integer(
+    "gradient_batch_size", 1, "Number of batches to accumulate gradients over"
 )
 
 
@@ -105,6 +106,7 @@ def main(argv):
     use_partitioning = FLAGS.use_partitioning
     num_partitions = FLAGS.num_partitions
     max_nodes_per_partition = FLAGS.max_nodes_per_partition
+    gradient_batch_size = FLAGS.gradient_batch_size
 
     seed_everything(FLAGS.seed, workers=True)
 
@@ -262,7 +264,7 @@ def main(argv):
         ],
         log_every_n_steps=100,
         gradient_clip_val=1.0,
-        # accumulate_grad_batches=num_partitions
+        accumulate_grad_batches=gradient_batch_size,
     )
 
     # Resuming training from a checkpoint
