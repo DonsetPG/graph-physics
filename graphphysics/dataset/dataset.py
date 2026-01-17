@@ -213,7 +213,14 @@ class BaseDataset(Dataset, ABC):
         return graph
 
     def _apply_partition(self, graph: Data, node_ids: torch.Tensor):
-        # TODO: preserve face, tetra is not needed (I think?)
+        """
+        Applies partitioning to the graph based on the provided node IDs.
+        Parameters:
+            graph (Data): The input graph data.
+            node_ids (torch.Tensor): The node IDs to include in the subgraph.
+        Returns:
+            Data: The partitioned subgraph.
+        """
         node_ids, _ = node_ids.sort()
         x = graph.x[node_ids]
         y = graph.y[node_ids]
@@ -224,20 +231,42 @@ class BaseDataset(Dataset, ABC):
             edge_index=graph.edge_index,
             edge_attr=graph.edge_attr,
             relabel_nodes=True,
-            num_nodes=graph.num_nodes
+            num_nodes=graph.num_nodes,
         )
 
+        # face = None
+        # if hasattr(graph, "face") and graph.face is not None:
+        #     # graph.face: [k, num_faces]
+        #     faces = graph.face
+
+        #     # Mask faces where *all* vertices are in node_ids
+        #     node_mask = torch.isin(faces, node_ids)
+        #     face_mask = node_mask.all(dim=0)
+
+        #     faces = faces[:, face_mask]
+
+        #     # Relabel node indices
+        #     # Build mapping old_index -> new_index
+        #     new_index = torch.full(
+        #         (graph.num_nodes,),
+        #         -1,
+        #         dtype=torch.long,
+        #         device=node_ids.device,
+        #     )
+        #     new_index[node_ids] = torch.arange(node_ids.size(0), device=node_ids.device)
+
+        #     face = new_index[faces]
+
         sub_graph = Data(
-                x=x,
-                y=y,
-                pos=pos,
-                edge_index=edge_index,
-                edge_attr=edge_attr,
-                # face=face,
-                # tetra=tetra,
-                num_nodes=x.size(0),
-                traj_index=graph.traj_index,
-            )
+            x=x,
+            y=y,
+            pos=pos,
+            edge_index=edge_index,
+            edge_attr=edge_attr,
+            # face=face,
+            num_nodes=x.size(0),
+            traj_index=graph.traj_index,
+        )
         return sub_graph
 
     def _get_partition(self, graph, traj_index, subgraph_idx):

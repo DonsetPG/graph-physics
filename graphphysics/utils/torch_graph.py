@@ -282,7 +282,7 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
         f: graph.x[:, indx].detach().cpu().numpy()
         for f, indx in node_features_mapping.items()
     }
-    # TODO: if graph.pos.shape[1] == 3, but no tetra, problem ! REDO this
+    # TODO: if graph.pos.shape[1] == 3, but no tetra, problem ! Should we condition on cells shape?
 
     cells = graph.face.detach().cpu().numpy()
     if graph.pos.shape[1] == 2:
