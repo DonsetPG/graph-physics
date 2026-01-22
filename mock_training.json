@@ -1,14 +1,14 @@
 {
     "dataset": {
-        "extension": "h5",
-        "h5_path": "dataset/original/train.h5",
-        "meta_path": "dataset_config/plate_meta.json",
+        "extension": "xdmf",
+        "xdmf_folder": "dataset/spindle/train",
+        "meta_path": "dataset_config/spindle_meta.json",
         "khop": 1,
         "new_edges_ratio": 0
     },
     "model": {
-        "type": "hierarchical",
-        "message_passing_num": 5,
+        "type": "epd",
+        "message_passing_num": 10,
         "node_input_size": 6,
         "edge_input_size": 4,
         "output_size": 3,
@@ -17,7 +17,7 @@
         "use_silu_activation": false,
         "use_rope_embeddings": false,
         "use_gated_attention": false,
-        "pool_is_remeshing": true,
+        "pool_is_remeshing": false,
         "pool_node_mask": "all"
     },
     "loss": {
@@ -48,7 +48,7 @@
     "training": {
         "use_spatial_mtp": false,
         "use_temporal_block": false,
-        "residual_save_steps": [1, 300, 5000],
-        "sampling_method": "random"
+        "residual_save_steps": [2, 300, 5000],
+        "sampling_method": "fps"
     }
 }

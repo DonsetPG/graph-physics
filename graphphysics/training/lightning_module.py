@@ -84,7 +84,7 @@ class LightningModule(L.LightningModule):
         self.gradient_method = get_gradient_method(
             param=parameters
         )  # finite_diff, least_squares
-        self.is_physical_loss_test = False # Set it true for testing physical loss only
+        self.is_physical_loss_test = True # Set it true for testing physical loss only
         self.physical_loss = (
             HyperelasticResidual(gradient_method=self.gradient_method) # Using HyperelasticResidual for now for deforming plate dataset
             if self.is_physical_loss_test

@@ -197,8 +197,8 @@ class XDMFDataset(BaseDataset):
             graph.edge_index.long() if graph.edge_index is not None else None
         )
 
-        print(graph.tetra)
-        # graph.tetra = graph.tetra.tra
+        # graph.tetra = graph.tetra.transpose(0, 1)
+        # print(graph.x)
 
         if hasattr(graph, "previous_data"):
             del graph.previous_data

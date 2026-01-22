@@ -4,46 +4,36 @@
     "cells": {
       "type": "static",
       "shape": [
-        500,
+        83,
         -1,
         4
       ],
       "dtype": "int32"
     },
-    "Displacement": {
+    "displacement": {
       "type": "dynamic",
       "shape": [
-        500,
+        83,
         -1,
         3
       ],
       "dtype": "float64"
     },
-    "Appartient1": {
+    "node_type": {
       "type": "static",
       "shape": [
-        500,
-        -1,
-        1
-      ],
-      "dtype": "float64"
-    },
-    "AppartientACT": {
-      "type": "static",
-      "shape": [
-        500,
+        83,
         -1,
         1
       ],
       "dtype": "float64"
     }
   },
-  "target_features": ["Displacement"],
+  "target_features": ["displacement"],
   "field_names": [
     "cells",
-    "Displacement",
-    "Appartient1",
-    "AppartientACT"
+    "displacement",
+    "node_type"
   ],
-  "trajectory_length": 500
+  "trajectory_length": 83
 }

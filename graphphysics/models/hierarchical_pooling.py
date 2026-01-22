@@ -106,29 +106,29 @@ class DownSampler(nn.Module):
             return torch.cat(perm, dim=0)
         return torch.empty(0, dtype=torch.long, device=scores.device)
 
-    def _prob_sample(self, scores: torch.Tensor, k: int, temperature: float) -> torch.Tensor:
-        scores = scores.view(-1)
+    def _prob_sample(self, scores: torch.Tensor, k: int) -> torch.Tensor:
+        scores = scores.view(-1).float()
         if scores.numel() == 0 or k <= 0:
             return torch.empty(0, dtype=torch.long, device=scores.device)
         if k >= scores.numel():
             return torch.arange(scores.numel(), device=scores.device)
-        if temperature <= 0:
-            raise ValueError("sampling_temperature must be > 0 for probabilistic sampling.")
-        logits = scores.float() / temperature
-        logits = logits - logits.max()
-        probs = torch.softmax(logits, dim=0)
-        if torch.isnan(probs).any() or probs.sum() <= 0:
-            probs = torch.ones_like(scores, dtype=torch.float)
-            probs = probs / probs.numel()
+        scores = torch.nan_to_num(scores, nan=0.0, posinf=0.0, neginf=0.0)
+        scores = scores - scores.min()
+        scores = torch.clamp_min(scores, 0.0)
+        total = scores.sum()
+        if torch.isnan(total) or total <= 0:
+            probs = torch.full_like(scores, 1.0 / scores.numel())
+        else:
+            probs = scores / total
         return torch.multinomial(probs, k, replacement=False)
 
     def _prob_sample_by_batch(
-        self, scores: torch.Tensor, batch: Optional[torch.Tensor], temperature: float
+        self, scores: torch.Tensor, batch: Optional[torch.Tensor]
     ) -> torch.Tensor:
         scores = scores.view(-1)
         if batch is None:
             k = self._num_keep(scores.numel())
-            return self._prob_sample(scores, k, temperature)
+            return self._prob_sample(scores, k)
 
         perm = []
         for batch_idx in batch.unique(sorted=True):
@@ -137,7 +137,7 @@ class DownSampler(nn.Module):
             if idx.numel() == 0:
                 continue
             k = self._num_keep(idx.numel())
-            sampled = self._prob_sample(scores[idx], k, temperature)
+            sampled = self._prob_sample(scores[idx], k)
             perm.append(idx[sampled])
 
         if perm:
@@ -213,9 +213,7 @@ class DownSampler(nn.Module):
             if scores is None:
                 raise ValueError("No residual scores provided for 'residu_prob' downsampling.")
             scores = scores.squeeze(-1)[candidate]
-            perm = self._prob_sample_by_batch(
-                scores, batch_candidate, self.sampling_temperature
-            )
+            perm = self._prob_sample_by_batch(scores, batch_candidate)
             return candidate[perm]
 
         raise ValueError(f"Unknown method: {self.method}")
