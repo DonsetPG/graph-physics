@@ -29,7 +29,19 @@ check-isort: ## check isort with black profile
 lint: ## Remove unused imports, run linters Black and isort
 	@make remove-unused-imports && isort graphphysics/ --profile black && black .
 
-train-predict: ## Train a small model, predict and retrain
+train-predict: ## Train a small model, predict, retrain and train with partitioning
 	@bash train.sh
 	@bash predict.sh
 	@bash retrain.sh
+	@python3 -m graphphysics.train \
+            --training_parameters_path=mock_training.json \
+            --num_epochs=1 \
+            --init_lr=0.001 \
+            --batch_size=1 \
+            --warmup=500 \
+            --num_workers=0 \
+            --prefetch_factor=0 \
+            --model_save_name=model \
+            --no_edge_feature \
+            --use_partitioning=true \
+            --num_partitions=4 \
