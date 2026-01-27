@@ -210,6 +210,9 @@ def get_dataset(
         ValueError: If the dataset extension specified in param is not supported.
     """
     dataset_params = param.get("dataset", {})
+    inputs = dataset_params.get("inputs", [])
+    if len(inputs) == 0:
+        raise ValueError("Please provide a list of input properties to use.")
     targets = dataset_params.get("targets", [])
     if len(targets) == 0:
         raise ValueError("Please provide a list of target properties to predict.")
@@ -243,6 +246,7 @@ def get_dataset(
         return XDMFDataset(
             xdmf_folder=dataset_params["xdmf_folder"],
             meta_path=dataset_params["meta_path"],
+            inputs=inputs,
             targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,

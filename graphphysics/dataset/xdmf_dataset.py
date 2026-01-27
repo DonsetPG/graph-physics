@@ -17,6 +17,7 @@ class XDMFDataset(BaseDataset):
         self,
         xdmf_folder: str,
         meta_path: str,
+        inputs: list[str] = None,
         targets: list[str] = None,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
@@ -30,6 +31,7 @@ class XDMFDataset(BaseDataset):
     ):
         super().__init__(
             meta_path=meta_path,
+            inputs=inputs,
             targets=targets,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
@@ -111,7 +113,7 @@ class XDMFDataset(BaseDataset):
 
             points, cells = reader.read_points_cells()
             time, point_data, _ = reader.read_data(frame)
-            _, target_point_data, _ = reader.read_data(frame + _target_data_index)
+            # _, target_point_data, _ = reader.read_data(frame + _target_data_index)
 
             if self.use_previous_data:
                 _, previous_data, _ = reader.read_data(frame - _previous_data_index)
@@ -133,24 +135,24 @@ class XDMFDataset(BaseDataset):
         point_data = {
             k: np.array(mesh.point_data[k]).astype(self.meta["features"][k]["dtype"])
             for k in self.meta["features"]
-            if k in mesh.point_data.keys()
+            if k in self.inputs
         }
 
         target_data = {}
         next_data = {}
         for k in self.meta["features"]:
             if k in self.targets:
-                target_data[k] = np.array(target_point_data[k]).astype(
+                target_data[k] = np.array(point_data[k]).astype(
                     self.meta["features"][k]["dtype"]
                 )
-            else:
-                if (
-                    k in target_point_data.keys()
-                    and self.meta["features"][k]["type"] == "dynamic"
-                ):
-                    next_data[k] = np.array(target_point_data[k]).astype(
-                        self.meta["features"][k]["dtype"]
-                    )
+            # else:
+            #     if (
+            #         k in target_point_data.keys()
+            #         and self.meta["features"][k]["type"] == "dynamic"
+            #     ):
+            #         next_data[k] = np.array(target_point_data[k]).astype(
+            #             self.meta["features"][k]["dtype"]
+            #         )
 
         def _reshape_array(a: dict):
             for k, v in a.items():

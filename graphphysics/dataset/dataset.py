@@ -19,6 +19,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(
         self,
         meta_path: str,
+        inputs: list[str],
         targets: list[str],
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
@@ -35,6 +36,24 @@ class BaseDataset(Dataset, ABC):
         self.device = torch.device("cpu")
 
         self.meta: Dict[str, Any] = meta
+
+        # Check inputs are properly defined
+        if inputs is None or len(inputs) == 0:
+            raise ValueError("At least one input must be specified.")
+        for input_ in inputs:
+            if input_ not in self.meta["features"]:
+                raise ValueError(f"Input {input_} not found in available fields.")
+        self.inputs = inputs
+
+        # Check targets are properly defined
+        if targets is None or len(targets) == 0:
+            raise ValueError("At least one target must be specified.")
+        for target in targets:
+            if target not in self.meta["features"]:
+                raise ValueError(f"Target {target} not found in available fields.")
+            if self.meta["features"][target]["type"] != "dynamic":
+                raise ValueError(f"Target {target} is not a dynamic field.")
+        self.targets = targets
 
         # Check targets are properly defined
         if targets is None or len(targets) == 0:
