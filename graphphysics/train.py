@@ -186,7 +186,7 @@ def main(argv):
     valid_dataloader = DataLoader(**valid_dataloader_kwargs)
 
     # Define or resume model
-    num_steps = num_epochs * len(train_dataloader)
+    num_steps = num_epochs * len(train_dataloader) // gradient_batch_size
 
     prev_data_kwargs = {}
     if use_previous_data is True:
