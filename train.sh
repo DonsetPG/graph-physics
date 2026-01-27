@@ -1,10 +1,1 @@
-python -m graphphysics.train \
-            --training_parameters_path=mock_training.json \
-            --num_epochs=1 \
-            --init_lr=0.001 \
-            --batch_size=1 \
-            --warmup=500 \
-            --num_workers=0 \
-            --prefetch_factor=0 \
-            --model_save_name=model \
-            --no_edge_feature
+python -m graphphysics.train --training_parameters_path=training_config/coarse-aneurysm.json --num_epochs=50 --init_lr=0.01 --batch_size=1 --warmup=1500 --num_workers=0 --prefetch_factor=0 --model_save_name=pointnet0.ckpt --use_previous_data=false --no_edge_feature

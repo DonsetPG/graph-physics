@@ -69,11 +69,12 @@ class Simulator(nn.Module):
         self._node_normalizer = Normalizer(
             size=node_input_size, name="node_normalizer", device=device
         )
-        self._edge_normalizer = (
-            Normalizer(size=edge_input_size, name="edge_normalizer", device=device)
-            if self.edge_input_size is not None
-            else None
-        )
+        #self._edge_normalizer = (
+        #    Normalizer(size=edge_input_size, name="edge_normalizer", device=device)
+        #    if self.edge_input_size is not None
+        #    else None
+        #)
+        self._edge_normalizer = None
 
         self.device = device
 
@@ -171,6 +172,7 @@ class Simulator(nn.Module):
             pos=inputs.pos,
             edge_attr=edge_attr,
             edge_index=inputs.edge_index,
+            batch=inputs.batch,
         )
 
         return graph, target_delta_normalized

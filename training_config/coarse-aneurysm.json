@@ -1,36 +1,35 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "dataset/train",
-        "meta_path": "dataset/meta.json",
-        "targets": ["Vitesse"],
+        "xdmf_folder": "dataset-shell-frame/train",
+        "meta_path": "dataset-shell-frame/meta.json",
+        "target_same_frame": true,
         "khop": 1,
         "new_edges_ratio": 0
     },
     "model": {
-        "type": "transformer",
-        "message_passing_num": 10,
-        "hidden_size": 64,
-        "node_input_size": 14,
-        "output_size": 3,
-        "edge_input_size": 0,
+        "type": "pointnet2",
+        "hidden_layers": 4,
+        "hidden_size": 32,
+        "node_input_size": 1111,
+        "output_size": 1,
+        "edge_input_size": 4,
         "num_heads": 4,
-        "use_silu_activation": false,
-        "use_rope_embeddings": false,
-        "use_gated_attention": false
+        "max_neighbors": 64,
+        "dim_model": [[[64, 64, 64, 128], [128, 128, 128, 256], [256, 512, 512, 1111]], [[256, 256, 256], [128, 256, 128], [128, 128, 128, 128]],[128, 128, 128]]
     },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 14,
+        "feature_index_end": 1111,
         "output_index_start": 0,
-        "output_index_end": 3,
-        "node_type_index": 14
+        "output_index_end": 1,
+        "node_type_index": 86
     },
     "transformations": {
         "preprocessing": {
-            "noise": [10.0, 10.0, 1.0, 10.0, 10.0, 1.0],
-            "noise_index_start": [0, 1, 2, 4, 5, 6],
-            "noise_index_end": [1, 2, 3, 5, 6, 7],
+            "noise": [],
+            "noise_index_start": [],
+            "noise_index_end": [],
             "masking": 0
         },
         "world_pos_parameters": {

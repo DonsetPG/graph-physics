@@ -10,7 +10,7 @@ import torch
 import torch.distributed.nn as dist_nn
 import torch.nn as nn
 import torch.nn.functional as F
-from einops import rearrange
+#from einops import rearrange
 from torch.utils.checkpoint import checkpoint
 
 from graphphysics.models.layers import TemporalAttention, build_mlp

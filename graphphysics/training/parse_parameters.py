@@ -13,6 +13,7 @@ from graphphysics.models.processors import (
     EncodeTransformDecode,
     TransolverProcessor,
 )
+from graphphysics.models.pointnet import SegmentationPointNetP2
 from graphphysics.models.simulator import Simulator
 from graphphysics.utils.loss import LossType, MultiLoss
 from graphphysics.utils.nodetype import NodeType
@@ -153,6 +154,13 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             rope_base=rope_base,
             use_temporal_block=use_temporal_block,
         )
+    elif model_type == "pointnet2":
+        return SegmentationPointNetP2(
+            node_input_size=node_input_size,
+            dim_model=param["model"]["dim_model"],
+            output_size=param["model"]["output_size"],
+            number_of_connections=param["model"]["max_neighbors"],
+        )
     else:
         raise ValueError(f"Model type '{model_type}' not supported.")
 
@@ -210,12 +218,11 @@ def get_dataset(
         ValueError: If the dataset extension specified in param is not supported.
     """
     dataset_params = param.get("dataset", {})
-    targets = dataset_params.get("targets", [])
-    if len(targets) == 0:
-        raise ValueError("Please provide a list of target properties to predict.")
+    index_params = param.get("index", {})
     khop = dataset_params.get("khop", 1)
     new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")
+    target_same_frame=dataset_params["target_same_frame"]
 
     world_pos_parameters = None
     if khop > 1:
@@ -229,7 +236,7 @@ def get_dataset(
         return H5Dataset(
             h5_path=dataset_params["h5_path"],
             meta_path=dataset_params["meta_path"],
-            targets=targets,
+            target_same_frame=target_same_frame,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -243,7 +250,7 @@ def get_dataset(
         return XDMFDataset(
             xdmf_folder=dataset_params["xdmf_folder"],
             meta_path=dataset_params["meta_path"],
-            targets=targets,
+            target_same_frame=target_same_frame,
             preprocessing=preprocessing,
             masking_ratio=masking_ratio,
             khop=khop,
@@ -251,6 +258,7 @@ def get_dataset(
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
+            node_type_index=index_params["node_type_index"]
         )
     else:
         raise ValueError(f"Dataset extension '{extension}' not supported.")

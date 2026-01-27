@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 
 import wandb
 from graphphysics.external.aneurysm import build_features
-from graphphysics.training.callback import LogPyVistaPredictionsCallback
+#from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
@@ -225,7 +225,7 @@ def main(argv):
     wandb_logger.experiment.config.update(
         {
             "architecture": parameters["model"]["type"],
-            "#_layers": parameters["model"]["message_passing_num"],
+            "#_layers": parameters["model"]["hidden_layers"],
             "#_neurons": parameters["model"]["hidden_size"],
             "#_hops": parameters["dataset"]["khop"],
             "max_lr": initial_lr,
@@ -242,13 +242,13 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
+            #LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         log_every_n_steps=100,
         gradient_clip_val=1.0,
     )
-
+    
     # Resuming training from a checkpoint
     if model_path and os.path.isfile(model_path) and resume_training:
         logger.success("Resuming training")
