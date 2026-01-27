@@ -1,5 +1,3 @@
-import os
-import sys
 import torch
 import torch.nn as nn
 from loguru import logger
@@ -24,34 +22,6 @@ except ImportError as e:
     logger.critical(
         f"Failed to import DGL. Transformer architecture will default to torch_geometric.TransformerConv. Reason: {e}"
     )
-    assume_no_dgl = os.getenv("GRAPH_PHYSICS_ASSUME_NO_DGL", "").strip().lower()
-    if assume_no_dgl in {"1", "true", "yes", "y"}:
-        logger.warning(
-            "GRAPH_PHYSICS_ASSUME_NO_DGL is set. Continuing with torch_geometric.TransformerConv."
-        )
-    else:
-        logger.warning(
-            "GRAPH_PHYSICS_ASSUME_NO_DGL is set. Continuing with torch_geometric.TransformerConv."
-        )
-        prompt = (
-            "You are about to launch a training without DGL. Transformer will thus use "
-            "torch_geometric.TransformerConv. Is this what you want? Answer Y to resume "
-            "training, and N to cancel: "
-        )
-        while True:
-            try:
-                response = input(prompt)
-            except EOFError:
-                logger.critical(
-                    "No user input available. Set GRAPH_PHYSICS_ASSUME_NO_DGL=1 to bypass."
-                )
-                sys.exit(1)
-            response = response.strip().lower()
-            if response == "y":
-                break
-            if response == "n":
-                sys.exit(1)
-            print("Please answer Y or N.")
 
 
 class EncodeProcessDecode(nn.Module):

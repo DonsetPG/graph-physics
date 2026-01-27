@@ -1,23 +1,23 @@
 import torch
 from torch_geometric.data import Data
+import pyvista as pv
 
 from graphphysics.utils.nodetype import NodeType
+from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
+
 
 device = "cuda" if torch.cuda.is_available() else "cpu"
 
 
 def aneurysm_node_type(graph: Data) -> torch.Tensor:
-    v_x = graph.x[:, 0]
-    wall_inputs = graph.x[:, 3]
-    node_type = torch.zeros(v_x.shape)
+    tawss = graph.x[:, 0]
 
-    wall_mask = wall_inputs == 1.0
+    node_type = torch.ones(tawss.shape, device=device) * NodeType.WALL_BOUNDARY
 
-    inflow_mask = torch.logical_and(graph.pos[:, 1] == 0.0, graph.pos[:, 0] <= 0)
+    inflow_mask = torch.logical_and(graph.pos[:, 1] <= 0.001, graph.pos[:, 0] <= 0)
 
-    outflow_mask = torch.logical_and(graph.pos[:, 1] == 0.0, graph.pos[:, 0] >= 0)
+    outflow_mask = torch.logical_and(graph.pos[:, 1] <= 0.001, graph.pos[:, 0] >= 0)
 
-    node_type[wall_mask] = NodeType.WALL_BOUNDARY
     node_type[inflow_mask] = NodeType.INFLOW
     node_type[outflow_mask] = NodeType.OUTFLOW
 
@@ -27,38 +27,20 @@ def aneurysm_node_type(graph: Data) -> torch.Tensor:
 def build_features(graph: Data) -> Data:
     node_type = aneurysm_node_type(graph)
 
-    current_velocity = graph.x[:, 0:3]
-    target_velocity = graph.y[:, 0:3]
-    previous_velocity = torch.tensor(graph.previous_data["Vitesse"], device=device)
+    mesh = convert_to_meshio_vtu(graph)
+    pv_mesh = pv.from_meshio(mesh)
+    surf = pv_mesh.extract_surface(pass_pointid=True)
+    surf_0 = surf.compute_normals(cell_normals=False, point_normals=True)
+    normals = torch.from_numpy(surf_0.point_normals).float().to(graph.x.device)
 
-    acceleration = current_velocity - previous_velocity
-    next_acceleration = target_velocity - current_velocity
-
-    not_inflow_mask = node_type != NodeType.INFLOW
-    next_acceleration[not_inflow_mask] = 0
-    next_acceleration_unique = next_acceleration.unique()
-
-    mean_next_accel = torch.ones(node_type.shape, device=device) * torch.mean(
-        next_acceleration_unique
-    )
-    min_next_accel = torch.ones(node_type.shape, device=device) * torch.min(
-        next_acceleration_unique
-    )
-    max_next_accel = torch.ones(node_type.shape, device=device) * torch.max(
-        next_acceleration_unique
-    )
-
+    graph.x = graph.x[:, :80] # les inflow_moy
     graph.x = torch.cat(
-        (
-            graph.x,
-            acceleration,
-            graph.pos,
-            mean_next_accel.unsqueeze(1),
-            min_next_accel.unsqueeze(1),
-            max_next_accel.unsqueeze(1),
-            node_type.to(device).unsqueeze(1),
-        ),
-        dim=1,
-    )
-
+    (
+        graph.x,
+        graph.pos,
+        normals,
+        node_type.unsqueeze(1),
+    ),
+    dim=1,
+)
     return graph

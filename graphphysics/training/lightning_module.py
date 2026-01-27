@@ -27,7 +27,8 @@ def build_mask(param: dict, graph: Batch):
         node_type = graph.x[:, 0, param["index"]["node_type_index"]]
     else:
         node_type = graph.x[:, param["index"]["node_type_index"]]
-    mask = torch.logical_or(node_type == NodeType.NORMAL, node_type == NodeType.OUTFLOW)
+    mask = torch.logical_or(node_type == NodeType.WALL_BOUNDARY, node_type == NodeType.OUTFLOW)
+    mask = torch.logical_or(mask, node_type == NodeType.INFLOW)
     mask = torch.logical_not(mask)
 
     return mask
@@ -43,7 +44,7 @@ class LightningModule(L.LightningModule):
         trajectory_length: int = 599,
         timestep: float = 1.0,
         only_processor: bool = False,
-        masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
+        masks: list[NodeType] = [NodeType.INFLOW, NodeType.OUTFLOW, NodeType.WALL_BOUNDARY],
         use_previous_data: bool = False,
         previous_data_start: int = None,
         previous_data_end: int = None,
@@ -344,9 +345,25 @@ class LightningModule(L.LightningModule):
         os.makedirs(save_dir, exist_ok=True)
         archive_path = os.path.join(save_dir, archive_filename)
         xdmf_filename = f"{archive_path}.xdmf"
-        init_mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
+        graph_to_save = trajectory[0]
+        with torch.no_grad():
+            _, _, self.predicted_outputs = self.model(graph_to_save)
+        graph_to_save.x = graph_to_save.x[:, :87]
+        init_mesh = convert_to_meshio_vtu(graph_to_save, add_all_data=True)
         points = init_mesh.points
         cells = init_mesh.cells
+
+        # --- Option: without time series (single frame only) ---
+        target_same_frame: bool = True
+        if getattr(self, "target_same_frame", True):
+            mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
+            mesh.point_data["prediction"] = self.predicted_outputs.detach().cpu().numpy()
+            meshio.write(xdmf_filename, mesh)
+            logger.info(
+                f"[No Time Series] Single frame saved at {xdmf_filename}"
+            )
+            return
+        
         try:
             with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
                 # Write the mesh (points and cells) once
@@ -354,6 +371,7 @@ class LightningModule(L.LightningModule):
                 # Loop through time steps and write data
                 t = timestep if not self.use_previous_data else 2 * timestep
                 for idx, graph in enumerate(trajectory):
+                    graph.x = graph.x[:, :87]
                     mesh = convert_to_meshio_vtu(graph, add_all_data=True)
                     point_data = mesh.point_data
                     cell_data = mesh.cell_data
@@ -381,9 +399,9 @@ class LightningModule(L.LightningModule):
         # Prepare the batch for the current step
         if last_prediction is not None:
             # Update the batch with the last prediction
-            batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
-                last_prediction.detach()
-            )
+            #batch.x[:, self.model.output_index_start : self.model.output_index_end] = (
+            #    last_prediction.detach()
+            #)
             if self.use_previous_data:
                 batch.x[:, self.previous_data_start : self.previous_data_end] = (
                     last_previous_data_prediction.detach()
@@ -428,6 +446,7 @@ class LightningModule(L.LightningModule):
         ) = self._make_prediction(
             batch, self.last_val_prediction, self.last_previous_data_prediction
         )
+        self.predicted_outputs = predicted_outputs
 
         if self.current_val_trajectory == 0:
             self.trajectory_to_save.append(batch)
@@ -470,7 +489,7 @@ class LightningModule(L.LightningModule):
         all_rollout_rmse = torch.sqrt(squared_diff.mean()).item()
 
         self.log(
-            "val_all_rollout_rmse",
+            "val_all_rollout_rmse_TAWSS",
             all_rollout_rmse,
             on_step=False,
             on_epoch=True,
@@ -481,7 +500,7 @@ class LightningModule(L.LightningModule):
         if self.first_step_losses:
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
-                "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+                "val_1step_rmse_TAWSS", mean_first_step_loss, on_epoch=True, prog_bar=True
             )
 
         # Save trajectory graphs
