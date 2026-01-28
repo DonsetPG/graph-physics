@@ -17,5 +17,4 @@ meshes/
 predictions/
 wandb/
 checkpoints/
-dataset/
 dataset-shell-frame/
