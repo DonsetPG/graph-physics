@@ -19,7 +19,7 @@ class BaseDataset(Dataset, ABC):
     def __init__(
         self,
         meta_path: str,
-        targets: list[str],
+        target_same_frame: bool = False,
         preprocessing: Optional[Callable[[Data], Data]] = None,
         masking_ratio: Optional[float] = None,
         khop: int = 1,
@@ -36,16 +36,6 @@ class BaseDataset(Dataset, ABC):
 
         self.meta: Dict[str, Any] = meta
 
-        # Check targets are properly defined
-        if targets is None or len(targets) == 0:
-            raise ValueError("At least one target must be specified.")
-        for target in targets:
-            if target not in self.meta["features"]:
-                raise ValueError(f"Target {target} not found in available fields.")
-            if self.meta["features"][target]["type"] != "dynamic":
-                raise ValueError(f"Target {target} is not a dynamic field.")
-        self.targets = targets
-
         self.trajectory_length: int = self.meta["trajectory_length"]
         self.num_trajectories: Optional[int] = None
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
@@ -61,7 +51,7 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
-
+        self.target_same_frame = target_same_frame
         self.world_pos_index_start = None
         self.world_pos_index_end = None
         if world_pos_parameters is not None:
@@ -88,12 +78,20 @@ class BaseDataset(Dataset, ABC):
         Returns:
             Tuple[int, int]: A tuple containing the trajectory number and the frame number within that trajectory.
         """
-        traj = index // (self.trajectory_length - 1)
-        frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
+        if (self.target_same_frame):
+            traj = index // self.trajectory_length
+            frame = index % self.trajectory_length
+        else:
+            traj = index // (self.trajectory_length - 1)
+            frame = index % (self.trajectory_length - 1) + int(self.use_previous_data)
         return traj, frame
 
     def __len__(self) -> int:
-        return self.size_dataset * (self.trajectory_length - 1)
+        self.target_same_frame=True # OJO !!!!!!!!!!!!!!!!!!!!!!!!
+        if (self.target_same_frame):
+            return self.size_dataset*self.trajectory_length
+        else:
+            return self.size_dataset * (self.trajectory_length - 1)
 
     @abstractmethod
     def __getitem__(self, index: int) -> Data:
