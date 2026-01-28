@@ -30,7 +30,7 @@ At the moment, the repository supports the following:
   * [x] K-hop neighbours 
   * [x] Nodes Masking
   * [x] Augmented Adjacency Matrix
-  * [ ] Sub-meshs
+  * [x] Sub-meshs
 
 Feel free to open a PR if you want to implement a new feature, or an issue to request one.
 
@@ -489,6 +489,17 @@ The possibility exists to test another Message Passing-based model from literatu
 }
 ```
 
+### Mesh Partitioning
+
+This project supports **dynamic partitioning of input meshes** using **METIS**, as described in Cluster-GCN: [An Efficient Algorithm for Training Deep and Large Graph Convolutional Networks](https://arxiv.org/abs/1905.07953) (Retrieved on January 27, 2026). During training, the model operates on **independent submeshes** generated from this partitioning.
+
+To enable partitioning, add the `--use_partitioning` flag to your training script. You can configure the partitioning strategy in one of two ways:
+
+- **Fixed number of partitions per mesh** using `--num_partitions`
+- **Adaptive partitioning based on mesh size** by specifying a maximum number of nodes per partition with `--max_nodes_per_partition`, allowing the number of partitions to vary across meshes
+
+**Gradient accumulation** is also available to maintain or reduce the number of training updates, by specifying a gradient batch size with `--gradient_batch_size`.
+
 # Citations
 
 If you use this repo, please use the following bibtex:
@@ -516,6 +527,6 @@ If you use this repo, please use the following bibtex:
 ## Dev wise
 
 - [ ] Make setup and requirements
-- [ ] Make CI/CD
+- [x] Make CI/CD
 - [ ] Add CI badge
 - [ ] Add testing badges

@@ -192,6 +192,9 @@ def get_dataset(
     use_edge_feature: bool = True,
     use_previous_data: bool = False,
     switch_to_val: bool = False,
+    use_partitioning: bool = False,
+    num_partitions: int = None,
+    max_nodes_per_partition: int = None,
 ):
     """
     Constructs the dataset based on provided parameters.
@@ -238,6 +241,9 @@ def get_dataset(
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
             world_pos_parameters=world_pos_parameters,
+            use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
+            max_nodes_per_partition=max_nodes_per_partition,
         )
     elif extension == "xdmf":
         return XDMFDataset(
@@ -251,6 +257,9 @@ def get_dataset(
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
+            use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
+            max_nodes_per_partition=max_nodes_per_partition,
         )
     else:
         raise ValueError(f"Dataset extension '{extension}' not supported.")

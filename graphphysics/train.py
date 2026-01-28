@@ -58,6 +58,16 @@ flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
     "training_parameters_path", None, "Path to the training parameters JSON file"
 )
+flags.DEFINE_bool("use_partitioning", False, "Whether to use graph partitioning")
+flags.DEFINE_integer(
+    "num_partitions", None, "Number of partitions for graph partitioning"
+)
+flags.DEFINE_integer(
+    "max_nodes_per_partition", None, "Maximum number of nodes per partition"
+)
+flags.DEFINE_integer(
+    "gradient_batch_size", 1, "Number of batches to accumulate gradients over"
+)
 
 
 def main(argv):
@@ -93,6 +103,10 @@ def main(argv):
     use_previous_data = FLAGS.use_previous_data
     previous_data_start = FLAGS.previous_data_start
     previous_data_end = FLAGS.previous_data_end
+    use_partitioning = FLAGS.use_partitioning
+    num_partitions = FLAGS.num_partitions
+    max_nodes_per_partition = FLAGS.max_nodes_per_partition
+    gradient_batch_size = FLAGS.gradient_batch_size
 
     seed_everything(FLAGS.seed, workers=True)
 
@@ -110,6 +124,9 @@ def main(argv):
         preprocessing=train_preprocessing,
         use_edge_feature=use_edge_feature,
         use_previous_data=use_previous_data,
+        use_partitioning=use_partitioning,
+        num_partitions=num_partitions,
+        max_nodes_per_partition=max_nodes_per_partition,
     )
 
     val_preprocessing = get_preprocessing(
@@ -169,7 +186,7 @@ def main(argv):
     valid_dataloader = DataLoader(**valid_dataloader_kwargs)
 
     # Define or resume model
-    num_steps = num_epochs * len(train_dataloader)
+    num_steps = num_epochs * len(train_dataloader) // gradient_batch_size
 
     prev_data_kwargs = {}
     if use_previous_data is True:
@@ -247,6 +264,7 @@ def main(argv):
         ],
         log_every_n_steps=100,
         gradient_clip_val=1.0,
+        accumulate_grad_batches=gradient_batch_size,
     )
 
     # Resuming training from a checkpoint

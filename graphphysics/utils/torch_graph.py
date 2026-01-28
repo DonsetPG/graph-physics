@@ -6,6 +6,9 @@ import torch
 import torch_geometric.transforms as T
 from meshio import Mesh
 from torch_geometric.data import Data
+from torch_geometric.loader import ClusterData, ClusterLoader
+
+PARTITION_METHODS = ["metis"]
 
 
 def compute_k_hop_edge_index(
@@ -100,6 +103,36 @@ def compute_k_hop_graph(
         khop_mesh_graph = edge_feature_computer(khop_mesh_graph).to(device)
 
     return khop_mesh_graph
+
+
+def create_subgraphs(
+    graph: Data, num_partitions: int, partition_method: str = "metis"
+):
+    """
+    Create subgraphs from the input graph for partitioning.
+
+    Parameters:
+        graph (Data): The input graph data.
+        num_partitions (int): The number of partitions to create.
+        partition_method (str): The method to use for partitioning ('metis').
+
+    Returns:
+        Loader: A DataLoader for the partitioned subgraphs.
+        List[Tensor]: A list of tensors containing the node IDs for each partition.
+    """
+    if partition_method not in PARTITION_METHODS:
+        raise ValueError(
+            f"Unsupported partition method: {partition_method}. Supported method are {PARTITION_METHODS}."
+        )
+    if partition_method == "metis":
+        cluster = ClusterData(graph, num_parts=num_partitions, log=False)
+        loader = ClusterLoader(cluster, batch_size=1, shuffle=False)
+        partition = cluster.partition
+        partitioned_node_ids = [
+            partition.node_perm[partition.partptr[i] : partition.partptr[i + 1]].cpu()
+            for i in range(num_partitions)
+        ]
+        return loader, partitioned_node_ids
 
 
 def meshdata_to_graph(
@@ -251,6 +284,7 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
         f: graph.x[:, indx].detach().cpu().numpy()
         for f, indx in node_features_mapping.items()
     }
+    # TODO: if graph.pos.shape[1] == 3, but no tetra, problem ! Should we condition on cells shape?
 
     cells = graph.face.detach().cpu().numpy()
     if graph.pos.shape[1] == 2:
@@ -263,7 +297,6 @@ def torch_graph_to_mesh(graph: Data, node_features_mapping: dict[str, int]) -> M
         raise ValueError(
             f"Graph Pos does not have the right shape. Expected shape[1] to be 2 or 3. Got {graph.pos.shape[1]}"
         )
-
     if cells.shape[-1] != extra_shape:
         cells = cells.T
 

@@ -25,6 +25,9 @@ class XDMFDataset(BaseDataset):
         add_edge_features: bool = True,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
+        use_partitioning: bool = False,
+        num_partitions: Optional[int] = None,
+        max_nodes_per_partition: Optional[int] = None,
         random_prev: int = 1,  # If we use previous data, we will fetch one previous frame between [-1, -random_prev]
         random_next: int = 1,  # The target will be the frame : t + [1, random_next]
     ):
@@ -37,6 +40,9 @@ class XDMFDataset(BaseDataset):
             new_edges_ratio=new_edges_ratio,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            use_partitioning=use_partitioning,
+            num_partitions=num_partitions,
+            max_nodes_per_partition=max_nodes_per_partition,
         )
 
         self.device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -65,12 +71,14 @@ class XDMFDataset(BaseDataset):
             for f in os.listdir(xdmf_folder)
             if os.path.isfile(os.path.join(xdmf_folder, f)) and f.endswith(".xdmf")
         ]
-        self._size_dataset: int = len(self.file_paths)
+        self._build_index_map()
 
-    @property
-    def size_dataset(self) -> int:
-        """Returns the number of trajectories in the dataset."""
-        return self._size_dataset
+    def _build_index_map(self):
+        for traj_index, file_path in enumerate(self.file_paths):
+            with meshio.xdmf.TimeSeriesReader(file_path) as reader:
+                points, _ = reader.read_points_cells()
+                num_nodes = len(points)
+            self._add_traj_to_index_map(traj_index, num_nodes)
 
     def __getitem__(self, index: int) -> Union[Data, Tuple[Data, torch.Tensor]]:
         """Retrieve a graph representation of a frame from a trajectory.
@@ -87,15 +95,13 @@ class XDMFDataset(BaseDataset):
             Union[Data, Tuple[Data, torch.Tensor]]: A graph representation of the specified frame in the trajectory,
             optionally along with selected indices if masking is applied.
         """
-        traj_index, frame = self.get_traj_frame(index=index)
+        traj_index, frame, subgraph_idx = self._get_indices(index)
         xdmf_file = self.file_paths[traj_index]
         mesh_id = os.path.splitext(os.path.basename(xdmf_file))[0].rsplit("_", 1)[-1]
 
-        # Fetch index for previous_data and target
         _target_data_index = random.randint(1, self.random_next)
         _previous_data_index = random.randint(1, self.random_prev)
 
-        # Read XDMF file
         with meshio.xdmf.TimeSeriesReader(xdmf_file) as reader:
             num_steps = reader.num_steps
 
@@ -199,6 +205,10 @@ class XDMFDataset(BaseDataset):
         del graph.next_data
         del graph.previous_data
         graph.traj_index = traj_index
+
+        # TODO: not working with masking and selected_indices yet
+        if self.use_partitioning:
+            graph = self._get_partition(graph, traj_index, subgraph_idx)
 
         if selected_indices is not None:
             return graph, selected_indices
