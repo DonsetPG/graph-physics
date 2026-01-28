@@ -251,8 +251,8 @@ class SegmentationPointNetP2(torch.nn.Module):
             dim_model[-1][1],
             output_size,
             len(dim_model[-1])+1,
-            dropout=0.5,
-            plain_last=False,
+            dropout=0.0,
+            plain_last=True,
             layer_norm=False,
         )
 
@@ -274,6 +274,3 @@ class SegmentationPointNetP2(torch.nn.Module):
 
         #return x.log_softmax(dim=1)
         return x
-
-
-
