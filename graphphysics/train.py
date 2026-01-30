@@ -12,7 +12,7 @@ from torch_geometric.loader import DataLoader
 
 import wandb
 from graphphysics.external.aneurysm import build_features
-from graphphysics.training.callback import LogPyVistaPredictionsCallback
+# from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
     get_dataset,
@@ -259,7 +259,7 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
+            # LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         log_every_n_steps=100,
@@ -284,7 +284,11 @@ def main(argv):
             val_dataloaders=valid_dataloader,
         )
 
+    os._exit(0)
+
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")
     app.run(main)
+    import sys
+    sys.exit(0)

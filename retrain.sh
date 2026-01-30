@@ -1,12 +1,14 @@
 python -m graphphysics.train \
-            --training_parameters_path=mock_training.json \
-            --num_epochs=2 \
+            --project_name=AXC \
+            --training_parameters_path=training_config/coarse-aneurysm.json \
+            --num_epochs=40 \
             --init_lr=0.001 \
             --batch_size=1 \
-            --warmup=500 \
+            --warmup=1500 \
             --num_workers=0 \
             --prefetch_factor=0 \
             --model_save_name=model \
-            --resume_training \
-            --model_path=checkpoints/model.ckpt \
+            --model_path=checkpoints/pretrained_model.ckpt \
+            --use_previous_data=true \
+            --seed=1 \
             --no_edge_feature \

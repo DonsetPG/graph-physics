@@ -9,6 +9,8 @@ class NodeType(enum.IntEnum):
     INFLOW = 4
     OUTFLOW = 5
     WALL_BOUNDARY = 6
+    ANEURYSM = 7
+    STENT = 8
     SIZE = 9
 
 

@@ -45,6 +45,15 @@
           1
         ],
         "dtype": "float32"
+      },
+      "LevelSetStent": {
+        "type": "static",
+        "shape": [
+          79,
+          -1,
+          1
+        ],
+        "dtype": "float32"
       }
     },
     "field_names": [
@@ -52,7 +61,8 @@
       "mesh_pos",
       "Vitesse",
       "node_type",
-      "LevelSetInlet"
+      "LevelSetInlet",
+      "LevelSetStent"
     ],
     "trajectory_length": 79
   }
