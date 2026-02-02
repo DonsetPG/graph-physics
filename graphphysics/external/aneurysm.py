@@ -30,16 +30,14 @@ def aneurysm_node_type(graph: Data) -> torch.Tensor:
     return node_type.to(device)
 
 
-def build_stent_features(graph: Data, node_type: torch.Tensor) -> Data:
+def build_stent_features(graph: Data) -> Data:
 
     stent_id = graph.id.split('_')[-1]
     stent_params = STENTS[stent_id]
-    stent = torch.Tensor(list(stent_params.values()), device=device)
-    stent_features = torch.zeros((graph.x.shape[0], 3), device=device)
+    stent = torch.Tensor(list(stent_params.values()))
+    stent_features = torch.zeros((graph.x.shape[0], 3))
 
-    stent_mask = node_type == NodeType.STENT
-    stent_features[stent_mask] = stent
-
+    stent_features[:] = stent
     return stent_features
 
 
@@ -88,7 +86,7 @@ def build_features(graph: Data) -> Data:
             max_next_accel.unsqueeze(1),
             lvlset_inlet.to(device).unsqueeze(1),
             lvlset_stent.to(device).unsqueeze(1),
-            stent_features,
+            stent_features.to(device),
             node_type.to(device).unsqueeze(1),
         ),
         dim=1,
