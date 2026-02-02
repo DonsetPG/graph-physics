@@ -3,7 +3,7 @@
         "extension": "xdmf",
         "xdmf_folder": "dataset/train",
         "meta_path": "dataset/meta.json",
-        "inputs": [],
+        "inputs": ["Vitesse_4D_Flow"],
         "targets": ["Vitesse"],
         "khop": 1,
         "new_edges_ratio": 0
@@ -12,7 +12,7 @@
         "type": "transformer",
         "message_passing_num": 10,
         "hidden_size": 64,
-        "node_input_size": 14,
+        "node_input_size": 6,
         "output_size": 3,
         "edge_input_size": 0,
         "num_heads": 4,
@@ -22,10 +22,15 @@
     },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 14,
+        "feature_index_end": 6,
         "output_index_start": 0,
         "output_index_end": 3,
-        "node_type_index": 14
+        "node_type_index": 6
+    },
+    "loss": {
+        "type": ["l2loss"],
+        "weights": [1.0],
+        "gradient_method": "finite_diff"
     },
     "transformations": {
         "preprocessing": {

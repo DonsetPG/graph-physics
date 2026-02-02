@@ -55,16 +55,6 @@ class BaseDataset(Dataset, ABC):
                 raise ValueError(f"Target {target} is not a dynamic field.")
         self.targets = targets
 
-        # Check targets are properly defined
-        if targets is None or len(targets) == 0:
-            raise ValueError("At least one target must be specified.")
-        for target in targets:
-            if target not in self.meta["features"]:
-                raise ValueError(f"Target {target} not found in available fields.")
-            if self.meta["features"][target]["type"] != "dynamic":
-                raise ValueError(f"Target {target} is not a dynamic field.")
-        self.targets = targets
-
         self.trajectory_length: int = self.meta["trajectory_length"]
         self.num_trajectories: Optional[int] = None
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
