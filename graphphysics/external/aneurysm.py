@@ -34,7 +34,7 @@ def build_stent_features(graph: Data, node_type: torch.Tensor) -> Data:
 
     stent_id = graph.id.split('_')[-1]
     stent_params = STENTS[stent_id]
-    stent = torch.Tensor([stent_params.values()], device=device)
+    stent = torch.Tensor(list(stent_params.values()), device=device)
     stent_features = torch.zeros((graph.x.shape[0], 3), device=device)
 
     stent_mask = node_type == NodeType.STENT
