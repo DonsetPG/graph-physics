@@ -25,7 +25,7 @@ def aneurysm_node_type(graph: Data) -> torch.Tensor:
 
 
 def build_features(graph: Data) -> Data:
-    node_type = aneurysm_node_type(graph)
+    node_type = graph.x[:, 3]
 
     velocity_4DFlow = graph.x[:, 0:3]
 

@@ -3,7 +3,7 @@
         "extension": "xdmf",
         "xdmf_folder": "dataset/train",
         "meta_path": "dataset/meta.json",
-        "inputs": ["Vitesse_4D_Flow"],
+        "inputs": ["Vitesse_4D_Flow", "node_type"],
         "targets": ["Vitesse"],
         "khop": 1,
         "new_edges_ratio": 0
