@@ -1,7 +1,8 @@
 {
     "dataset": {
         "extension": "h5",
-        "h5_path": "dataset/h5_dataset/deforming_plate/train.h5",
+        "train_path": "dataset/h5_dataset/deforming_plate/train.h5",
+        "test_path": "dataset/h5_dataset/deforming_plate/test.h5",
         "meta_path": "dataset_config/plate_meta.json",
         "targets": ["world_pos"],
         "khop": 1,

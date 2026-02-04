@@ -32,7 +32,6 @@ class H5Dataset(BaseDataset):
         new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
-        switch_to_val: bool = False,
         world_pos_parameters: Optional[dict] = None,
         cache_size: int = 8,
         use_partitioning: bool = False,
@@ -55,10 +54,6 @@ class H5Dataset(BaseDataset):
         )
 
         self.type = "h5"
-
-        if switch_to_val:
-            h5_path = h5_path.replace("train", "test")
-
         self.h5_path = h5_path
         self.meta_path = meta_path
         self.cache_size = cache_size

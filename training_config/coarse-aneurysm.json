@@ -1,8 +1,9 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "dataset/train",
-        "meta_path": "dataset/meta.json",
+        "train_path": "dataset/train",
+        "test_path": "dataset/test",
+        "meta_path": "dataset_config/aneurysm_meta.json",
         "targets": ["Vitesse"],
         "khop": 1,
         "new_edges_ratio": 0

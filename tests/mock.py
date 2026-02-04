@@ -7,6 +7,7 @@ import re
 MOCK_TFR_PATH = "tests/mock_tfr"
 MOCK_TR_SPLIT = "train"
 MOCK_H5_SAVE_PATH = "tests/mock_h5/write_mock.h5"
+MOCK_H5_TEST_PATH = "tests/mock_h5/write_mock_test.h5"
 MOCK_H5_META_SAVE_PATH = "tests/mock_h5/meta.json"
 MOCK_H5_TARGETS = ["velocity"]
 MOCK_H5_META10_SAVE_PATH = "tests/mock_h5/meta10.json"
@@ -14,7 +15,9 @@ MOCK_VTU_FOLDER_PATH = "tests/mock_vtu"
 MOCK_VTU_PATH = os.path.join(MOCK_VTU_FOLDER_PATH, "cylinder_0.vtu")
 MOCK_VTU_ANEURYSM_FOLDER_PATH = "tests/mock_vtu_aneurysm"
 MOCK_XDMF_FOLDER = "tests/mock_xdmf"
+MOCK_XDMF_FOLDER_TEST = "tests/mock_xdmf_test"
 os.makedirs(MOCK_XDMF_FOLDER, exist_ok=True)
+os.makedirs(MOCK_XDMF_FOLDER_TEST, exist_ok=True)
 MOCK_XDMF_PATH = os.path.join(MOCK_XDMF_FOLDER, "mock.xdmf")
 MOCK_XDMF_H5_PATH = os.path.join(MOCK_XDMF_FOLDER, "mock.h5")
 MOCK_XDMF_TARGETS = ["velocity_x", "velocity_y"]

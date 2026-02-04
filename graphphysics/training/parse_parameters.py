@@ -219,6 +219,14 @@ def get_dataset(
     khop = dataset_params.get("khop", 1)
     new_edges_ratio = dataset_params.get("new_edges_ratio", 0)
     extension = dataset_params.get("extension", "")
+    train_path = dataset_params["train_path"]
+    test_path = dataset_params["test_path"]
+    if test_path == train_path:
+        raise ValueError("Train and test paths cannot be the same.")
+    if switch_to_val:
+        dataset_path = test_path
+    else:
+        dataset_path = train_path
 
     world_pos_parameters = None
     if khop > 1:
@@ -230,7 +238,7 @@ def get_dataset(
 
     if extension == "h5":
         return H5Dataset(
-            h5_path=dataset_params["h5_path"],
+            h5_path=dataset_path,
             meta_path=dataset_params["meta_path"],
             targets=targets,
             preprocessing=preprocessing,
@@ -239,7 +247,6 @@ def get_dataset(
             new_edges_ratio=new_edges_ratio,
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
-            switch_to_val=switch_to_val,
             world_pos_parameters=world_pos_parameters,
             use_partitioning=use_partitioning,
             num_partitions=num_partitions,
@@ -247,7 +254,7 @@ def get_dataset(
         )
     elif extension == "xdmf":
         return XDMFDataset(
-            xdmf_folder=dataset_params["xdmf_folder"],
+            xdmf_folder=dataset_path,
             meta_path=dataset_params["meta_path"],
             targets=targets,
             preprocessing=preprocessing,

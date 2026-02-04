@@ -58,7 +58,6 @@ class XDMFDataset(BaseDataset):
         self.random_prev = random_prev
 
         if switch_to_val:
-            xdmf_folder = xdmf_folder.replace("train", "test")
             self.random_next = 1
             self.random_prev = 1
 
