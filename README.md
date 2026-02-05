@@ -171,7 +171,8 @@ Let's start with the training settings. An example is available [here](https://g
 ```json 
 "dataset": {
     "extension": "h5",
-    "h5_path": "dataset/h5_dataset/cylinder_flow/train.h5",
+    "train_path": "dataset/h5_dataset/cylinder_flow/train.h5",
+    "test_path": "dataset/h5_dataset/cylinder_flow/test.h5",    
     "meta_path": "dataset/h5_dataset/cylinder_flow/meta.json",
     "targets": ["velocity"],
     "khop": 1
@@ -179,7 +180,7 @@ Let's start with the training settings. An example is available [here](https://g
 ```
 
 - `extension`: If the dataset used is h5 or xdmf.
-- `h5_path` (`xdmf_folder` for an xdmf dataset): Path to the dataset.
+- `train_path`: Path to the training dataset, either an `.h5` file or the folder containing the `.xdmf` files.
 
 > [!NOTE]  
 > You will need a dataset at the same location with `test` instead of `train` in its name for the validation step to work. Otherwise, you can specify its name directly in `training.py`

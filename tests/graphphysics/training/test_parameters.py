@@ -16,8 +16,8 @@ from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.loss import L2Loss, MultiLoss, DivergenceL2Loss, CosineLoss
 from graphphysics.models.layers import set_use_silu_activation, use_silu_activation
 
-from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TARGETS
-from tests.mock import MOCK_XDMF_FOLDER, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
+from tests.mock import MOCK_H5_META_SAVE_PATH, MOCK_H5_SAVE_PATH, MOCK_H5_TEST_PATH, MOCK_H5_TARGETS
+from tests.mock import MOCK_XDMF_FOLDER, MOCK_XDMF_FOLDER_TEST, MOCK_H5_META10_SAVE_PATH, MOCK_XDMF_TARGETS
 
 # Mock imports from 'graphphysics' package
 with patch(
@@ -81,7 +81,8 @@ with patch(
                 },
                 "dataset": {
                     "extension": "h5",
-                    "h5_path": MOCK_H5_SAVE_PATH,
+                    "train_path": MOCK_H5_SAVE_PATH,
+                    "test_path": MOCK_H5_TEST_PATH,
                     "meta_path": MOCK_H5_META_SAVE_PATH,
                     "targets": MOCK_H5_TARGETS,
                     "khop": 2,
@@ -153,23 +154,39 @@ with patch(
             preprocessing = MagicMock()
             dataset = get_dataset(self.param, preprocessing)
 
-            self.assertEqual(dataset.h5_path, self.param["dataset"]["h5_path"])
+            self.assertEqual(dataset.h5_path, self.param["dataset"]["train_path"])
             self.assertEqual(dataset.meta_path, self.param["dataset"]["meta_path"])
             self.assertEqual(dataset.targets, self.param["dataset"]["targets"])
             self.assertEqual(dataset.preprocessing, preprocessing)
             self.assertEqual(dataset.khop, self.param["dataset"]["khop"])
             self.assertTrue(dataset.add_edge_features, True)
 
+        def test_get_dataset_h5_validation(self):
+            preprocessing = MagicMock()
+            dataset = get_dataset(self.param, preprocessing, switch_to_val=True)
+
+            self.assertEqual(dataset.h5_path, self.param["dataset"]["test_path"])
+
         def test_get_dataset_xdmf(self):
             self.param["dataset"]["extension"] = "xdmf"
             self.param["dataset"]["meta_path"] = MOCK_H5_META10_SAVE_PATH
-            self.param["dataset"]["xdmf_folder"] = MOCK_XDMF_FOLDER
+            self.param["dataset"]["train_path"] = MOCK_XDMF_FOLDER
+            self.param["dataset"]["test_path"] = MOCK_XDMF_FOLDER_TEST
             self.param["dataset"]["targets"] = MOCK_XDMF_TARGETS
             dataset = get_dataset(self.param, preprocessing=MagicMock())
 
-            self.assertEqual(dataset.xdmf_folder, self.param["dataset"]["xdmf_folder"])
+            self.assertEqual(dataset.xdmf_folder, self.param["dataset"]["train_path"])
             self.assertEqual(dataset.meta_path, self.param["dataset"]["meta_path"])
             self.assertEqual(dataset.targets, self.param["dataset"]["targets"])
+
+        def test_get_dataset_xdmf_validation(self):
+            self.param["dataset"]["extension"] = "xdmf"
+            self.param["dataset"]["meta_path"] = MOCK_H5_META10_SAVE_PATH
+            self.param["dataset"]["train_path"] = MOCK_XDMF_FOLDER
+            self.param["dataset"]["test_path"] = MOCK_XDMF_FOLDER_TEST
+            self.param["dataset"]["targets"] = MOCK_XDMF_TARGETS
+            dataset = get_dataset(self.param, preprocessing=MagicMock(), switch_to_val=True)
+            self.assertEqual(dataset.xdmf_folder, self.param["dataset"]["test_path"])
 
         def test_get_dataset_invalid(self):
             self.param["dataset"]["extension"] = "invalid_extension"
@@ -231,6 +248,15 @@ with patch(
             l2_loss, loss_name = get_loss(param=param_wo_loss)
             self.assertIsInstance(l2_loss, L2Loss)
             self.assertEqual(loss_name, "L2LOSS")
+
+        def test_get_dataset_train_test_path_equal(self):
+            self.param["dataset"]["test_path"] = self.param["dataset"]["train_path"]
+            with self.assertRaises(ValueError) as context:
+                get_dataset(self.param, preprocessing=MagicMock())
+            self.assertIn(
+                f"Train and test paths cannot be both {self.param['dataset']['train_path']}.",
+                str(context.exception),
+            )
 
     if __name__ == "__main__":
         unittest.main()

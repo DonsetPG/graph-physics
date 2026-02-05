@@ -1,7 +1,8 @@
 {
     "dataset": {
         "extension": "h5",
-        "h5_path": "dataset/h5_dataset/cylinder_flow/train.h5",
+        "train_path": "dataset/h5_dataset/cylinder_flow/train.h5",
+        "test_path": "dataset/h5_dataset/cylinder_flow/test.h5",
         "meta_path": "dataset_config/cylinder_meta.json",
         "targets": ["velocity"],
         "khop": 1

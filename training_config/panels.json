@@ -1,7 +1,8 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "dataset/train",
+        "train_path": "dataset/train",
+        "test_path": "dataset/test",
         "meta_path": "dataset_config/panels_meta.json",
         "targets": ["Vitesse"],
         "khop": 1,

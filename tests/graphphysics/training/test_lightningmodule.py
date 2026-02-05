@@ -13,6 +13,7 @@ from graphphysics.training.lightning_module import LightningModule
 from tests.mock import (
     MOCK_H5_META_SAVE_PATH,
     MOCK_H5_SAVE_PATH,
+    MOCK_H5_TEST_PATH,
 )
 
 with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model, patch(
@@ -71,7 +72,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
                 },
                 "dataset": {
                     "extension": "h5",
-                    "h5_path": MOCK_H5_SAVE_PATH,
+                    "train_path": MOCK_H5_SAVE_PATH,
+                    "test_path": MOCK_H5_TEST_PATH,
                     "meta_path": MOCK_H5_META_SAVE_PATH,
                     "khop": 2,
                 },

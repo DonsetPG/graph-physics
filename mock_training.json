@@ -1,7 +1,8 @@
 {
     "dataset": {
         "extension": "xdmf",
-        "xdmf_folder": "tests/mock_xdmf_aneurysm",
+        "train_path": "tests/mock_xdmf_aneurysm",
+        "test_path": "tests/mock_xdmf_aneurysm_test",
         "meta_path": "tests/mock_h5/meta_aneurysm.json",
         "targets": ["Vitesse"],
         "khop": 1
