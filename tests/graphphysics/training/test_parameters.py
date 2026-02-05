@@ -254,7 +254,7 @@ with patch(
             with self.assertRaises(ValueError) as context:
                 get_dataset(self.param, preprocessing=MagicMock())
             self.assertIn(
-                "Train and test paths cannot be the same.",
+                f"Train and test paths cannot be both {self.param['dataset']['train_path']}.",
                 str(context.exception),
             )
 

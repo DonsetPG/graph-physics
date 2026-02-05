@@ -222,7 +222,7 @@ def get_dataset(
     train_path = dataset_params["train_path"]
     test_path = dataset_params["test_path"]
     if test_path == train_path:
-        raise ValueError("Train and test paths cannot be the same.")
+        raise ValueError(f"Train and test paths cannot be both {train_path}.")
     if switch_to_val:
         dataset_path = test_path
     else:
