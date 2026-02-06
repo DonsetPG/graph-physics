@@ -5,8 +5,8 @@ from typing import Callable, Optional
 import h5py
 import numpy as np
 
-from graphphysics.utils.hierarchical import get_frame_as_mesh, get_traj_as_meshes
 from jraphphysics.dataset.dataset import BaseDataset
+from jraphphysics.utils.hierarchical import get_frame_as_mesh, get_traj_as_meshes
 
 
 class H5Dataset(BaseDataset):

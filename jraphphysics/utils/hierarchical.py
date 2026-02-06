@@ -64,10 +64,17 @@ def get_frame_as_mesh(
     }
     point_data["node_type"] = traj["node_type"][0]
 
-    mesh_pos = (
-        traj["mesh_pos"][frame] if traj["mesh_pos"].ndim > 1 else traj["mesh_pos"]
-    )
-    cells = traj["cells"][frame] if traj["cells"].ndim > 1 else traj["cells"]
+    if traj["mesh_pos"].ndim > 2:
+        mesh_frame = min(frame, traj["mesh_pos"].shape[0] - 1)
+        mesh_pos = traj["mesh_pos"][mesh_frame]
+    else:
+        mesh_pos = traj["mesh_pos"]
+
+    if traj["cells"].ndim > 2:
+        cells_frame = min(frame, traj["cells"].shape[0] - 1)
+        cells = traj["cells"][cells_frame]
+    else:
+        cells = traj["cells"]
     return mesh_pos, cells, point_data, target_point_data, next_data
 
 
