@@ -1,0 +1,22 @@
+# JAX stack (pinned to versions validated in venvjax)
+jax==0.9.0.1
+jaxlib==0.9.0.1
+
+# Core JAX ecosystem used by jraphphysics
+flax==0.12.3
+jraph==0.0.6.dev0
+optax==0.2.7
+orbax-checkpoint==0.11.32
+
+# Required transitive/runtime deps pinned for reproducibility
+ml_dtypes==0.5.4
+numpy==2.1.2
+scipy==1.17.0
+absl-py==2.2.0
+opt_einsum==3.4.0
+msgpack==1.1.2
+tensorstore==0.1.80
+typing_extensions==4.15.0
+PyYAML==6.0.3
+rich==14.3.2
+treescope==0.1.10

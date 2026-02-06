@@ -71,8 +71,32 @@ class Simulator(nnx.Module):
         features = inputs.nodes["features"][
             :, self.feature_index_start : self.feature_index_end
         ]
-        pos = inputs.nodes["pos"]
-        node_features = jnp.concatenate([pos, features, one_hot_type], axis=1)
+        base_features = jnp.concatenate([features, one_hot_type], axis=1)
+
+        pos = None
+        if isinstance(inputs.nodes, dict):
+            pos = inputs.nodes.get("pos")
+
+        with_pos = (
+            jnp.concatenate([pos, base_features], axis=1)
+            if pos is not None
+            else base_features
+        )
+
+        if with_pos.shape[1] == self.node_input_size:
+            return with_pos
+        if base_features.shape[1] == self.node_input_size:
+            return base_features
+
+        node_features = with_pos
+        if node_features.shape[1] < self.node_input_size:
+            pad_width = self.node_input_size - node_features.shape[1]
+            padding = jnp.zeros(
+                (node_features.shape[0], pad_width), dtype=node_features.dtype
+            )
+            node_features = jnp.concatenate([node_features, padding], axis=1)
+        elif node_features.shape[1] > self.node_input_size:
+            node_features = node_features[:, : self.node_input_size]
 
         return node_features
 
@@ -95,9 +119,13 @@ class Simulator(nnx.Module):
             globals=inputs.globals,
         )"""
 
-        graph = inputs._replace(
-            nodes={"features": node_features_normalized},
-        )
+        if isinstance(inputs.nodes, dict):
+            nodes = dict(inputs.nodes)
+            nodes["features"] = node_features_normalized
+        else:
+            nodes = {"features": node_features_normalized}
+
+        graph = inputs._replace(nodes=nodes)
 
         return graph, target_delta_normalized
 
