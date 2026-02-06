@@ -31,33 +31,27 @@ except ImportError as e:
         )
     else:
         logger.warning(
-            "DGL is unavailable. Transformer will use torch_geometric.TransformerConv."
+            "GRAPH_PHYSICS_ASSUME_NO_DGL is set. Continuing with torch_geometric.TransformerConv."
         )
-        if not sys.stdin.isatty():
-            logger.warning(
-                "No interactive stdin available. Continuing without DGL; set "
-                "GRAPH_PHYSICS_ASSUME_NO_DGL=1 to silence this warning."
-            )
-        else:
-            prompt = (
-                "You are about to launch a training without DGL. Transformer will thus use "
-                "torch_geometric.TransformerConv. Is this what you want? Answer Y to resume "
-                "training, and N to cancel: "
-            )
-            while True:
-                try:
-                    response = input(prompt)
-                except EOFError:
-                    logger.critical(
-                        "No user input available. Set GRAPH_PHYSICS_ASSUME_NO_DGL=1 to bypass."
-                    )
-                    sys.exit(1)
-                response = response.strip().lower()
-                if response == "y":
-                    break
-                if response == "n":
-                    sys.exit(1)
-                print("Please answer Y or N.")
+        prompt = (
+            "You are about to launch a training without DGL. Transformer will thus use "
+            "torch_geometric.TransformerConv. Is this what you want? Answer Y to resume "
+            "training, and N to cancel: "
+        )
+        while True:
+            try:
+                response = input(prompt)
+            except EOFError:
+                logger.critical(
+                    "No user input available. Set GRAPH_PHYSICS_ASSUME_NO_DGL=1 to bypass."
+                )
+                sys.exit(1)
+            response = response.strip().lower()
+            if response == "y":
+                break
+            if response == "n":
+                sys.exit(1)
+            print("Please answer Y or N.")
 
 
 class EncodeProcessDecode(nn.Module):

@@ -125,25 +125,14 @@ def create_subgraphs(
             f"Unsupported partition method: {partition_method}. Supported method are {PARTITION_METHODS}."
         )
     if partition_method == "metis":
-        try:
-            cluster = ClusterData(graph, num_parts=num_partitions, log=False)
-            loader = ClusterLoader(cluster, batch_size=1, shuffle=False)
-            partition = cluster.partition
-            partitioned_node_ids = [
-                partition.node_perm[
-                    partition.partptr[i] : partition.partptr[i + 1]
-                ].cpu()
-                for i in range(num_partitions)
-            ]
-            return loader, partitioned_node_ids
-        except ImportError:
-            # Fallback when optional METIS dependencies are unavailable.
-            node_ids = torch.arange(graph.num_nodes)
-            partitioned_node_ids = [
-                ids.cpu() for ids in torch.tensor_split(node_ids, num_partitions)
-            ]
-            fallback_loader = [graph.subgraph(ids) for ids in partitioned_node_ids]
-            return fallback_loader, partitioned_node_ids
+        cluster = ClusterData(graph, num_parts=num_partitions, log=False)
+        loader = ClusterLoader(cluster, batch_size=1, shuffle=False)
+        partition = cluster.partition
+        partitioned_node_ids = [
+            partition.node_perm[partition.partptr[i] : partition.partptr[i + 1]].cpu()
+            for i in range(num_partitions)
+        ]
+        return loader, partitioned_node_ids
 
 
 def meshdata_to_graph(
