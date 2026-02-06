@@ -43,7 +43,11 @@ def _masked_mean(errors: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
     masked_count = jnp.sum(mask_expanded)
     masked_sum = jnp.sum(errors * mask_expanded)
     unmasked_mean = jnp.mean(errors)
-    return jnp.where(masked_count > 0, masked_sum / masked_count, unmasked_mean)
+    # Avoid 0/0 when no masked nodes are present (this can poison gradients even if
+    # the branch is not selected).
+    safe_count = jnp.maximum(masked_count, 1.0)
+    masked_mean = masked_sum / safe_count
+    return jnp.where(masked_count > 0, masked_mean, unmasked_mean)
 
 
 @dataclass

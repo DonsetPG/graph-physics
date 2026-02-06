@@ -628,6 +628,18 @@ class SimpleTrainer:
                             total_nodes,
                             node_type_values[:16],
                         )
+                        if self.masks is None:
+                            fallback_masks = [
+                                int(value)
+                                for value in node_type_values
+                                if 0 <= int(value) < int(NodeType.SIZE)
+                            ]
+                            if len(fallback_masks) > 0:
+                                self.masks = fallback_masks  # type: ignore[assignment]
+                                logger.warning(
+                                    "Falling back to dataset-driven loss masks: {}",
+                                    fallback_masks,
+                                )
                 step_loss, step_metrics = self.train_step(graph)
                 if not np.isfinite(step_loss):
                     self._raise_non_finite_loss(

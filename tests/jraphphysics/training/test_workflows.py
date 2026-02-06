@@ -29,6 +29,7 @@ class FakeGraph:
 class DummySimulator:
     def __init__(self):
         self.output_size = 2
+        self.node_type_index = 2
         self.inputs = []
 
     def __call__(self, graph, is_training=True):
@@ -263,3 +264,28 @@ def test_simple_trainer_batches_multiple_graphs():
         history = trainer.fit(dataset=dataset, num_epochs=1, batch_size=2, max_train_samples=3)
 
     assert len(history["train_loss"]) == 1
+
+
+def test_simple_trainer_falls_back_to_dataset_node_type_masks():
+    simulator = DummySimulator()
+    logger = DummyLogger()
+    trainer = SimpleTrainer(
+        simulator=simulator,
+        learning_rate=1e-3,
+        logger=logger,
+    )
+    graph = FakeGlobalsGraph(
+        nodes={"features": np.array([[0.0, 0.0, 1.0]], dtype=np.float32)},
+        globals={"target_features": np.array([[0.0, 0.0]], dtype=np.float32)},
+    )
+    dataset = [{}, {}]
+
+    from unittest.mock import patch
+
+    with patch(
+        "jraphphysics.training.workflows.graph_from_dataset_item",
+        return_value=graph,
+    ):
+        trainer.fit(dataset=dataset, num_epochs=1, max_train_samples=1)
+
+    assert trainer.masks == [1]
