@@ -23,10 +23,19 @@ FLAGS = flags.FLAGS
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_float("init_lr", 0.001, "Initial learning rate")
+flags.DEFINE_integer("batch_size", 2, "Batch size")
+flags.DEFINE_integer("warmup", 1000, "Learning rate warmup steps")
+flags.DEFINE_integer("num_workers", 2, "Number of dataset workers (compatibility flag)")
+flags.DEFINE_integer(
+    "prefetch_factor",
+    2,
+    "Number of prefetched batches per worker (compatibility flag)",
+)
 flags.DEFINE_integer("max_train_samples", -1, "Max train samples per epoch")
 flags.DEFINE_integer("max_val_samples", -1, "Max validation samples per epoch")
 flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
 flags.DEFINE_bool("use_wandb", True, "Enable Weights & Biases logging")
+flags.DEFINE_bool("no_edge_feature", False, "Whether to disable edge features")
 flags.DEFINE_string(
     "model_save_name",
     "checkpoints/jraphphysics_checkpoint.pkl",
@@ -56,6 +65,12 @@ def _to_limit(value: int):
     return value
 
 
+def _effective_train_samples(dataset, max_train_samples: int | None) -> int:
+    if max_train_samples is None:
+        return len(dataset)
+    return min(len(dataset), max_train_samples)
+
+
 def main(argv):
     del argv
 
@@ -65,17 +80,24 @@ def main(argv):
     with open(FLAGS.training_parameters_path, "r") as fp:
         parameters = json.load(fp)
 
-    preprocessing = get_preprocessing(parameters)
-    val_preprocessing = get_preprocessing(parameters, remove_noise=True)
+    use_edge_feature = not FLAGS.no_edge_feature
+    preprocessing = get_preprocessing(parameters, use_edge_feature=use_edge_feature)
+    val_preprocessing = get_preprocessing(
+        parameters,
+        remove_noise=True,
+        use_edge_feature=use_edge_feature,
+    )
 
     train_dataset = get_dataset(
         param=parameters,
         preprocessing=preprocessing,
+        use_edge_feature=use_edge_feature,
         use_previous_data=FLAGS.use_previous_data,
     )
     val_dataset = get_dataset(
         param=parameters,
         preprocessing=val_preprocessing,
+        use_edge_feature=use_edge_feature,
         use_previous_data=FLAGS.use_previous_data,
         switch_to_val=True,
     )
@@ -125,15 +147,24 @@ def main(argv):
                     "#_neurons": parameters["model"]["hidden_size"],
                     "#_hops": parameters["dataset"]["khop"],
                     "max_lr": FLAGS.init_lr,
-                    "batch_size": 1,
+                    "batch_size": FLAGS.batch_size,
+                    "warmup": FLAGS.warmup,
+                    "num_workers": FLAGS.num_workers,
+                    "prefetch_factor": FLAGS.prefetch_factor,
+                    "use_edge_feature": use_edge_feature,
                 }
             )
 
     loss_fn, loss_name = get_loss(parameters)
     gradient_method = get_gradient_method(parameters)
+    max_train_samples = _to_limit(FLAGS.max_train_samples)
+    max_val_samples = _to_limit(FLAGS.max_val_samples)
+    total_steps = FLAGS.num_epochs * max(_effective_train_samples(train_dataset, max_train_samples), 1)
     trainer = SimpleTrainer(
         simulator=simulator,
         learning_rate=FLAGS.init_lr,
+        warmup_steps=max(FLAGS.warmup, 0),
+        total_steps=total_steps,
         loss_fn=loss_fn,
         loss_name=loss_name,
         gradient_method=gradient_method,
@@ -145,8 +176,8 @@ def main(argv):
         preprocessing=preprocessing,
         val_dataset=val_dataset,
         val_preprocessing=val_preprocessing,
-        max_train_samples=_to_limit(FLAGS.max_train_samples),
-        max_val_samples=_to_limit(FLAGS.max_val_samples),
+        max_train_samples=max_train_samples,
+        max_val_samples=max_val_samples,
     )
 
     end_epoch = start_epoch + FLAGS.num_epochs

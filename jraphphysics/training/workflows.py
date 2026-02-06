@@ -278,6 +278,8 @@ def load_checkpoint(path: str) -> Dict[str, Any]:
 class SimpleTrainer:
     simulator: Any
     learning_rate: float = 1e-3
+    warmup_steps: int = 0
+    total_steps: Optional[int] = None
     loss_fn: Any | None = None
     loss_name: Any | None = None
     masks: list[NodeType] | None = None
@@ -296,7 +298,17 @@ class SimpleTrainer:
             return
 
         self._nnx = nnx
-        tx = optax.adam(self.learning_rate)
+        learning_rate: Any = self.learning_rate
+        if self.warmup_steps > 0:
+            decay_steps = max(int(self.total_steps or 1), self.warmup_steps + 1)
+            learning_rate = optax.warmup_cosine_decay_schedule(
+                init_value=0.0,
+                peak_value=self.learning_rate,
+                warmup_steps=self.warmup_steps,
+                decay_steps=decay_steps,
+                end_value=self.learning_rate * 1e-3,
+            )
+        tx = optax.adam(learning_rate)
 
         for kwargs in ({}, {"wrt": nnx.Param}):
             try:

@@ -64,6 +64,7 @@ def test_get_preprocessing_adds_noise(base_param):
     preprocess_fn.assert_called_once_with(graph, key=key)
     called_kwargs = mock_build.call_args.kwargs
     assert called_kwargs["noise_parameters"] is not None
+    assert called_kwargs["add_edges_features"] is True
 
 
 def test_get_preprocessing_remove_noise(base_param):
@@ -80,6 +81,20 @@ def test_get_preprocessing_remove_noise(base_param):
     assert out_key is key
     called_kwargs = mock_build.call_args.kwargs
     assert called_kwargs["noise_parameters"] is None
+
+
+def test_get_preprocessing_without_edge_features(base_param):
+    graph = MagicMock()
+    key = MagicMock()
+
+    preprocess_fn = MagicMock(return_value=(graph, key))
+    with patch("jraphphysics.training.parse_parameters.build_preprocessing") as mock_build:
+        mock_build.return_value = preprocess_fn
+        preprocessing = get_preprocessing(base_param, use_edge_feature=False)
+        preprocessing(graph, key)
+
+    called_kwargs = mock_build.call_args.kwargs
+    assert called_kwargs["add_edges_features"] is False
 
 
 def test_get_model_transformer(base_param):
@@ -129,12 +144,18 @@ def test_get_simulator(base_param):
 
 def test_get_dataset_xdmf(base_param):
     with patch("jraphphysics.training.parse_parameters.XDMFDataset") as mock_dataset:
-        get_dataset(base_param, preprocessing=MagicMock(), switch_to_val=True)
+        get_dataset(
+            base_param,
+            preprocessing=MagicMock(),
+            switch_to_val=True,
+            use_edge_feature=False,
+        )
         called = mock_dataset.call_args.kwargs
 
     assert called["xdmf_folder"] == base_param["dataset"]["xdmf_folder"]
     assert called["targets"] == base_param["dataset"]["targets"]
     assert called["switch_to_val"] is True
+    assert called["add_edge_features"] is False
 
 
 def test_get_dataset_h5(base_param):
@@ -146,12 +167,18 @@ def test_get_dataset_h5(base_param):
         "khop": 1,
     }
     with patch("jraphphysics.training.parse_parameters.H5Dataset") as mock_dataset:
-        get_dataset(base_param, preprocessing=None, switch_to_val=True)
+        get_dataset(
+            base_param,
+            preprocessing=None,
+            switch_to_val=True,
+            use_edge_feature=False,
+        )
         called = mock_dataset.call_args.kwargs
 
     assert called["h5_path"] == base_param["dataset"]["h5_path"]
     assert called["targets"] == base_param["dataset"]["targets"]
     assert called["switch_to_val"] is True
+    assert called["add_edge_features"] is False
 
 
 def test_get_dataset_invalid_extension(base_param):

@@ -34,6 +34,7 @@ def _default_rngs(seed: int = 0) -> nnx.Rngs:
 def get_preprocessing(
     param: Dict[str, Any],
     remove_noise: bool = False,
+    use_edge_feature: bool = True,
 ) -> GraphPreprocessing:
     preprocessing_params = param.get("transformations", {}).get("preprocessing", {})
     noise_scale = preprocessing_params.get("noise", 0)
@@ -58,7 +59,7 @@ def get_preprocessing(
     preprocessing = build_preprocessing(
         noise_parameters=noise_parameters,
         world_pos_parameters=world_pos_parameters,
-        add_edges_features=True,
+        add_edges_features=use_edge_feature,
     )
 
     def _wrapped(
@@ -147,6 +148,7 @@ def get_simulator(
 def get_dataset(
     param: Dict[str, Any],
     preprocessing: Optional[Callable] = None,
+    use_edge_feature: bool = True,
     use_previous_data: bool = False,
     switch_to_val: bool = False,
 ) -> Any:
@@ -165,6 +167,7 @@ def get_dataset(
             targets=targets,
             preprocessing=preprocessing,
             khop=khop,
+            add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
         )
@@ -177,7 +180,7 @@ def get_dataset(
             preprocessing=preprocessing,
             masking_ratio=None,
             khop=khop,
-            add_edge_features=True,
+            add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
             switch_to_val=switch_to_val,
         )
