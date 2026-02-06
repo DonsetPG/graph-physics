@@ -117,3 +117,30 @@ def test_multiloss_returns_scalar():
     )
     assert value.shape == ()
     assert jnp.isfinite(value)
+
+
+def test_l2loss_empty_mask_falls_back_to_unmasked_mean():
+    graph = _build_graph()
+    node_type = jnp.full_like(graph.nodes["features"][:, 2], int(NodeType.OBSTACLE)).astype(
+        jnp.int32
+    )
+    target = jnp.array(
+        [[1.0, 1.0], [2.0, -2.0], [2.0, 3.0], [1.0, -4.0]],
+        dtype=jnp.float32,
+    )
+    network_output = jnp.array(
+        [[1.1, 0.9], [1.8, -2.1], [2.1, 2.8], [1.2, -3.9]],
+        dtype=jnp.float32,
+    )
+
+    loss = L2Loss()(
+        graph=graph,
+        target=target,
+        network_output=network_output,
+        node_type=node_type,
+        masks=[NodeType.NORMAL],
+    )
+
+    expected = jnp.mean((network_output - target) ** 2)
+    assert jnp.isfinite(loss)
+    assert jnp.allclose(loss, expected)

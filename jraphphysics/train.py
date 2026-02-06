@@ -159,7 +159,22 @@ def main(argv):
     gradient_method = get_gradient_method(parameters)
     max_train_samples = _to_limit(FLAGS.max_train_samples)
     max_val_samples = _to_limit(FLAGS.max_val_samples)
-    total_steps = FLAGS.num_epochs * max(_effective_train_samples(train_dataset, max_train_samples), 1)
+    effective_train_samples = _effective_train_samples(train_dataset, max_train_samples)
+    effective_val_samples = _effective_train_samples(val_dataset, max_val_samples)
+    total_steps = FLAGS.num_epochs * max(effective_train_samples, 1)
+    logger.info(
+        "Training setup: epochs={}, train_samples/epoch={}, val_samples/epoch={}, warmup_steps={}",
+        FLAGS.num_epochs,
+        effective_train_samples,
+        effective_val_samples,
+        max(FLAGS.warmup, 0),
+    )
+    if max_val_samples is None and len(val_dataset) > 1000:
+        logger.warning(
+            "Validation is configured on the full validation set ({} samples). "
+            "This can be slow; use --max_val_samples to bound epoch time.",
+            len(val_dataset),
+        )
     trainer = SimpleTrainer(
         simulator=simulator,
         learning_rate=FLAGS.init_lr,

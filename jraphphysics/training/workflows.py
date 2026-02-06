@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import pickle
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
@@ -8,6 +9,7 @@ from typing import Any, Callable, Dict, Mapping, Optional, Sequence, Tuple
 import jax.numpy as jnp
 import numpy as np
 import jraph
+from loguru import logger
 
 from graphphysics.utils.nodetype import NodeType
 from jraphphysics.training.parse_parameters import GraphPreprocessing
@@ -285,10 +287,12 @@ class SimpleTrainer:
     masks: list[NodeType] | None = None
     gradient_method: str | None = None
     logger: Any | None = None
+    progress_log_interval: int = 50
     _optimizer: Optional[Any] = field(default=None, init=False)
     _nnx: Optional[Any] = field(default=None, init=False)
     _use_optimizer: bool = field(default=False, init=False)
     _global_step: int = field(default=0, init=False)
+    _optimizer_error_logged: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         try:
@@ -346,6 +350,55 @@ class SimpleTrainer:
         if self.loss_name is None:
             return "loss"
         return str(self.loss_name)
+
+    def _loss_mask_summary(self, graph: jraph.GraphsTuple) -> Tuple[int, int]:
+        try:
+            node_type = np.asarray(
+                graph.nodes["features"][:, self.simulator.node_type_index]
+            ).astype(np.int32)
+            masks = self.masks or [NodeType.NORMAL, NodeType.OUTFLOW]
+            selected = np.zeros_like(node_type, dtype=bool)
+            for node_t in masks:
+                selected |= node_type == int(node_t)
+            return int(selected.sum()), int(node_type.shape[0])
+        except Exception:
+            return 0, 0
+
+    def _raise_non_finite_loss(
+        self,
+        split: str,
+        epoch_idx: int,
+        step_idx: int,
+        loss_value: float,
+        graph: jraph.GraphsTuple,
+    ) -> None:
+        node_features = np.asarray(graph.nodes["features"])
+        node_finite = np.isfinite(node_features)
+        node_type = None
+        if node_features.ndim == 2 and self.simulator.node_type_index < node_features.shape[1]:
+            node_type = node_features[:, self.simulator.node_type_index]
+
+        target = None
+        if graph.globals is not None and isinstance(graph.globals, dict):
+            target = graph.globals.get("target_features")
+        target_finite_ratio = None
+        if target is not None:
+            target_np = np.asarray(target)
+            target_finite_ratio = float(np.mean(np.isfinite(target_np)))
+
+        active_nodes, total_nodes = self._loss_mask_summary(graph)
+        msg = (
+            f"Non-finite {split} loss at epoch={epoch_idx + 1}, step={step_idx + 1}, "
+            f"global_step={self._global_step + 1}, loss={loss_value}. "
+            f"finite(node_features)={float(np.mean(node_finite)):.6f}, "
+            f"active_loss_nodes={active_nodes}/{total_nodes}"
+        )
+        if node_type is not None:
+            uniq = np.unique(node_type.astype(np.int32))
+            msg += f", unique_node_types={uniq.tolist()[:16]}"
+        if target_finite_ratio is not None:
+            msg += f", finite(target)={target_finite_ratio:.6f}"
+        raise FloatingPointError(msg)
 
     def _compute_multiloss_components(
         self, graph: jraph.GraphsTuple
@@ -455,8 +508,14 @@ class SimpleTrainer:
                 else:
                     metrics[f"train_{self._single_loss_metric_name()}"] = loss_value
                 return loss_value, metrics
-            except Exception:
+            except Exception as exc:
                 self._use_optimizer = False
+                if not self._optimizer_error_logged:
+                    logger.warning(
+                        "Disabling optimizer updates after value_and_grad failure: {}",
+                        exc,
+                    )
+                    self._optimizer_error_logged = True
 
         loss_value = float(
             supervised_loss(
@@ -501,18 +560,64 @@ class SimpleTrainer:
             "val_1step_rmse": [],
         }
 
-        for _ in range(num_epochs):
+        val_limit = (
+            len(val_dataset)
+            if (val_dataset is not None and max_val_samples is None)
+            else (
+                min(len(val_dataset), max_val_samples)
+                if val_dataset is not None
+                else 0
+            )
+        )
+        logger.info(
+            "Starting JAX training: epochs={}, train_steps_per_epoch={}, val_steps={}",
+            num_epochs,
+            train_limit,
+            val_limit,
+        )
+
+        for epoch_idx in range(num_epochs):
+            epoch_start = time.time()
+            logger.info("Epoch {}/{} started", epoch_idx + 1, num_epochs)
             epoch_losses = []
             epoch_metric_values: Dict[str, list[float]] = {}
             for idx in range(train_limit):
                 graph = graph_from_dataset_item(dataset[idx])
                 graph, key = _apply_preprocessing(graph, preprocessing, key)
+                if idx == 0:
+                    active_nodes, total_nodes = self._loss_mask_summary(graph)
+                    if total_nodes > 0 and active_nodes == 0:
+                        logger.warning(
+                            "No nodes match default loss mask on first batch (active_loss_nodes=0/{}). "
+                            "Check 'index.node_type_index' and node type values in your dataset.",
+                            total_nodes,
+                        )
                 step_loss, step_metrics = self.train_step(graph)
+                if not np.isfinite(step_loss):
+                    self._raise_non_finite_loss(
+                        split="train",
+                        epoch_idx=epoch_idx,
+                        step_idx=idx,
+                        loss_value=step_loss,
+                        graph=graph,
+                    )
                 epoch_losses.append(step_loss)
                 for name, value in step_metrics.items():
                     epoch_metric_values.setdefault(name, []).append(float(value))
                 self._global_step += 1
                 self._log_metrics(step_metrics, step=self._global_step)
+                if (
+                    self.progress_log_interval > 0
+                    and ((idx + 1) % self.progress_log_interval == 0 or idx + 1 == train_limit)
+                ):
+                    logger.info(
+                        "Epoch {}/{} step {}/{} train_loss={:.6g}",
+                        epoch_idx + 1,
+                        num_epochs,
+                        idx + 1,
+                        train_limit,
+                        step_loss,
+                    )
 
             epoch_loss = float(np.mean(epoch_losses))
             history["train_loss"].append(epoch_loss)
@@ -532,6 +637,16 @@ class SimpleTrainer:
                     gradient_method=self.gradient_method,
                     key=key,
                 )
+                if not np.isfinite(val_loss):
+                    first_graph = graph_from_dataset_item(val_dataset[0])
+                    first_graph, _ = _apply_preprocessing(first_graph, val_preprocessing, key)
+                    self._raise_non_finite_loss(
+                        split="val",
+                        epoch_idx=epoch_idx,
+                        step_idx=0,
+                        loss_value=val_loss,
+                        graph=first_graph,
+                    )
                 history["val_loss"].append(val_loss)
                 self._log_metrics({"val_loss": val_loss}, step=self._global_step)
 
@@ -544,5 +659,21 @@ class SimpleTrainer:
                 for metric_name, metric_value in val_rollout_metrics.items():
                     history.setdefault(metric_name, []).append(metric_value)
                 self._log_metrics(val_rollout_metrics, step=self._global_step)
+                logger.info(
+                    "Epoch {}/{} done in {:.2f}s | train_loss={:.6g} val_loss={:.6g}",
+                    epoch_idx + 1,
+                    num_epochs,
+                    time.time() - epoch_start,
+                    epoch_loss,
+                    val_loss,
+                )
+            else:
+                logger.info(
+                    "Epoch {}/{} done in {:.2f}s | train_loss={:.6g}",
+                    epoch_idx + 1,
+                    num_epochs,
+                    time.time() - epoch_start,
+                    epoch_loss,
+                )
 
         return history

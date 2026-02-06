@@ -34,6 +34,18 @@ def _prepare_mask_for_loss(
     return mask
 
 
+def _masked_mean(errors: jnp.ndarray, mask: jnp.ndarray) -> jnp.ndarray:
+    mask_expanded = mask
+    while mask_expanded.ndim < errors.ndim:
+        mask_expanded = mask_expanded[:, None]
+    mask_expanded = mask_expanded.astype(errors.dtype)
+
+    masked_count = jnp.sum(mask_expanded)
+    masked_sum = jnp.sum(errors * mask_expanded)
+    unmasked_mean = jnp.mean(errors)
+    return jnp.where(masked_count > 0, masked_sum / masked_count, unmasked_mean)
+
+
 @dataclass
 class L2Loss:
     @property
@@ -53,8 +65,7 @@ class L2Loss:
         mask = _prepare_mask_for_loss(
             network_output, node_type, masks, selected_indexes
         )
-        errors = ((network_output - target) ** 2)[mask]
-        return jnp.mean(errors)
+        return _masked_mean((network_output - target) ** 2, mask)
 
 
 @dataclass
@@ -80,7 +91,7 @@ class CosineLoss:
         output_norm = jnp.linalg.norm(network_output, axis=1) + 1e-8
         cosine = jnp.sum(network_output * target, axis=1) / (target_norm * output_norm)
         errors = 1.0 - cosine
-        return jnp.mean(errors[mask])
+        return _masked_mean(errors, mask)
 
 
 @dataclass
@@ -110,7 +121,7 @@ class L1SmoothLoss:
             0.5 * (diff**2) / self.beta,
             diff - 0.5 * self.beta,
         )
-        return jnp.mean(errors[mask])
+        return _masked_mean(errors, mask)
 
 
 @dataclass
@@ -148,8 +159,8 @@ class GradientL2Loss:
                 field=target_physical,
                 method=gradient_method,
             )
-        errors = ((network_output_gradient - target_gradient) ** 2)[mask]
-        return jnp.mean(errors)
+        errors = (network_output_gradient - target_gradient) ** 2
+        return _masked_mean(errors, mask)
 
 
 @dataclass
@@ -187,8 +198,8 @@ class ConvectionL2Loss:
             gradient=network_output_gradient,
             method=gradient_method,
         )
-        errors = ((network_output_convection - target_convection) ** 2)[mask]
-        return jnp.mean(errors)
+        errors = (network_output_convection - target_convection) ** 2
+        return _masked_mean(errors, mask)
 
 
 @dataclass
@@ -218,7 +229,7 @@ class DivergenceL2Loss:
             gradient=network_output_gradient,
             method=gradient_method,
         )
-        return jnp.mean((divergence**2)[mask])
+        return _masked_mean(divergence**2, mask)
 
 
 @dataclass
@@ -248,7 +259,7 @@ class DivergenceL1Loss:
             gradient=network_output_gradient,
             method=gradient_method,
         )
-        return jnp.mean(jnp.abs(divergence)[mask])
+        return _masked_mean(jnp.abs(divergence), mask)
 
 
 @dataclass
@@ -286,7 +297,7 @@ class DivergenceL1SmoothLoss:
             0.5 * (diff**2) / self.beta,
             diff - 0.5 * self.beta,
         )
-        return jnp.mean(errors[mask])
+        return _masked_mean(errors, mask)
 
 
 @dataclass
