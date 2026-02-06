@@ -5,7 +5,11 @@ import jraph
 from flax import nnx
 import pytest
 from jax.experimental import sparse as jsparse
-from jraphphysics.models.processors import EncodeTransformDecode
+from jraphphysics.models.processors import (
+    EncodeProcessDecode,
+    EncodeTransformDecode,
+    TransolverProcessor,
+)
 from jraphphysics.models.layers import Transformer
 
 
@@ -107,3 +111,120 @@ class TestEncodeTransformDecode:
         # Verify each processor is a Transformer
         for processor in model.processor_list:
             assert isinstance(processor, Transformer)
+
+
+class TestEncodeProcessDecode:
+    @pytest.fixture
+    def sample_graph(self):
+        n_nodes = 6
+        n_edges = 8
+        nodes = {
+            "features": jnp.ones((n_nodes, 10)),
+            "pos": jnp.ones((n_nodes, 3)),
+        }
+        edges = jnp.ones((n_edges, 4))
+        senders = jnp.array([0, 1, 2, 3, 4, 5, 1, 2], dtype=jnp.int32)
+        receivers = jnp.array([1, 2, 3, 4, 5, 0, 3, 4], dtype=jnp.int32)
+        return jraph.GraphsTuple(
+            n_node=jnp.array([n_nodes]),
+            n_edge=jnp.array([n_edges]),
+            nodes=nodes,
+            edges=edges,
+            senders=senders,
+            receivers=receivers,
+            globals=None,
+        )
+
+    def test_encode_process_decode_output(self, sample_graph):
+        model = EncodeProcessDecode(
+            message_passing_num=2,
+            node_input_size=10,
+            edge_input_size=4,
+            output_size=5,
+            hidden_size=32,
+            rngs=nnx.Rngs(params=0, dropout=0),
+        )
+        outputs = model(sample_graph)
+        assert outputs.shape == (sample_graph.n_node[0], 5)
+
+    def test_encode_process_decode_only_processor(self, sample_graph):
+        hidden_size = 32
+        sample_graph = sample_graph._replace(
+            nodes={
+                "features": jnp.ones((sample_graph.n_node[0], hidden_size)),
+                "pos": sample_graph.nodes["pos"],
+            },
+            edges=jnp.ones((sample_graph.n_edge[0], hidden_size)),
+        )
+        model = EncodeProcessDecode(
+            message_passing_num=2,
+            node_input_size=10,
+            edge_input_size=4,
+            output_size=5,
+            hidden_size=hidden_size,
+            only_processor=True,
+            rngs=nnx.Rngs(params=0, dropout=0),
+        )
+        outputs = model(sample_graph)
+        assert outputs.shape == (sample_graph.n_node[0], hidden_size)
+
+    def test_encode_process_decode_rope_requires_pos(self, sample_graph):
+        model = EncodeProcessDecode(
+            message_passing_num=1,
+            node_input_size=10,
+            edge_input_size=4,
+            output_size=2,
+            hidden_size=32,
+            use_rope_embeddings=True,
+            rngs=nnx.Rngs(params=0, dropout=0),
+        )
+        bad_graph = sample_graph._replace(nodes={"features": sample_graph.nodes["features"]})
+        with pytest.raises(ValueError):
+            model(bad_graph)
+
+
+class TestTransolverProcessor:
+    @pytest.fixture
+    def sample_graph(self):
+        n_nodes = 5
+        nodes = {
+            "features": jnp.ones((n_nodes, 8)),
+            "pos": jnp.ones((n_nodes, 3)),
+        }
+        senders = jnp.array([0, 1, 2, 3], dtype=jnp.int32)
+        receivers = jnp.array([1, 2, 3, 4], dtype=jnp.int32)
+        return jraph.GraphsTuple(
+            n_node=jnp.array([n_nodes]),
+            n_edge=jnp.array([4]),
+            nodes=nodes,
+            edges=None,
+            senders=senders,
+            receivers=receivers,
+            globals=None,
+        )
+
+    def test_transolver_output(self, sample_graph):
+        model = TransolverProcessor(
+            message_passing_num=2,
+            node_input_size=8,
+            output_size=3,
+            hidden_size=16,
+            num_heads=4,
+            rngs=nnx.Rngs(params=0, dropout=0),
+        )
+        outputs = model(sample_graph)
+        assert outputs.shape == (sample_graph.n_node[0], 3)
+
+    def test_transolver_rope_requires_pos(self, sample_graph):
+        model = TransolverProcessor(
+            message_passing_num=2,
+            node_input_size=8,
+            output_size=3,
+            hidden_size=16,
+            num_heads=4,
+            use_rope_embeddings=True,
+            rngs=nnx.Rngs(params=0, dropout=0),
+        )
+        bad_graph = sample_graph._replace(nodes={"features": sample_graph.nodes["features"]})
+        with pytest.raises(ValueError):
+            model(bad_graph)

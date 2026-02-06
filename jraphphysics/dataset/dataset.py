@@ -21,7 +21,9 @@ class BaseDataset(data.Dataset):
         preprocessing: Optional[
             Callable[[jraph.GraphsTuple], jraph.GraphsTuple]
         ] = None,
+        masking_ratio: Optional[float] = None,
         khop: int = 1,
+        add_edge_features: bool = False,
         use_previous_data: bool = False,
     ):
         with open(meta_path, "r") as fp:
@@ -46,7 +48,9 @@ class BaseDataset(data.Dataset):
         self.khop_edge_attr_cache: Dict[int, jnp.ndarray] = {}
 
         self.preprocessing = preprocessing
+        self.masking_ratio = masking_ratio
         self.khop = khop
+        self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
 
     @property
@@ -72,7 +76,11 @@ class BaseDataset(data.Dataset):
 
     def _apply_preprocessing(self, graph: jraph.GraphsTuple) -> jraph.GraphsTuple:
         if self.preprocessing is not None:
-            graph = self.preprocessing(graph)
+            transformed = self.preprocessing(graph)
+            if isinstance(transformed, tuple):
+                graph = transformed[0]
+            else:
+                graph = transformed
         return graph
 
     def _apply_k_hop(

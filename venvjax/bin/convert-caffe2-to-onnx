@@ -1,0 +1,6 @@
+#!/Users/paulgarnier/.codex/worktrees/eef9/graph-physics/venvjax/bin/python
+import sys
+from caffe2.python.onnx.bin.conversion import caffe2_to_onnx
+if __name__ == '__main__':
+    sys.argv[0] = sys.argv[0].removesuffix('.exe')
+    sys.exit(caffe2_to_onnx())
