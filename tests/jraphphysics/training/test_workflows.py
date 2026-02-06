@@ -1,6 +1,8 @@
 from dataclasses import dataclass
 from pathlib import Path
 
+import jax.numpy as jnp
+import jraph
 import numpy as np
 
 from jraphphysics.training.workflows import (
@@ -200,3 +202,64 @@ def test_simple_trainer_logs_graphphysics_metric_names():
     assert "val_1step_rmse" in all_keys
     assert len(history["val_all_rollout_rmse"]) == 1
     assert len(history["val_1step_rmse"]) == 1
+
+
+def test_simple_trainer_optimizer_update_uses_model_and_grads_signature():
+    simulator = DummySimulator()
+    trainer = SimpleTrainer(simulator=simulator, learning_rate=1e-3)
+    graph = FakeGraph(nodes={"features": np.array([[0.0, 0.0, 1.0]], dtype=np.float32)})
+
+    class FakeNNX:
+        @staticmethod
+        def value_and_grad(fn):
+            def _wrapped(model):
+                _ = fn, model
+                return np.array(1.0, dtype=np.float32), {"dummy": 1}
+
+            return _wrapped
+
+    class RecordingOptimizer:
+        def __init__(self):
+            self.calls = []
+
+        def update(self, model, grads):
+            self.calls.append((model, grads))
+
+    trainer._nnx = FakeNNX()
+    trainer._optimizer = RecordingOptimizer()
+    trainer._use_optimizer = True
+
+    _, metrics = trainer.train_step(graph)
+
+    assert len(trainer._optimizer.calls) == 1
+    assert trainer._optimizer.calls[0][0] is simulator
+    assert "train_loss" in metrics
+
+
+def test_simple_trainer_batches_multiple_graphs():
+    simulator = DummySimulator()
+    trainer = SimpleTrainer(simulator=simulator, learning_rate=1e-3)
+
+    graph = jraph.GraphsTuple(
+        nodes={
+            "features": jnp.array([[0.0, 0.0, 1.0]], dtype=jnp.float32),
+            "pos": jnp.array([[0.0, 0.0, 0.0]], dtype=jnp.float32),
+        },
+        edges=None,
+        senders=jnp.array([0], dtype=jnp.int32),
+        receivers=jnp.array([0], dtype=jnp.int32),
+        n_node=jnp.array([1], dtype=jnp.int32),
+        n_edge=jnp.array([1], dtype=jnp.int32),
+        globals={},
+    )
+    dataset = [{}, {}, {}]
+
+    from unittest.mock import patch
+
+    with patch(
+        "jraphphysics.training.workflows.graph_from_dataset_item",
+        side_effect=[graph, graph, graph],
+    ):
+        history = trainer.fit(dataset=dataset, num_epochs=1, batch_size=2, max_train_samples=3)
+
+    assert len(history["train_loss"]) == 1

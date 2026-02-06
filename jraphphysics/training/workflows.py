@@ -31,6 +31,14 @@ def _to_numpy(value: Any) -> Any:
     return value
 
 
+def _batch_graphs(graphs: Sequence[jraph.GraphsTuple]) -> jraph.GraphsTuple:
+    if len(graphs) == 0:
+        raise ValueError("Cannot batch an empty graph list.")
+    if len(graphs) == 1:
+        return graphs[0]
+    return jraph.batch(list(graphs))
+
+
 def graph_from_dataset_item(item: Mapping[str, Any]) -> jraph.GraphsTuple:
     if isinstance(item, tuple):
         item = item[0]
@@ -364,6 +372,15 @@ class SimpleTrainer:
         except Exception:
             return 0, 0
 
+    def _node_type_unique_values(self, graph: jraph.GraphsTuple) -> list[int]:
+        try:
+            node_type = np.asarray(
+                graph.nodes["features"][:, self.simulator.node_type_index]
+            ).astype(np.int32)
+            return np.unique(node_type).tolist()
+        except Exception:
+            return []
+
     def _raise_non_finite_loss(
         self,
         split: str,
@@ -501,7 +518,12 @@ class SimpleTrainer:
 
                 grad_fn = self._nnx.value_and_grad(_loss)
                 loss, grads = grad_fn(self.simulator)
-                self._optimizer.update(grads)
+                try:
+                    # Flax >=0.11 expects update(model, grads).
+                    self._optimizer.update(self.simulator, grads)
+                except TypeError:
+                    # Backward-compatibility for older Flax APIs expecting update(grads).
+                    self._optimizer.update(grads)
                 loss_value = float(loss)
                 if isinstance(self.loss_fn, MultiLoss):
                     metrics["train_multiloss"] = loss_value
@@ -540,12 +562,15 @@ class SimpleTrainer:
         preprocessing: Optional[GraphPreprocessing] = None,
         val_dataset: Optional[Sequence[Mapping[str, Any]]] = None,
         val_preprocessing: Optional[GraphPreprocessing] = None,
+        batch_size: int = 1,
         max_train_samples: Optional[int] = None,
         max_val_samples: Optional[int] = None,
         key: Optional[Any] = None,
     ) -> Dict[str, Any]:
         if num_epochs < 1:
             raise ValueError("num_epochs must be >= 1.")
+        if batch_size < 1:
+            raise ValueError("batch_size must be >= 1.")
 
         train_limit = len(dataset) if max_train_samples is None else min(
             len(dataset), max_train_samples
@@ -570,9 +595,11 @@ class SimpleTrainer:
             )
         )
         logger.info(
-            "Starting JAX training: epochs={}, train_steps_per_epoch={}, val_steps={}",
+            "Starting JAX training: epochs={}, train_samples_per_epoch={}, batch_size={}, train_steps_per_epoch={}, val_steps={}",
             num_epochs,
             train_limit,
+            batch_size,
+            int(np.ceil(train_limit / batch_size)),
             val_limit,
         )
 
@@ -581,23 +608,32 @@ class SimpleTrainer:
             logger.info("Epoch {}/{} started", epoch_idx + 1, num_epochs)
             epoch_losses = []
             epoch_metric_values: Dict[str, list[float]] = {}
-            for idx in range(train_limit):
-                graph = graph_from_dataset_item(dataset[idx])
-                graph, key = _apply_preprocessing(graph, preprocessing, key)
-                if idx == 0:
+            train_step_count = int(np.ceil(train_limit / batch_size))
+            for step_idx, start_idx in enumerate(range(0, train_limit, batch_size)):
+                end_idx = min(train_limit, start_idx + batch_size)
+                batch_graphs = []
+                for sample_idx in range(start_idx, end_idx):
+                    graph = graph_from_dataset_item(dataset[sample_idx])
+                    graph, key = _apply_preprocessing(graph, preprocessing, key)
+                    batch_graphs.append(graph)
+                graph = _batch_graphs(batch_graphs)
+                if step_idx == 0:
                     active_nodes, total_nodes = self._loss_mask_summary(graph)
                     if total_nodes > 0 and active_nodes == 0:
+                        node_type_values = self._node_type_unique_values(graph)
                         logger.warning(
                             "No nodes match default loss mask on first batch (active_loss_nodes=0/{}). "
-                            "Check 'index.node_type_index' and node type values in your dataset.",
+                            "Check 'index.node_type_index' and node type values in your dataset. "
+                            "Observed node_type values: {}",
                             total_nodes,
+                            node_type_values[:16],
                         )
                 step_loss, step_metrics = self.train_step(graph)
                 if not np.isfinite(step_loss):
                     self._raise_non_finite_loss(
                         split="train",
                         epoch_idx=epoch_idx,
-                        step_idx=idx,
+                        step_idx=step_idx,
                         loss_value=step_loss,
                         graph=graph,
                     )
@@ -608,14 +644,17 @@ class SimpleTrainer:
                 self._log_metrics(step_metrics, step=self._global_step)
                 if (
                     self.progress_log_interval > 0
-                    and ((idx + 1) % self.progress_log_interval == 0 or idx + 1 == train_limit)
+                    and (
+                        (step_idx + 1) % self.progress_log_interval == 0
+                        or step_idx + 1 == train_step_count
+                    )
                 ):
                     logger.info(
                         "Epoch {}/{} step {}/{} train_loss={:.6g}",
                         epoch_idx + 1,
                         num_epochs,
-                        idx + 1,
-                        train_limit,
+                        step_idx + 1,
+                        train_step_count,
                         step_loss,
                     )
 

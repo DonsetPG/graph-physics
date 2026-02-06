@@ -3,6 +3,7 @@ import os
 
 from absl import app, flags
 from flax import nnx
+import jax
 from loguru import logger
 
 from jraphphysics.training.parse_parameters import (
@@ -79,6 +80,11 @@ def main(argv):
 
     with open(FLAGS.training_parameters_path, "r") as fp:
         parameters = json.load(fp)
+    logger.info(
+        "JAX backend={} devices={}",
+        jax.default_backend(),
+        [str(device) for device in jax.devices()],
+    )
 
     use_edge_feature = not FLAGS.no_edge_feature
     preprocessing = get_preprocessing(parameters, use_edge_feature=use_edge_feature)
@@ -191,6 +197,7 @@ def main(argv):
         preprocessing=preprocessing,
         val_dataset=val_dataset,
         val_preprocessing=val_preprocessing,
+        batch_size=max(FLAGS.batch_size, 1),
         max_train_samples=max_train_samples,
         max_val_samples=max_val_samples,
     )
