@@ -305,6 +305,9 @@ def load_checkpoint(path: str) -> Dict[str, Any]:
 class SimpleTrainer:
     simulator: Any
     learning_rate: float = 1e-3
+    weight_decay: float = 1e-4
+    beta1: float = 0.9
+    beta2: float = 0.95
     warmup_steps: int = 0
     total_steps: Optional[int] = None
     loss_fn: Any | None = None
@@ -338,7 +341,12 @@ class SimpleTrainer:
                 decay_steps=decay_steps,
                 end_value=self.learning_rate * 1e-3,
             )
-        tx = optax.adam(learning_rate)
+        tx = optax.adamw(
+            learning_rate=learning_rate,
+            weight_decay=self.weight_decay,
+            b1=self.beta1,
+            b2=self.beta2,
+        )
 
         for kwargs in ({}, {"wrt": nnx.Param}):
             try:

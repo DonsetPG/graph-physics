@@ -27,6 +27,9 @@ flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_float("init_lr", 0.001, "Initial learning rate")
 flags.DEFINE_integer("batch_size", 2, "Batch size")
 flags.DEFINE_integer("warmup", 1000, "Learning rate warmup steps")
+flags.DEFINE_float("weight_decay", 1e-4, "AdamW weight decay")
+flags.DEFINE_float("beta1", 0.9, "AdamW beta1")
+flags.DEFINE_float("beta2", 0.95, "AdamW beta2")
 flags.DEFINE_integer("num_workers", 2, "Number of dataset workers (compatibility flag)")
 flags.DEFINE_integer(
     "prefetch_factor",
@@ -162,6 +165,9 @@ def main(argv):
                     "max_lr": FLAGS.init_lr,
                     "batch_size": FLAGS.batch_size,
                     "warmup": FLAGS.warmup,
+                    "weight_decay": FLAGS.weight_decay,
+                    "beta1": FLAGS.beta1,
+                    "beta2": FLAGS.beta2,
                     "num_workers": FLAGS.num_workers,
                     "prefetch_factor": FLAGS.prefetch_factor,
                     "use_edge_feature": use_edge_feature,
@@ -176,13 +182,19 @@ def main(argv):
     gradient_method = get_gradient_method(parameters)
     max_train_samples = _to_limit(FLAGS.max_train_samples)
     max_val_samples = _to_limit(FLAGS.max_val_samples)
+    train_batch_size = max(FLAGS.batch_size, 1)
     effective_train_samples = _effective_train_samples(train_dataset, max_train_samples)
     effective_val_samples = _effective_train_samples(val_dataset, max_val_samples)
-    total_steps = FLAGS.num_epochs * max(effective_train_samples, 1)
+    train_steps_per_epoch = max(
+        (effective_train_samples + train_batch_size - 1) // train_batch_size,
+        1,
+    )
+    total_steps = FLAGS.num_epochs * train_steps_per_epoch
     logger.info(
-        "Training setup: epochs={}, train_samples/epoch={}, val_samples/epoch={}, warmup_steps={}",
+        "Training setup: epochs={}, train_samples/epoch={}, train_steps/epoch={}, val_samples/epoch={}, warmup_steps={}",
         FLAGS.num_epochs,
         effective_train_samples,
+        train_steps_per_epoch,
         effective_val_samples,
         max(FLAGS.warmup, 0),
     )
@@ -195,6 +207,9 @@ def main(argv):
     trainer = SimpleTrainer(
         simulator=simulator,
         learning_rate=FLAGS.init_lr,
+        weight_decay=FLAGS.weight_decay,
+        beta1=FLAGS.beta1,
+        beta2=FLAGS.beta2,
         warmup_steps=max(FLAGS.warmup, 0),
         total_steps=total_steps,
         loss_fn=loss_fn,
@@ -209,7 +224,7 @@ def main(argv):
         preprocessing=preprocessing,
         val_dataset=val_dataset,
         val_preprocessing=val_preprocessing,
-        batch_size=max(FLAGS.batch_size, 1),
+        batch_size=train_batch_size,
         max_train_samples=max_train_samples,
         max_val_samples=max_val_samples,
     )
