@@ -6,6 +6,7 @@ from flax import nnx
 import jax
 from loguru import logger
 
+from jraphphysics.external.aneurysm import build_features
 from jraphphysics.training.parse_parameters import (
     get_dataset,
     get_gradient_method,
@@ -87,11 +88,16 @@ def main(argv):
     )
 
     use_edge_feature = not FLAGS.no_edge_feature
-    preprocessing = get_preprocessing(parameters, use_edge_feature=use_edge_feature)
+    preprocessing = get_preprocessing(
+        parameters,
+        use_edge_feature=use_edge_feature,
+        extra_node_features=build_features,
+    )
     val_preprocessing = get_preprocessing(
         parameters,
         remove_noise=True,
         use_edge_feature=use_edge_feature,
+        extra_node_features=build_features,
     )
 
     train_dataset = get_dataset(

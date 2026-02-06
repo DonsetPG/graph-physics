@@ -35,6 +35,8 @@ def get_preprocessing(
     param: Dict[str, Any],
     remove_noise: bool = False,
     use_edge_feature: bool = True,
+    extra_node_features: Optional[Callable] = None,
+    extra_edge_features: Optional[Callable] = None,
 ) -> GraphPreprocessing:
     preprocessing_params = param.get("transformations", {}).get("preprocessing", {})
     noise_scale = preprocessing_params.get("noise", 0)
@@ -60,6 +62,8 @@ def get_preprocessing(
         noise_parameters=noise_parameters,
         world_pos_parameters=world_pos_parameters,
         add_edges_features=use_edge_feature,
+        extra_node_features=extra_node_features,
+        extra_edge_features=extra_edge_features,
     )
 
     def _wrapped(
