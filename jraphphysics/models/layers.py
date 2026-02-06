@@ -186,17 +186,68 @@ def scaled_query_key_softmax(
     q = q / scaling_factor
 
     if att_mask is not None:
-        attn = jsparse.bcoo_dot_general(
-            att_mask,
-            jnp.einsum("TNH,SNH->TNS", q, k),
-            dimension_numbers=(([1], [0]), ([], [])),
+        raise ValueError(
+            "scaled_query_key_softmax with sparse att_mask is unsupported in dense mode. "
+            "Use scaled_dot_product_attention for sparse attention."
         )
-        attn = nn.softmax(attn)
     else:
         attn = jnp.einsum("TNH,SNH->TNS", q, k)
         attn = nn.softmax(attn, axis=-1)
 
     return attn
+
+
+def _extract_sparse_edges(att_mask: jsparse.BCOO) -> Tuple[jnp.ndarray, jnp.ndarray]:
+    indices = att_mask.indices
+    data = att_mask.data
+    if data is not None:
+        keep = data != 0
+        indices = indices[keep]
+    senders = indices[:, 0].astype(jnp.int32)
+    receivers = indices[:, 1].astype(jnp.int32)
+    return senders, receivers
+
+
+def _sparse_scaled_dot_product_attention(
+    q: jnp.ndarray,
+    k: jnp.ndarray,
+    v: jnp.ndarray,
+    senders: jnp.ndarray,
+    receivers: jnp.ndarray,
+    return_attention: bool = False,
+) -> Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]]:
+    num_nodes = q.shape[0]
+    num_heads = q.shape[1]
+
+    if senders.shape[0] == 0:
+        out = jnp.zeros_like(v)
+        if return_attention:
+            attn = jnp.zeros((num_nodes, num_heads, num_nodes), dtype=q.dtype)
+            return out, attn
+        return out
+
+    q_edges = q[receivers]
+    k_edges = k[senders]
+    v_edges = v[senders]
+
+    scaling_factor = jnp.sqrt(k.shape[-1]).astype(q.dtype)
+    logits = jnp.sum((q_edges / scaling_factor) * k_edges, axis=-1)  # [E, H]
+
+    # Softmax over incoming edges for each receiver independently, per head.
+    segment_max = jax.ops.segment_max(logits, receivers, num_segments=num_nodes)
+    stabilized = logits - segment_max[receivers]
+    exp_logits = jnp.exp(stabilized)
+    segment_denom = jax.ops.segment_sum(exp_logits, receivers, num_segments=num_nodes)
+    alpha = exp_logits / (segment_denom[receivers] + 1e-9)  # [E, H]
+
+    weighted_values = alpha[..., None] * v_edges  # [E, H, D]
+    out = jax.ops.segment_sum(weighted_values, receivers, num_segments=num_nodes)
+
+    if return_attention:
+        attn = jnp.zeros((num_nodes, num_heads, num_nodes), dtype=alpha.dtype)
+        attn = attn.at[receivers, :, senders].add(alpha)
+        return out, attn
+    return out
 
 
 def scaled_dot_product_attention(
@@ -206,7 +257,18 @@ def scaled_dot_product_attention(
     att_mask: Optional[jsparse.BCOO] = None,
     return_attention: bool = False,
 ) -> Union[jnp.ndarray, Tuple[jnp.ndarray, jnp.ndarray]]:
-    attn = scaled_query_key_softmax(q, k, att_mask=att_mask)
+    if att_mask is not None:
+        senders, receivers = _extract_sparse_edges(att_mask)
+        return _sparse_scaled_dot_product_attention(
+            q=q,
+            k=k,
+            v=v,
+            senders=senders,
+            receivers=receivers,
+            return_attention=return_attention,
+        )
+
+    attn = scaled_query_key_softmax(q, k, att_mask=None)
     y = jnp.einsum("TNS,BNH->BNH", attn, v)
 
     if return_attention:
