@@ -295,12 +295,13 @@ class SimpleTrainer:
     masks: list[NodeType] | None = None
     gradient_method: str | None = None
     logger: Any | None = None
-    progress_log_interval: int = 50
+    progress_log_interval: int = 10
     _optimizer: Optional[Any] = field(default=None, init=False)
     _nnx: Optional[Any] = field(default=None, init=False)
     _use_optimizer: bool = field(default=False, init=False)
     _global_step: int = field(default=0, init=False)
     _optimizer_error_logged: bool = field(default=False, init=False)
+    _logging_error_logged: bool = field(default=False, init=False)
 
     def __post_init__(self) -> None:
         try:
@@ -337,19 +338,27 @@ class SimpleTrainer:
             return
 
         payload = {k: float(v) for k, v in metrics.items()}
+        if step is not None:
+            payload.setdefault("global_step", int(step))
         try:
             if hasattr(self.logger, "log"):
                 if step is None:
                     self.logger.log(payload)
                 else:
-                    self.logger.log(payload, step=step)
+                    try:
+                        self.logger.log(payload, step=step)
+                    except TypeError:
+                        self.logger.log(payload)
             elif callable(self.logger):
                 if step is None:
                     self.logger(payload)
                 else:
                     self.logger(payload, step=step)
-        except Exception:
+        except Exception as exc:
             # Logging should never break training.
+            if not self._logging_error_logged:
+                logger.warning("Metric logging failed once and will be suppressed: {}", exc)
+                self._logging_error_logged = True
             return
 
     def _single_loss_metric_name(self) -> str:
@@ -527,8 +536,10 @@ class SimpleTrainer:
                 loss_value = float(loss)
                 if isinstance(self.loss_fn, MultiLoss):
                     metrics["train_multiloss"] = loss_value
+                    metrics["train_loss"] = loss_value
                 else:
                     metrics[f"train_{self._single_loss_metric_name()}"] = loss_value
+                    metrics["train_loss"] = loss_value
                 return loss_value, metrics
             except Exception as exc:
                 self._use_optimizer = False
@@ -551,8 +562,10 @@ class SimpleTrainer:
         )
         if isinstance(self.loss_fn, MultiLoss):
             metrics["train_multiloss"] = loss_value
+            metrics["train_loss"] = loss_value
         else:
             metrics[f"train_{self._single_loss_metric_name()}"] = loss_value
+            metrics["train_loss"] = loss_value
         return loss_value, metrics
 
     def fit(
@@ -657,7 +670,8 @@ class SimpleTrainer:
                 if (
                     self.progress_log_interval > 0
                     and (
-                        (step_idx + 1) % self.progress_log_interval == 0
+                        step_idx == 0
+                        or (step_idx + 1) % self.progress_log_interval == 0
                         or step_idx + 1 == train_step_count
                     )
                 ):

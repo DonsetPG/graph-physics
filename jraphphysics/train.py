@@ -35,6 +35,7 @@ flags.DEFINE_integer(
 )
 flags.DEFINE_integer("max_train_samples", -1, "Max train samples per epoch")
 flags.DEFINE_integer("max_val_samples", -1, "Max validation samples per epoch")
+flags.DEFINE_integer("log_every_n_steps", 10, "Console/W&B logging frequency in steps")
 flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
 flags.DEFINE_bool("use_wandb", True, "Enable Weights & Biases logging")
 flags.DEFINE_bool("no_edge_feature", False, "Whether to disable edge features")
@@ -166,6 +167,10 @@ def main(argv):
                     "use_edge_feature": use_edge_feature,
                 }
             )
+            if hasattr(wandb_run, "define_metric"):
+                wandb_run.define_metric("global_step")
+                wandb_run.define_metric("train_*", step_metric="global_step")
+                wandb_run.define_metric("val_*", step_metric="global_step")
 
     loss_fn, loss_name = get_loss(parameters)
     gradient_method = get_gradient_method(parameters)
@@ -196,6 +201,7 @@ def main(argv):
         loss_name=loss_name,
         gradient_method=gradient_method,
         logger=wandb_run,
+        progress_log_interval=max(FLAGS.log_every_n_steps, 0),
     )
     history = trainer.fit(
         dataset=train_dataset,
