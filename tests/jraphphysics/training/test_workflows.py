@@ -96,6 +96,42 @@ def test_graph_from_torch_item_conversion():
     assert graph.globals["target_features"].shape == (1, 2)
 
 
+def test_graph_from_mesh_item_preserves_previous_data_in_globals():
+    item = {
+        "points": np.array(
+            [[0.0, 0.0, 0.0], [1.0, 0.0, 0.0], [0.0, 1.0, 0.0]],
+            dtype=np.float32,
+        ),
+        "cells": np.array([[0, 1, 2]], dtype=np.int32),
+        "point_data": {
+            "Vitesse": np.array(
+                [[1.0, 0.0, 0.0], [1.2, 0.0, 0.0], [0.8, 0.0, 0.0]],
+                dtype=np.float32,
+            ),
+            "node_type": np.array([[1.0], [1.0], [1.0]], dtype=np.float32),
+        },
+        "target_data": {
+            "Vitesse": np.array(
+                [[1.1, 0.0, 0.0], [1.3, 0.0, 0.0], [0.9, 0.0, 0.0]],
+                dtype=np.float32,
+            ),
+        },
+        "previous_data": {
+            "Vitesse": np.array(
+                [[0.9, 0.0, 0.0], [1.1, 0.0, 0.0], [0.7, 0.0, 0.0]],
+                dtype=np.float32,
+            )
+        },
+        "time": 1.0,
+    }
+
+    graph = graph_from_dataset_item(item)
+    assert "previous_data" in graph.globals
+    assert "Vitesse" in graph.globals["previous_data"]
+    assert graph.globals["previous_data"]["Vitesse"].shape == (3, 3)
+    assert graph.globals["previous_data"]["Vitesse"].dtype == jnp.float32
+
+
 def test_rollout_autoregressive_updates_next_input():
     simulator = DummySimulator()
     graph1 = FakeGraph(nodes={"features": np.array([[1.0, 2.0, 9.0]], dtype=np.float32)})

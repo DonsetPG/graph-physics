@@ -31,6 +31,10 @@ def _to_numpy(value: Any) -> Any:
     return value
 
 
+def _to_jax_float(value: Any) -> jnp.ndarray:
+    return jnp.asarray(_to_numpy(value), dtype=jnp.float32)
+
+
 def _batch_graphs(graphs: Sequence[jraph.GraphsTuple]) -> jraph.GraphsTuple:
     if len(graphs) == 0:
         raise ValueError("Cannot batch an empty graph list.")
@@ -67,6 +71,11 @@ def graph_from_dataset_item(item: Mapping[str, Any]) -> jraph.GraphsTuple:
             if target.ndim == 1:
                 target = target[:, None]
             globals_dict["target_features"] = jnp.asarray(target, dtype=jnp.float32)
+        previous_data = getattr(item, "previous_data", None)
+        if previous_data is not None:
+            globals_dict["previous_data"] = {
+                key: _to_jax_float(value) for key, value in _to_numpy(previous_data).items()
+            }
 
         return jraph.GraphsTuple(
             nodes={
@@ -85,13 +94,21 @@ def graph_from_dataset_item(item: Mapping[str, Any]) -> jraph.GraphsTuple:
             globals=globals_dict,
         )
 
-    return meshdata_to_graph(
+    graph = meshdata_to_graph(
         points=_to_numpy(item["points"]),
         cells=_to_numpy(item["cells"]),
         point_data=_to_numpy(item.get("point_data")),
         time=item.get("time", 1.0),
         target=_to_numpy(item.get("target_data")),
     )
+    previous_data = item.get("previous_data")
+    if previous_data is not None:
+        globals_dict = dict(graph.globals) if graph.globals is not None else {}
+        globals_dict["previous_data"] = {
+            key: _to_jax_float(value) for key, value in _to_numpy(previous_data).items()
+        }
+        graph = graph._replace(globals=globals_dict)
+    return graph
 
 
 def _apply_preprocessing(
