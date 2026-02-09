@@ -1,0 +1,48 @@
+{
+    "dt": 0.01,
+    "features": {
+      "cells": {
+        "type": "static",
+        "shape": [
+          40,
+          -1,
+          3
+        ],
+        "dtype": "int32"
+      },
+      "mesh_pos": {
+        "type": "static",
+        "shape": [
+          40,
+          -1,
+          3
+        ],
+        "dtype": "float32"
+      },
+      "velocity": {
+        "type": "dynamic",
+        "shape": [
+          40,
+          -1,
+          3
+        ],
+        "dtype": "float32"
+      },
+      "NT": {
+        "type": "static",
+        "shape": [
+          40,
+          -1,
+          1
+        ],
+        "dtype": "float32"
+      }
+    },
+    "field_names": [
+      "cells",
+      "mesh_pos",
+      "velocity",
+      "NT"
+    ],
+    "trajectory_length": 40
+  }
