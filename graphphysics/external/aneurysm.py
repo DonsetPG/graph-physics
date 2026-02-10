@@ -53,7 +53,7 @@ def build_features(graph: Data) -> Data:
     graph.x = torch.cat(
         (
             current_velocity,
-            timestep.torch.unsqueeze(1),
+            timestep.unsqueeze(1),
             acceleration,
             graph.pos,
             mean_next_accel.unsqueeze(1),
