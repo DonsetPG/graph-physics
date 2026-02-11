@@ -1,5 +1,5 @@
 ![Lint and Tests](https://github.com/DonsetPG/graph-physics/workflows/gp/badge.svg?branch=main)
-
+[![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/DonsetPG/graph-physics)
 # Training Graph Neural Networks for Mesh-based Physics Simulations
 
 ## Overview
