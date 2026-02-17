@@ -19,7 +19,7 @@
         ],
         "dtype": "float32"
       },
-      "velocity": {
+      "Vitesse": {
         "type": "dynamic",
         "shape": [
           40,
@@ -28,7 +28,7 @@
         ],
         "dtype": "float32"
       },
-      "NT": {
+      "node_type": {
         "type": "static",
         "shape": [
           40,
@@ -41,8 +41,8 @@
     "field_names": [
       "cells",
       "mesh_pos",
-      "velocity",
-      "NT"
+      "Vitesse",
+      "node_type"
     ],
     "trajectory_length": 40
   }

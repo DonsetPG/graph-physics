@@ -31,7 +31,7 @@ def build_features(graph: Data) -> Data:
 
     current_velocity = graph.x[:, 0:3]
     target_velocity = graph.y[:, 0:3]
-    previous_velocity = torch.tensor(graph.previous_data["velocity"], device=device)
+    previous_velocity = torch.tensor(graph.previous_data["Vitesse"], device=device)
 
     acceleration = current_velocity - previous_velocity
     next_acceleration = target_velocity - current_velocity
