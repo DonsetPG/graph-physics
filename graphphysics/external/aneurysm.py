@@ -49,6 +49,8 @@ def build_features(graph: Data) -> Data:
     max_next_accel = torch.ones(node_type.shape, device=device) * torch.max(
         next_acceleration_unique
     )
+    velocity_norm = torch.norm(current_velocity, dim=1)
+    velocity_norm = velocity_norm.to(device).unsqueeze(1)
 
     graph.x = torch.cat(
         (
@@ -59,6 +61,7 @@ def build_features(graph: Data) -> Data:
             mean_next_accel.unsqueeze(1),
             min_next_accel.unsqueeze(1),
             max_next_accel.unsqueeze(1),
+            velocity_norm,
             node_type.to(device).unsqueeze(1),
         ),
         dim=1,

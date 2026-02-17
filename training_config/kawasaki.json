@@ -4,7 +4,7 @@
         "train_path": "dataset/train",
         "test_path": "dataset/test",
         "meta_path": "dataset_config/kawasaki_meta.json",
-        "targets": ["velocity"],
+        "targets": ["Vitesse"],
         "khop": 1,
         "new_edges_ratio": 0
     },
@@ -12,20 +12,20 @@
         "type": "transformer",
         "message_passing_num": 10,
         "hidden_size": 64,
-        "node_input_size": 13,
+        "node_input_size": 14,
         "output_size": 3,
         "edge_input_size": 0,
-        "num_heads": 2,
+        "num_heads": 4,
         "use_silu_activation": false,
         "use_rope_embeddings": false,
         "use_gated_attention": false
     },
     "index": {
         "feature_index_start": 0,
-        "feature_index_end": 13,
+        "feature_index_end": 14,
         "output_index_start": 0,
         "output_index_end": 3,
-        "node_type_index": 13
+        "node_type_index": 14
     },
     "transformations": {
         "preprocessing": {

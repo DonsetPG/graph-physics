@@ -1,4 +1,5 @@
 python -m graphphysics.train \
+            --project_name=KD \
             --training_parameters_path=training_config/kawasaki.json \
             --num_epochs=20 \
             --init_lr=0.001 \
