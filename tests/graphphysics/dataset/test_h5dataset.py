@@ -234,3 +234,18 @@ class TestXDMFDatasetPartitioning(unittest.TestCase):
         )
         self.assertLess(subgraph.num_nodes, graph.num_nodes)
         self.assertEqual(subgraph.x.shape[1], graph.x.shape[1])
+
+    def test_partitioning_with_one_partitions(self):
+        partitioned_dataset = H5Dataset(
+            h5_path=MOCK_H5_SAVE_PATH,
+            meta_path=MOCK_H5_META_SAVE_PATH,
+            targets=MOCK_H5_TARGETS,
+            preprocessing=self.transform,
+            use_partitioning=True,
+            num_partitions=1,
+        )
+
+        subgraph = partitioned_dataset[0]
+        graph = self.dataset[0]
+        self.assertEqual(subgraph.num_nodes, graph.num_nodes)
+        self.assertEqual(subgraph.x.shape[1], graph.x.shape[1])
