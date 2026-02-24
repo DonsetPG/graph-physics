@@ -108,6 +108,8 @@ class LightningModule(L.LightningModule):
         self.first_step_losses_aneurysm: List[torch.Tensor] = []
         self.val_step_outputs = []
         self.val_step_targets = []
+        self.val_step_outputs_aneurysm = []
+        self.val_step_targets_aneurysm = []
         self.trajectory_length = trajectory_length
         self.timestep = timestep
         self.current_val_trajectory = 0
@@ -443,8 +445,12 @@ class LightningModule(L.LightningModule):
             self.trajectory_to_save.append(batch)
         node_type = batch.x[:, self.model.node_type_index]
 
+        aneurysm_mask = build_aneurysm_mask(self.param, batch).to(self.device)
+
         self.val_step_outputs.append(predicted_outputs.cpu())
         self.val_step_targets.append(target.cpu())
+        self.val_step_outputs_aneurysm.append(predicted_outputs[aneurysm_mask].cpu())
+        self.val_step_targets_aneurysm.append(target[aneurysm_mask].cpu())
         val_loss = self.val_loss(
             target,
             predicted_outputs,
@@ -455,7 +461,6 @@ class LightningModule(L.LightningModule):
 
         # compute RMSE for the first step
         if self.step_counter == 0:
-            aneurysm_mask = build_aneurysm_mask(self.param, batch).to(self.device)
             squared_diff = (predicted_outputs - target) ** 2
             rmse = torch.sqrt(squared_diff.mean()).detach().cpu()
             rmse_aneurysm = torch.sqrt(squared_diff[aneurysm_mask].mean()).detach().cpu()
@@ -467,6 +472,8 @@ class LightningModule(L.LightningModule):
     def _reset_validation_epoch_end(self):
         self.val_step_outputs.clear()
         self.val_step_targets.clear()
+        self.val_step_outputs_aneurysm.clear()
+        self.val_step_targets_aneurysm.clear()
         self.current_val_trajectory = 0
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
@@ -476,16 +483,20 @@ class LightningModule(L.LightningModule):
         self.first_step_losses_aneurysm = []
 
     def on_validation_epoch_end(self):
-        aneurysm_mask = [build_aneurysm_mask(self.param, self.trajectory_to_save[0]).cpu()]*len(self.val_step_outputs)
-        aneurysm_mask = torch.cat(aneurysm_mask, dim=0)
+
         # Concatenate outputs and targets
         predicteds = torch.cat(self.val_step_outputs, dim=0)
         targets = torch.cat(self.val_step_targets, dim=0)
 
+        predicteds_aneurysm = torch.cat(self.val_step_outputs_aneurysm, dim=0)
+        targets_aneurysm = torch.cat(self.val_step_targets_aneurysm, dim=0)
+
         # Compute RMSE over all rollouts
         squared_diff = (predicteds - targets) ** 2
+        squared_diff_aneurysm = (predicteds_aneurysm - targets_aneurysm) ** 2
+
         all_rollout_rmse = torch.sqrt(squared_diff.mean()).item()
-        all_rollout_rmse_aneurysm = torch.sqrt(squared_diff[aneurysm_mask].mean()).item()
+        all_rollout_rmse_aneurysm = torch.sqrt(squared_diff_aneurysm.mean()).item()
 
         self.log(
             "val_all_rollout_rmse",
