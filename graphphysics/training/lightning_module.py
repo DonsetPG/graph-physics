@@ -52,7 +52,7 @@ class LightningModule(L.LightningModule):
         trajectory_length: int = 599,
         timestep: float = 1.0,
         only_processor: bool = False,
-        masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW],
+        masks: list[NodeType] = [NodeType.NORMAL, NodeType.OUTFLOW, NodeType.ANEURYSM, NodeType.STENT],
         use_previous_data: bool = False,
         previous_data_start: int = None,
         previous_data_end: int = None,
