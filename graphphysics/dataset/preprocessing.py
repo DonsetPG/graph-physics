@@ -219,7 +219,7 @@ def add_noise(
     node_type = graph.x[:, node_type_index]
 
     # Mask to zero noise for nodes that are not NORMAL
-    mask = node_type != NodeType.NORMAL
+    mask = torch.logical_or(node_type == NodeType.WALL_BOUNDARY, node_type == NodeType.INFLOW)
 
     for start, end, scale in zip(noise_index_start, noise_index_end, noise_scale):
         feature = graph.x[:, start:end]
