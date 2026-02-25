@@ -500,6 +500,9 @@ class MultiLoss(_Loss):
                 method=gradient_method,
                 device=device,
             )
+        else:
+            network_output_gradient = None
+            target_gradient = None
 
         losses = [
             w
