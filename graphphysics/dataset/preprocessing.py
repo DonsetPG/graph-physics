@@ -220,6 +220,7 @@ def add_noise(
 
     # Mask to zero noise for nodes that are not NORMAL
     mask = torch.logical_or(node_type == NodeType.WALL_BOUNDARY, node_type == NodeType.INFLOW)
+    # mask_aneurysm = node_type == NodeType.ANEURYSM
 
     for start, end, scale in zip(noise_index_start, noise_index_end, noise_scale):
         feature = graph.x[:, start:end]
@@ -228,9 +229,11 @@ def add_noise(
 
         # Generate noise
         noise = torch.randn_like(feature) * scale_
+        # noise_aneurysm = torch.randn_like(feature) * scale_ * 0.1
 
         # Zero out noise for nodes not of type NORMAL
         noise[mask] = 0
+        # noise[mask_aneurysm] = noise_aneurysm[mask_aneurysm]
 
         # Add noise to features
         graph.x[:, start:end] = feature + noise
