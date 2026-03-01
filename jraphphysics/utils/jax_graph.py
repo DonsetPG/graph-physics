@@ -46,6 +46,7 @@ def compute_k_hop_edge_index(
 def compute_k_hop_graph(
     graph: jraph.GraphsTuple,
     num_hops: int,
+    add_edge_features_to_khop: bool = False,
 ) -> jraph.GraphsTuple:
     """Builds a k-hop mesh graph.
 
@@ -70,9 +71,16 @@ def compute_k_hop_graph(
     )
 
     # Build k-hop graph
+    edges = None
+    if add_edge_features_to_khop:
+        pos = graph.nodes["pos"]
+        delta = pos[khop_edge_index[1]] - pos[khop_edge_index[0]]
+        dist = jnp.linalg.norm(delta, axis=1, keepdims=True)
+        edges = jnp.concatenate([delta, dist], axis=1)
+
     khop_graph = jraph.GraphsTuple(
         nodes=graph.nodes,
-        edges=None,
+        edges=edges,
         senders=khop_edge_index[0],
         receivers=khop_edge_index[1],
         n_node=graph.n_node,

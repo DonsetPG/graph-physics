@@ -18,6 +18,7 @@ class XDMFDataset(BaseDataset):
             Callable[[jraph.GraphsTuple], jraph.GraphsTuple]
         ] = None,
         khop: int = 1,
+        add_edge_features: bool = False,
         use_previous_data: bool = False,
         switch_to_val: bool = False,
     ):
@@ -26,6 +27,7 @@ class XDMFDataset(BaseDataset):
             targets=targets,
             preprocessing=preprocessing,
             khop=khop,
+            add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
         )
         if switch_to_val:

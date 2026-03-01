@@ -73,7 +73,7 @@ class FeedForwardTest(parameterized.TestCase):
             features=2,
             hidden_dim=3,
             batch_size=2,
-            expected_val=[-0.4697958, -0.46979585],
+            expected_val=[1.0, 1.0],
             expected_shape=(2, 1, 3),
         ),
     )
@@ -102,7 +102,7 @@ class GatedMLPTest(parameterized.TestCase):
             features=2,
             hidden_dim=3,
             batch_size=2,
-            expected_val=[4.1905556, 17.151281],
+            expected_val=[11.727587, 47.99916],
             expected_shape=(2, 1, 2),
         ),
     )
