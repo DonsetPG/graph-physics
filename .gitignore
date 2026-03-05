@@ -21,3 +21,7 @@ checkpoints/
 plots/
 scripts/
 wandb_download/
+
+AGENTS.md
+.codex/
+venvjax/*
