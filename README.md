@@ -501,6 +501,10 @@ To enable partitioning, add the `--use_partitioning` flag to your training scrip
 
 **Gradient accumulation** is also available to maintain or reduce the number of training updates, by specifying a gradient batch size with `--gradient_batch_size`.
 
+**VRAM optimization mode** can be enabled globally with `--enable_vram_optimizations` (or via `"training": {"enable_vram_optimizations": true}` in the training JSON).  
+When enabled, training uses FlashOptim + mixed precision + activation checkpointing in transformer blocks; when disabled, training behavior is unchanged.  
+FlashOptim requires installing the extra dependency: `pip install flashoptim`.
+
 # Citations
 
 If you use this repo, please use the following bibtex:

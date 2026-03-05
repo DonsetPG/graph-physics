@@ -48,6 +48,7 @@ class LightningModule(L.LightningModule):
         previous_data_start: int = None,
         previous_data_end: int = None,
         prediction_save_path: str = "predictions",
+        enable_vram_optimizations: bool = False,
     ):
         """
         Initializes the LightningModule.
@@ -63,6 +64,8 @@ class LightningModule(L.LightningModule):
             use_previous_data (bool): If set to true, we also update autoregressively the
               features at previous_data_start : previous_data_end
             prediction_save_path (str): Directory where predictions will be saved.
+            enable_vram_optimizations (bool): Enables FlashOptim + mixed precision related
+                memory optimizations when supported.
         """
         super().__init__()
         self.save_hyperparameters()
@@ -118,7 +121,12 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
-        training_params: Dict = parameters.get("training", {})
+        training_params: Dict = parameters.setdefault("training", {})
+        self.enable_vram_optimizations: bool = bool(
+            enable_vram_optimizations
+            or training_params.get("enable_vram_optimizations", False)
+        )
+        training_params["enable_vram_optimizations"] = self.enable_vram_optimizations
         self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
         self.spatial_mtp_alpha: float = training_params.get("spatial_mtp_alpha", 0.20)
         self.spatial_mtp_centers_per_step: int = training_params.get(
@@ -144,6 +152,7 @@ class LightningModule(L.LightningModule):
         self._nodeenc_hook = None
         self._penultimate_hidden = None
         self._H_nodeenc = None
+        self._flashoptim_cast_applied = False
 
         if self.use_spatial_mtp:
             self._setup_spatial_mtp(processor, device)
@@ -502,12 +511,42 @@ class LightningModule(L.LightningModule):
 
     def configure_optimizers(self):
         """Initialize the optimizer"""
-        opt = torch.optim.AdamW(
-            self.parameters(),
-            lr=self.learning_rate,
-            weight_decay=0.0001,
-            betas=(0.9, 0.95),
-        )
+        if self.enable_vram_optimizations and torch.cuda.is_available():
+            try:
+                from flashoptim import FlashAdamW, cast_model
+            except ImportError as exc:
+                raise RuntimeError(
+                    "enable_vram_optimizations=True requires flashoptim. "
+                    "Install it with `pip install flashoptim`."
+                ) from exc
+
+            if not self._flashoptim_cast_applied:
+                cast_model(self.model, dtype=torch.bfloat16)
+                if self.spatial_mtp is not None:
+                    cast_model(self.spatial_mtp, dtype=torch.bfloat16)
+                self._flashoptim_cast_applied = True
+
+            opt = FlashAdamW(
+                self.parameters(),
+                lr=self.learning_rate,
+                weight_decay=0.0001,
+                betas=(0.9, 0.95),
+                master_weight_bits=24,
+                compress_state_dict=True,
+            )
+            logger.info("Using FlashAdamW with bf16 model casting for VRAM optimization.")
+        else:
+            if self.enable_vram_optimizations and not torch.cuda.is_available():
+                logger.warning(
+                    "enable_vram_optimizations=True but CUDA is unavailable. "
+                    "Falling back to AdamW."
+                )
+            opt = torch.optim.AdamW(
+                self.parameters(),
+                lr=self.learning_rate,
+                weight_decay=0.0001,
+                betas=(0.9, 0.95),
+            )
         sch = CosineWarmupScheduler(opt, warmup=self.warmup, max_iters=self.num_steps)
         return {
             "optimizer": opt,
