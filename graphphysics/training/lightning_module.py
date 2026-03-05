@@ -1,4 +1,5 @@
 import os
+import platform
 import shutil
 from typing import Dict, List, Optional
 
@@ -31,6 +32,55 @@ def build_mask(param: dict, graph: Batch):
     mask = torch.logical_not(mask)
 
     return mask
+
+
+def _torch_version_tuple(version: str) -> tuple[int, int]:
+    normalized = version.split("+")[0]
+    parts: list[int] = []
+    for chunk in normalized.split("."):
+        digits = []
+        for char in chunk:
+            if char.isdigit():
+                digits.append(char)
+            else:
+                break
+        if not digits:
+            break
+        parts.append(int("".join(digits)))
+    while len(parts) < 2:
+        parts.append(0)
+    return parts[0], parts[1]
+
+
+def _validate_flashoptim_runtime() -> None:
+    """
+    Guard rails to avoid hard crashes in unsupported environments.
+    """
+    system = platform.system().lower()
+    if system != "linux":
+        raise RuntimeError(
+            f"FlashOptim is supported on Linux + NVIDIA CUDA only (got platform={system})."
+        )
+
+    if torch.version.cuda is None:
+        raise RuntimeError(
+            "FlashOptim requires a CUDA-enabled PyTorch build. "
+            f"Current torch build has no CUDA ({torch.__version__})."
+        )
+
+    major, minor = _torch_version_tuple(torch.__version__)
+    if (major, minor) < (2, 7):
+        raise RuntimeError(
+            "FlashOptim requires PyTorch >= 2.7. "
+            f"Current version is {torch.__version__}."
+        )
+
+    try:
+        import triton  # noqa: F401
+    except ImportError as exc:
+        raise RuntimeError(
+            "FlashOptim requires Triton. Install it with `pip install triton`."
+        ) from exc
 
 
 class LightningModule(L.LightningModule):
@@ -512,6 +562,7 @@ class LightningModule(L.LightningModule):
     def configure_optimizers(self):
         """Initialize the optimizer"""
         if self.enable_vram_optimizations and torch.cuda.is_available():
+            _validate_flashoptim_runtime()
             try:
                 from flashoptim import FlashAdamW, cast_model
             except ImportError as exc:
