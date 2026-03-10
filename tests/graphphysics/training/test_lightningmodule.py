@@ -139,8 +139,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
         def test_configure_optimizers_vram_toggle_without_cuda(self):
             self.model.enable_vram_optimizations = True
             with patch("torch.cuda.is_available", return_value=False):
-                optimizers = self.model.configure_optimizers()
-            self.assertIsInstance(optimizers["optimizer"], torch.optim.AdamW)
+                with self.assertRaises(RuntimeError):
+                    self.model.configure_optimizers()
 
         def test_configure_optimizers_vram_toggle_preflight_error(self):
             self.model.enable_vram_optimizations = True

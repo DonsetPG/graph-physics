@@ -38,6 +38,7 @@ def use_memory_optimized_training() -> bool:
 
 @contextmanager
 def _no_cuda_autocast_if_needed(is_cuda_tensor: bool):
+    """Temporarily disables CUDA autocast for kernels that must run in fp32."""
     if is_cuda_tensor and torch.is_autocast_enabled():
         with torch.amp.autocast("cuda", enabled=False):
             yield
@@ -46,6 +47,7 @@ def _no_cuda_autocast_if_needed(is_cuda_tensor: bool):
 
 
 def _bsddmm_fp32(mask, q: torch.Tensor, k_t: torch.Tensor):
+    """Runs DGL `bsddmm` in fp32 and returns a sparse attention tensor."""
     q32 = q.float()
     k_t32 = k_t.float()
     try:
@@ -57,6 +59,7 @@ def _bsddmm_fp32(mask, q: torch.Tensor, k_t: torch.Tensor):
 
 
 def _bspmm_fp32(attn, v: torch.Tensor, out_dtype: torch.dtype) -> torch.Tensor:
+    """Runs DGL `bspmm` in fp32 and casts the dense output back to `out_dtype`."""
     v32 = v.float()
     try:
         attn32 = attn.astype(torch.float32)

@@ -62,6 +62,11 @@ def _validate_flashoptim_runtime() -> None:
             f"FlashOptim is supported on Linux + NVIDIA CUDA only (got platform={system})."
         )
 
+    if not torch.cuda.is_available():
+        raise RuntimeError(
+            "FlashOptim requires an available CUDA device, but torch.cuda.is_available() is False."
+        )
+
     if torch.version.cuda is None:
         raise RuntimeError(
             "FlashOptim requires a CUDA-enabled PyTorch build. "
@@ -561,7 +566,7 @@ class LightningModule(L.LightningModule):
 
     def configure_optimizers(self):
         """Initialize the optimizer"""
-        if self.enable_vram_optimizations and torch.cuda.is_available():
+        if self.enable_vram_optimizations:
             _validate_flashoptim_runtime()
             try:
                 from flashoptim import FlashAdamW, cast_model
@@ -587,11 +592,6 @@ class LightningModule(L.LightningModule):
             )
             logger.info("Using FlashAdamW with bf16 model casting for VRAM optimization.")
         else:
-            if self.enable_vram_optimizations and not torch.cuda.is_available():
-                logger.warning(
-                    "enable_vram_optimizations=True but CUDA is unavailable. "
-                    "Falling back to AdamW."
-                )
             opt = torch.optim.AdamW(
                 self.parameters(),
                 lr=self.learning_rate,
