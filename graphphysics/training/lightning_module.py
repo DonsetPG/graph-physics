@@ -301,7 +301,7 @@ class LightningModule(L.LightningModule):
             )
 
             self.log(
-                f"train_{self.loss_name}",
+                f"train_loss - {self.loss_name}",
                 loss,
                 on_step=True,
                 on_epoch=True,
