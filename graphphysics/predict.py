@@ -30,6 +30,13 @@ flags.DEFINE_string(
 flags.DEFINE_string(
     "prediction_save_path", "predictions", "Path to where the predictions will be saved"
 )
+flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
+flags.DEFINE_integer(
+    "previous_data_start", 4, "Index of the start of the previous data in the features"
+)
+flags.DEFINE_integer(
+    "previous_data_end", 7, "Index of the end of the previous data in the features"
+)
 
 
 def main(argv):
@@ -54,6 +61,9 @@ def main(argv):
     wandb_project_name = FLAGS.project_name
     model_path = FLAGS.model_path
     use_edge_feature = not FLAGS.no_edge_feature
+    use_previous_data = FLAGS.use_previous_data
+    previous_data_start = FLAGS.previous_data_start
+    previous_data_end = FLAGS.previous_data_end
 
     # Build preprocessing function
     preprocessing = get_preprocessing(
@@ -69,7 +79,8 @@ def main(argv):
         param=parameters,
         preprocessing=preprocessing,
         use_edge_feature=use_edge_feature,
-        use_previous_data=True,
+        use_previous_data=use_previous_data,
+        switch_to_val=True,
     )
 
     predict_dataloader_kwargs = {
@@ -84,6 +95,13 @@ def main(argv):
 
     # Load trained model
     prediction_save_path = FLAGS.prediction_save_path
+    prev_data_kwargs = {}
+    if use_previous_data is True:
+        prev_data_kwargs = {
+            "use_previous_data": True,
+            "previous_data_start": previous_data_start,
+            "previous_data_end": previous_data_end,
+        }
     logger.info(f"Loading model from checkpoint: {model_path}")
     lightning_module = LightningModule.load_from_checkpoint(
         checkpoint_path=model_path,
@@ -91,6 +109,7 @@ def main(argv):
         trajectory_length=predict_dataset.trajectory_length,
         timestep=predict_dataset.dt,
         prediction_save_path=prediction_save_path,
+        **prev_data_kwargs,
     )
 
     # Initialize WandbLogger

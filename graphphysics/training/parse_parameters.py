@@ -263,7 +263,6 @@ def get_dataset(
             new_edges_ratio=new_edges_ratio,
             add_edge_features=use_edge_feature,
             use_previous_data=use_previous_data,
-            switch_to_val=switch_to_val,
             use_partitioning=use_partitioning,
             num_partitions=num_partitions,
             max_nodes_per_partition=max_nodes_per_partition,

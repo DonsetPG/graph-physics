@@ -23,7 +23,6 @@ class XDMFDataset(BaseDataset):
         new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
-        switch_to_val: bool = False,
         use_partitioning: bool = False,
         num_partitions: Optional[int] = None,
         max_nodes_per_partition: Optional[int] = None,
