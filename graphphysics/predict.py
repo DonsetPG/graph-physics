@@ -70,6 +70,7 @@ def main(argv):
         preprocessing=preprocessing,
         use_edge_feature=use_edge_feature,
         use_previous_data=True,
+        switch_to_val=True,
     )
 
     predict_dataloader_kwargs = {
