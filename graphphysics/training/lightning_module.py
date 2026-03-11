@@ -34,24 +34,6 @@ def build_mask(param: dict, graph: Batch):
     return mask
 
 
-def _torch_version_tuple(version: str) -> tuple[int, int]:
-    normalized = version.split("+")[0]
-    parts: list[int] = []
-    for chunk in normalized.split("."):
-        digits = []
-        for char in chunk:
-            if char.isdigit():
-                digits.append(char)
-            else:
-                break
-        if not digits:
-            break
-        parts.append(int("".join(digits)))
-    while len(parts) < 2:
-        parts.append(0)
-    return parts[0], parts[1]
-
-
 def _validate_flashoptim_runtime() -> None:
     """
     Guard rails to avoid hard crashes in unsupported environments.
@@ -71,13 +53,6 @@ def _validate_flashoptim_runtime() -> None:
         raise RuntimeError(
             "FlashOptim requires a CUDA-enabled PyTorch build. "
             f"Current torch build has no CUDA ({torch.__version__})."
-        )
-
-    major, minor = _torch_version_tuple(torch.__version__)
-    if (major, minor) < (2, 7):
-        raise RuntimeError(
-            "FlashOptim requires PyTorch >= 2.7. "
-            f"Current version is {torch.__version__}."
         )
 
     try:
