@@ -280,7 +280,7 @@ class LightningModule(L.LightningModule):
             )
             for train_loss, loss_name in zip(train_losses, self.loss_name):
                 self.log(
-                    f"train_loss - {loss_name}",
+                    f"train_{loss_name}",
                     train_loss,
                     on_step=True,
                     on_epoch=True,
