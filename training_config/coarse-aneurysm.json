@@ -42,6 +42,7 @@
     },
     "training": {
         "use_spatial_mtp": false,
-        "use_temporal_block": false
+        "use_temporal_block": false,
+        "enable_vram_optimizations": false
     }
 }

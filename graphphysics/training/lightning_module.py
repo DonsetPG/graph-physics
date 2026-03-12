@@ -48,6 +48,7 @@ class LightningModule(L.LightningModule):
         previous_data_start: int = None,
         previous_data_end: int = None,
         prediction_save_path: str = "predictions",
+        enable_vram_optimizations: bool = False,
     ):
         """
         Initializes the LightningModule.
@@ -63,6 +64,8 @@ class LightningModule(L.LightningModule):
             use_previous_data (bool): If set to true, we also update autoregressively the
               features at previous_data_start : previous_data_end
             prediction_save_path (str): Directory where predictions will be saved.
+            enable_vram_optimizations (bool): Enables VRAM-related optimizations
+                (mixed precision and activation checkpointing) when supported.
         """
         super().__init__()
         self.save_hyperparameters()
@@ -118,7 +121,12 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
-        training_params: Dict = parameters.get("training", {})
+        training_params: Dict = parameters.setdefault("training", {})
+        self.enable_vram_optimizations: bool = bool(
+            enable_vram_optimizations
+            or training_params.get("enable_vram_optimizations", False)
+        )
+        training_params["enable_vram_optimizations"] = self.enable_vram_optimizations
         self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
         self.spatial_mtp_alpha: float = training_params.get("spatial_mtp_alpha", 0.20)
         self.spatial_mtp_centers_per_step: int = training_params.get(

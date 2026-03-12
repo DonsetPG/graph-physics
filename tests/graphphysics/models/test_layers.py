@@ -14,6 +14,7 @@ from graphphysics.models.layers import (
     Attention,
     Transformer,
     GraphNetBlock,
+    set_memory_optimized_training,
     set_use_silu_activation,
 )
 
@@ -244,6 +245,19 @@ class TestTransformerComponents(unittest.TestCase):
         x = torch.randn(5, input_dim)
         output = transformer(x, None)
         self.assertEqual(output.shape, (5, output_dim))
+
+    def test_transformer_checkpoint_toggle(self):
+        input_dim = 16
+        output_dim = 16
+        num_heads = 4
+        set_memory_optimized_training(False)
+        transformer_default = Transformer(input_dim, output_dim, num_heads)
+        self.assertFalse(transformer_default.use_activation_checkpointing)
+
+        set_memory_optimized_training(True)
+        transformer_optimized = Transformer(input_dim, output_dim, num_heads)
+        self.assertTrue(transformer_optimized.use_activation_checkpointing)
+        set_memory_optimized_training(False)
 
 
 class TestGraphNetBlock(unittest.TestCase):

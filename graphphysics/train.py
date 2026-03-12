@@ -1,6 +1,7 @@
 import json
 import os
 import warnings
+from typing import Optional
 
 import torch
 from absl import app, flags
@@ -70,6 +71,13 @@ flags.DEFINE_integer(
 )
 
 
+def _resolve_trainer_precision(enable_vram_optimizations: bool) -> Optional[str]:
+    if not enable_vram_optimizations or not torch.cuda.is_available():
+        return None
+    is_bf16_supported = getattr(torch.cuda, "is_bf16_supported", lambda: False)
+    return "bf16-mixed" if is_bf16_supported() else "16-mixed"
+
+
 def main(argv):
     del argv
 
@@ -107,6 +115,10 @@ def main(argv):
     num_partitions = FLAGS.num_partitions
     max_nodes_per_partition = FLAGS.max_nodes_per_partition
     gradient_batch_size = FLAGS.gradient_batch_size
+
+    training_params = parameters.setdefault("training", {})
+    enable_vram_optimizations = bool(training_params.get("enable_vram_optimizations", False))
+    training_params["enable_vram_optimizations"] = enable_vram_optimizations
 
     seed_everything(FLAGS.seed, workers=True)
 
@@ -206,6 +218,7 @@ def main(argv):
             num_steps=num_steps,
             trajectory_length=train_dataset.trajectory_length,
             timestep=train_dataset.dt,
+            enable_vram_optimizations=enable_vram_optimizations,
             **prev_data_kwargs,
         )
         logger.info(f"Resuming WandB run: {lightning_module.wandb_run_id}")
@@ -218,6 +231,7 @@ def main(argv):
             warmup=warmup,
             trajectory_length=train_dataset.trajectory_length,
             timestep=train_dataset.dt,
+            enable_vram_optimizations=enable_vram_optimizations,
             **prev_data_kwargs,
         )
 
@@ -247,25 +261,38 @@ def main(argv):
             "#_hops": parameters["dataset"]["khop"],
             "max_lr": initial_lr,
             "batch_size": batch_size,
+            "enable_vram_optimizations": enable_vram_optimizations,
         }
     )
 
+    trainer_precision = _resolve_trainer_precision(enable_vram_optimizations)
+    if enable_vram_optimizations and trainer_precision is None:
+        logger.warning(
+            "VRAM optimizations requested but CUDA is unavailable. "
+            "Mixed precision will be disabled."
+        )
+
     # Configure Trainer
-    trainer = Trainer(
-        accelerator="gpu" if torch.cuda.is_available() else "cpu",
-        devices=1,
-        max_epochs=num_epochs,
-        logger=wandb_logger,
-        callbacks=[
+    trainer_kwargs = {
+        "accelerator": "gpu" if torch.cuda.is_available() else "cpu",
+        "devices": 1,
+        "max_epochs": num_epochs,
+        "logger": wandb_logger,
+        "callbacks": [
             ColabProgressBar(),
             checkpoint_callback,
             LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
-        log_every_n_steps=100,
-        gradient_clip_val=1.0,
-        accumulate_grad_batches=gradient_batch_size,
-    )
+        "log_every_n_steps": 100,
+        "gradient_clip_val": 1.0,
+        "accumulate_grad_batches": gradient_batch_size,
+    }
+    if trainer_precision is not None:
+        trainer_kwargs["precision"] = trainer_precision
+        wandb_logger.experiment.config.update({"trainer_precision": trainer_precision})
+
+    trainer = Trainer(**trainer_kwargs)
 
     # Resuming training from a checkpoint
     if model_path and os.path.isfile(model_path) and resume_training:
