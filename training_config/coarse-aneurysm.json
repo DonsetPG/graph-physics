@@ -30,8 +30,8 @@
     "transformations": {
         "preprocessing": {
             "noise": [10.0, 10.0, 1.0, 10.0, 10.0, 1.0],
-            "noise_index_start": [0, 1, 2, 4, 5, 6],
-            "noise_index_end": [1, 2, 3, 5, 6, 7],
+            "noise_index_start": [0, 1, 2, 5, 6, 7],
+            "noise_index_end": [1, 2, 3, 6, 7, 8],
             "masking": 0
         },
         "world_pos_parameters": {
