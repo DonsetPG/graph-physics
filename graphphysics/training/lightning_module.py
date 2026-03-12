@@ -1,5 +1,4 @@
 import os
-import platform
 import shutil
 from typing import Dict, List, Optional
 
@@ -34,35 +33,6 @@ def build_mask(param: dict, graph: Batch):
     return mask
 
 
-def _validate_flashoptim_runtime() -> None:
-    """
-    Guard rails to avoid hard crashes in unsupported environments.
-    """
-    system = platform.system().lower()
-    if system != "linux":
-        raise RuntimeError(
-            f"FlashOptim is supported on Linux + NVIDIA CUDA only (got platform={system})."
-        )
-
-    if not torch.cuda.is_available():
-        raise RuntimeError(
-            "FlashOptim requires an available CUDA device, but torch.cuda.is_available() is False."
-        )
-
-    if torch.version.cuda is None:
-        raise RuntimeError(
-            "FlashOptim requires a CUDA-enabled PyTorch build. "
-            f"Current torch build has no CUDA ({torch.__version__})."
-        )
-
-    try:
-        import triton  # noqa: F401
-    except ImportError as exc:
-        raise RuntimeError(
-            "FlashOptim requires Triton. Install it with `pip install triton`."
-        ) from exc
-
-
 class LightningModule(L.LightningModule):
     def __init__(
         self,
@@ -94,8 +64,8 @@ class LightningModule(L.LightningModule):
             use_previous_data (bool): If set to true, we also update autoregressively the
               features at previous_data_start : previous_data_end
             prediction_save_path (str): Directory where predictions will be saved.
-            enable_vram_optimizations (bool): Enables FlashOptim + mixed precision related
-                memory optimizations when supported.
+            enable_vram_optimizations (bool): Enables VRAM-related optimizations
+                (mixed precision and activation checkpointing) when supported.
         """
         super().__init__()
         self.save_hyperparameters()
@@ -182,7 +152,6 @@ class LightningModule(L.LightningModule):
         self._nodeenc_hook = None
         self._penultimate_hidden = None
         self._H_nodeenc = None
-        self._flashoptim_cast_applied = False
 
         if self.use_spatial_mtp:
             self._setup_spatial_mtp(processor, device)
@@ -541,38 +510,12 @@ class LightningModule(L.LightningModule):
 
     def configure_optimizers(self):
         """Initialize the optimizer"""
-        if self.enable_vram_optimizations:
-            _validate_flashoptim_runtime()
-            try:
-                from flashoptim import FlashAdamW, cast_model
-            except ImportError as exc:
-                raise RuntimeError(
-                    "enable_vram_optimizations=True requires flashoptim. "
-                    "Install it with `pip install flashoptim`."
-                ) from exc
-
-            if not self._flashoptim_cast_applied:
-                cast_model(self.model, dtype=torch.bfloat16)
-                if self.spatial_mtp is not None:
-                    cast_model(self.spatial_mtp, dtype=torch.bfloat16)
-                self._flashoptim_cast_applied = True
-
-            opt = FlashAdamW(
-                self.parameters(),
-                lr=self.learning_rate,
-                weight_decay=0.0001,
-                betas=(0.9, 0.95),
-                master_weight_bits=24,
-                compress_state_dict=True,
-            )
-            logger.info("Using FlashAdamW with bf16 model casting for VRAM optimization.")
-        else:
-            opt = torch.optim.AdamW(
-                self.parameters(),
-                lr=self.learning_rate,
-                weight_decay=0.0001,
-                betas=(0.9, 0.95),
-            )
+        opt = torch.optim.AdamW(
+            self.parameters(),
+            lr=self.learning_rate,
+            weight_decay=0.0001,
+            betas=(0.9, 0.95),
+        )
         sch = CosineWarmupScheduler(opt, warmup=self.warmup, max_iters=self.num_steps)
         return {
             "optimizer": opt,

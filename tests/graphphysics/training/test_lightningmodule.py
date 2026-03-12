@@ -139,17 +139,14 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
         def test_configure_optimizers_vram_toggle_without_cuda(self):
             self.model.enable_vram_optimizations = True
             with patch("torch.cuda.is_available", return_value=False):
-                with self.assertRaises(RuntimeError):
-                    self.model.configure_optimizers()
+                optimizers = self.model.configure_optimizers()
+            self.assertIsInstance(optimizers["optimizer"], torch.optim.AdamW)
 
-        def test_configure_optimizers_vram_toggle_preflight_error(self):
+        def test_configure_optimizers_vram_toggle_with_cuda(self):
             self.model.enable_vram_optimizations = True
-            with patch("torch.cuda.is_available", return_value=True), patch(
-                "graphphysics.training.lightning_module._validate_flashoptim_runtime",
-                side_effect=RuntimeError("FlashOptim requires PyTorch >= 2.7."),
-            ):
-                with self.assertRaises(RuntimeError):
-                    self.model.configure_optimizers()
+            with patch("torch.cuda.is_available", return_value=True):
+                optimizers = self.model.configure_optimizers()
+            self.assertIsInstance(optimizers["optimizer"], torch.optim.AdamW)
 
         def test_full_training_loop(self):
             trainer = L.Trainer(fast_dev_run=True)

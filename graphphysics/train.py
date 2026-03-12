@@ -269,7 +269,7 @@ def main(argv):
     if enable_vram_optimizations and trainer_precision is None:
         logger.warning(
             "VRAM optimizations requested but CUDA is unavailable. "
-            "Mixed precision and FlashOptim will be disabled."
+            "Mixed precision will be disabled."
         )
 
     # Configure Trainer
