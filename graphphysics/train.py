@@ -30,7 +30,7 @@ torch.set_float32_matmul_precision("high")
 torch.multiprocessing.set_sharing_strategy("file_system")
 
 FLAGS = flags.FLAGS
-flags.DEFINE_string("project_name", "my_project", "Name of the WandB project")
+flags.DEFINE_string("project_name", "benchmark_speed_aneurysm", "Name of the WandB project")
 flags.DEFINE_integer("num_epochs", 10, "Number of epochs")
 flags.DEFINE_integer("seed", 42, "Random seed")
 flags.DEFINE_float("init_lr", 0.001, "Initial learning rate")
@@ -50,10 +50,10 @@ flags.DEFINE_bool(
 
 flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
 flags.DEFINE_integer(
-    "previous_data_start", 4, "Index of the start of the previous data in the features"
+    "previous_data_start", 5, "Index of the start of the previous data in the features"
 )
 flags.DEFINE_integer(
-    "previous_data_end", 7, "Index of the end of the previous data in the features"
+    "previous_data_end", 8, "Index of the end of the previous data in the features"
 )
 flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
@@ -281,7 +281,6 @@ def main(argv):
         "callbacks": [
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         "log_every_n_steps": 100,
@@ -295,23 +294,49 @@ def main(argv):
     trainer = Trainer(**trainer_kwargs)
 
     # Resuming training from a checkpoint
-    if model_path and os.path.isfile(model_path) and resume_training:
-        logger.success("Resuming training")
-        trainer.fit(
-            model=lightning_module,
-            train_dataloaders=train_dataloader,
-            val_dataloaders=valid_dataloader,
-            ckpt_path=model_path,
-        )
-    else:
-        logger.success("Starting training")
-        trainer.fit(
-            model=lightning_module,
-            train_dataloaders=train_dataloader,
-            val_dataloaders=valid_dataloader,
-        )
+    try:
+        if model_path and os.path.isfile(model_path) and resume_training:
+            logger.success("Resuming training")
+            trainer.fit(
+                model=lightning_module,
+                train_dataloaders=train_dataloader,
+                val_dataloaders=valid_dataloader,
+                ckpt_path=model_path,
+            )
+        else:
+            logger.success("Starting training")
+            trainer.fit(
+                model=lightning_module,
+                train_dataloaders=train_dataloader,
+                val_dataloaders=valid_dataloader,
+            )
+    finally:
+        if wandb.run is not None:
+            try:
+                wandb.finish()
+            except Exception as e:
+                logger.warning(f"wandb.finish() failed during shutdown: {e}")
+
+    logger.success("Training finished. Exiting process.")
+    raise SystemExit(0)
 
 
 if __name__ == "__main__":
     torch.multiprocessing.set_start_method("spawn")
-    app.run(main)
+    exit_code = 0
+    try:
+        app.run(main)
+    except SystemExit as e:
+        code = e.code
+        if isinstance(code, int):
+            exit_code = code
+        elif code is None:
+            exit_code = 0
+        else:
+            exit_code = 1
+    except Exception:
+        logger.exception("Unhandled exception in training entrypoint.")
+        exit_code = 1
+
+    # Force process termination so background workers/threads cannot keep the process alive.
+    os._exit(exit_code)
