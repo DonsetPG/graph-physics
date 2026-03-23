@@ -1,9 +1,7 @@
 import os
-import shutil
 from typing import Dict, List, Optional
 
 import lightning as L
-import meshio
 import torch
 import torch.nn as nn
 from loguru import logger
@@ -17,7 +15,11 @@ from graphphysics.training.parse_parameters import (
     get_simulator,
 )
 from graphphysics.utils.loss import L2Loss, MultiLoss
-from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu
+from graphphysics.utils.meshio_mesh import (
+    append_mesh_to_xdmf,
+    convert_to_meshio_vtu,
+    meshes_to_xdmf,
+)
 from graphphysics.utils.nodetype import NodeType
 from graphphysics.utils.scheduler import CosineWarmupScheduler
 
@@ -108,13 +110,9 @@ class LightningModule(L.LightningModule):
         self.previous_data_start = previous_data_start
         self.previous_data_end = previous_data_end
 
-        # For one trajectory vizualization
-        self.trajectory_to_save: list[Batch] = []
-
         # Prediction
         self.prediction_save_path: str = prediction_save_path
         self.current_pred_trajectory = 0
-        self.prediction_trajectory: list[Batch] = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
@@ -147,6 +145,9 @@ class LightningModule(L.LightningModule):
 
         if self.use_spatial_mtp:
             self._setup_spatial_mtp(processor, device)
+
+        # TODO: Decide on whether or not to keep this
+        # self.compress_predictions = parameters["compression"]
 
     def forward(self, graph: Batch):
         return self.model(graph)
@@ -334,42 +335,27 @@ class LightningModule(L.LightningModule):
         self._remove_spatial_mtp_hooks()
         super().teardown(stage)
 
-    def _save_trajectory_to_xdmf(
-        self,
-        trajectory: list[Batch],
-        save_dir: str,
-        archive_filename: str,
-        timestep: float = 1,
+    def _save_batch_to_xdmf(
+        self, batch: Batch, save_dir: str, archive_filename: str, timestep: float = 1
     ):
+        """
+        Saves a batch to an XDMF/H5 archive.
+        Creates the archive if it doesn't exist, appends the batch at the end it does.
+        """
         os.makedirs(save_dir, exist_ok=True)
         archive_path = os.path.join(save_dir, archive_filename)
-        xdmf_filename = f"{archive_path}.xdmf"
-        init_mesh = convert_to_meshio_vtu(trajectory[0], add_all_data=True)
-        points = init_mesh.points
-        cells = init_mesh.cells
-        try:
-            with meshio.xdmf.TimeSeriesWriter(xdmf_filename) as writer:
-                # Write the mesh (points and cells) once
-                writer.write_points_cells(points, cells)
-                # Loop through time steps and write data
-                t = timestep if not self.use_previous_data else 2 * timestep
-                for idx, graph in enumerate(trajectory):
-                    mesh = convert_to_meshio_vtu(graph, add_all_data=True)
-                    point_data = mesh.point_data
-                    cell_data = mesh.cell_data
-                    writer.write_data(t, point_data=point_data, cell_data=cell_data)
-                    t += timestep
-
-        except Exception as e:
-            logger.error(f"Error saving graph {idx} at epoch {self.current_epoch}: {e}")
-        logger.info(
-            f"Validation Trajectory {archive_filename.split('_')[-1]} saved at {save_dir}."
-        )
-        h5_filename = xdmf_filename.replace(".xdmf", ".h5")
-        src = os.path.join(os.getcwd(), os.path.basename(h5_filename))
-        # The h5 file may be in the cwd (meshio bug), move it to xdmf location
-        if os.path.exists(src):
-            shutil.move(src=src, dst=h5_filename)
+        mesh = convert_to_meshio_vtu(batch, add_all_data=True)
+        if not os.path.exists(f"{archive_path}.h5") or not os.path.exists(
+            f"{archive_path}.xdmf"
+        ):
+            meshes_to_xdmf(filename=archive_path, meshes=[mesh], timestep=timestep)
+        else:
+            append_mesh_to_xdmf(
+                filename=archive_path,
+                mesh=mesh,
+                timestep=timestep,
+                compress=self.compress_predictions,
+            )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
@@ -430,7 +416,16 @@ class LightningModule(L.LightningModule):
         )
 
         if self.current_val_trajectory == 0:
-            self.trajectory_to_save.append(batch)
+            self._save_batch_to_xdmf(
+                batch,
+                os.path.join("meshes", f"epoch_{self.current_epoch}"),
+                self._get_frame_savename(
+                    batch,
+                    self.current_val_trajectory,
+                    prefix=f"graph_epoch_{self.current_epoch}",
+                ),
+                timestep=self.timestep,
+            )
         node_type = batch.x[:, self.model.node_type_index]
 
         self.val_step_outputs.append(predicted_outputs.cpu())
@@ -456,7 +451,6 @@ class LightningModule(L.LightningModule):
         self.current_val_trajectory = 0
         self.last_val_prediction = None
         self.last_previous_data_prediction = None
-        self.trajectory_to_save.clear()
         self.step_counter = 0
         self.first_step_losses = []
 
@@ -482,20 +476,7 @@ class LightningModule(L.LightningModule):
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
                 "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
-            )
-
-        # Save trajectory graphs
-        save_dir = os.path.join("meshes", f"epoch_{self.current_epoch}")
-        self._save_trajectory_to_xdmf(
-            self.trajectory_to_save,
-            save_dir,
-            self._get_traj_savename(
-                self.trajectory_to_save,
-                self.current_val_trajectory,
-                prefix=f"graph_epoch_{self.current_epoch}",
-            ),
-            timestep=self.timestep,
-        )
+                )
 
         # Clear stored outputs
         self._reset_validation_epoch_end()
@@ -521,7 +502,6 @@ class LightningModule(L.LightningModule):
 
     def _reset_prediction_trajectory(self):
         self.current_pred_trajectory += 1
-        self.prediction_trajectory = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
 
@@ -533,16 +513,7 @@ class LightningModule(L.LightningModule):
         """
         batch = batch.to(self.device, non_blocking=True)
         if batch.traj_index > self.current_pred_trajectory:
-            # save
-            self._save_trajectory_to_xdmf(
-                self.prediction_trajectory,
-                self.prediction_save_path,
-                self._get_traj_savename(
-                    self.prediction_trajectory, self.current_pred_trajectory
-                ),
-                timestep=self.timestep,
-            )
-            # reset
+            # reset when changing trajectory
             self._reset_prediction_trajectory()
 
         # predict
@@ -555,28 +526,25 @@ class LightningModule(L.LightningModule):
         ) = self._make_prediction(
             batch, self.last_pred_prediction, self.last_previous_data_pred_prediction
         )
-        self.prediction_trajectory.append(batch)
+        self._save_batch_to_xdmf(
+            batch,
+            self.prediction_save_path,
+            self._get_frame_savename(
+                batch,
+                self.current_pred_trajectory,
+            ),
+            timestep=self.timestep,
+        )
 
     def _reset_predict_epoch_end(self):
-        self.prediction_trajectory.clear()
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
         self.current_pred_trajectory = 0
 
     def on_predict_epoch_end(self):
         """
-        Save last trajectory to xdmf and clear stored outputs.
+        Clear stored outputs.
         """
-        self._save_trajectory_to_xdmf(
-            self.prediction_trajectory,
-            self.prediction_save_path,
-            self._get_traj_savename(
-                self.prediction_trajectory, self.current_pred_trajectory
-            ),
-            timestep=self.timestep,
-        )
-
-        # Clear stored outputs
         self._reset_predict_epoch_end()
 
     def on_save_checkpoint(self, checkpoint: dict):
@@ -594,19 +562,19 @@ class LightningModule(L.LightningModule):
         """
         self.wandb_run_id = checkpoint.get("wandb_run_id", None)
 
-    def _get_traj_savename(
-        self, traj: list[Batch], traj_idx: int, prefix: str = "graph"
+    def _get_frame_savename(
+        self, batch: Batch, traj_idx: int, prefix: str = "graph"
     ) -> str:
         """
         Get the name of the trajectory to save (id if provided in attributes, index otherwise).
         Args:
-            traj (list[Batch]): List of Batch objects representing the trajectory.
+            batch (Batch): Batch object.
             traj_idx (int): Index of the current trajectory.
             prefix (str): Prefix for the trajectory filename. (does not include trailing '_')
         Returns:
             str: The name of the trajectory to save (no extensions).
         """
-        if hasattr(traj[0], "id") and traj[0].id[0] is not None:
-            return f"{prefix}_{traj[0].id[0]}"
+        if hasattr(batch, "id") and batch.id[0] is not None:
+            return f"{prefix}_{batch.id[0]}"
         else:
             return f"{prefix}_{traj_idx}"
