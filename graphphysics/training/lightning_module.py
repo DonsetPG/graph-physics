@@ -116,8 +116,8 @@ class LightningModule(L.LightningModule):
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
         self.compress_predictions = (
-            parameters["compression"]
-            if hasattr(self.parameters, "compression")
+            parameters["compress_predictions"]
+            if hasattr(self.parameters, "compress_predictions")
             else False
         )
 
