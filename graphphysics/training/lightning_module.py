@@ -115,6 +115,11 @@ class LightningModule(L.LightningModule):
         self.current_pred_trajectory = 0
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
+        self.compress_predictions = (
+            parameters["compression"]
+            if hasattr(self.parameters, "compression")
+            else False
+        )
 
         training_params: Dict = parameters.get("training", {})
         self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
@@ -145,9 +150,6 @@ class LightningModule(L.LightningModule):
 
         if self.use_spatial_mtp:
             self._setup_spatial_mtp(processor, device)
-
-        # TODO: Decide on whether or not to keep this
-        # self.compress_predictions = parameters["compression"]
 
     def forward(self, graph: Batch):
         return self.model(graph)
@@ -350,7 +352,12 @@ class LightningModule(L.LightningModule):
         ):
             meshes_to_xdmf(filename=archive_path, meshes=[mesh], timestep=timestep)
         else:
-            append_mesh_to_xdmf(filename=archive_path, mesh=mesh, timestep=timestep)
+            append_mesh_to_xdmf(
+                filename=archive_path,
+                mesh=mesh,
+                timestep=timestep,
+                compress=self.compress_predictions,
+            )
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
