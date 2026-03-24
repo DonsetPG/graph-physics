@@ -350,12 +350,7 @@ class LightningModule(L.LightningModule):
         ):
             meshes_to_xdmf(filename=archive_path, meshes=[mesh], timestep=timestep)
         else:
-            append_mesh_to_xdmf(
-                filename=archive_path,
-                mesh=mesh,
-                timestep=timestep,
-                compress=self.compress_predictions,
-            )
+            append_mesh_to_xdmf(filename=archive_path, mesh=mesh, timestep=timestep)
 
     def _reset_validation_trajectory(self):
         self.current_val_trajectory += 1
@@ -476,7 +471,7 @@ class LightningModule(L.LightningModule):
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
                 "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
-                )
+            )
 
         # Clear stored outputs
         self._reset_validation_epoch_end()
