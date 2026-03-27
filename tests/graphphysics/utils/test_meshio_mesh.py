@@ -6,7 +6,12 @@ import shutil
 import torch
 from torch_geometric.data import Data
 
-from graphphysics.utils.meshio_mesh import convert_to_meshio_vtu, vtu_to_xdmf
+from graphphysics.utils.meshio_mesh import (
+    convert_to_meshio_vtu,
+    vtu_to_xdmf,
+    meshes_to_xdmf,
+    append_mesh_to_xdmf,
+)
 from tests.mock import MOCK_VTU_FOLDER_PATH, MOCK_VTU_ANEURYSM_FOLDER_PATH
 
 
@@ -185,6 +190,177 @@ class TestVtuToXdmf(unittest.TestCase):
         # Check that all vtu files were removed.
         for file in self.tmp_files:
             self.assertFalse(os.path.exists(file))
+        os.remove(f"{self.filename}.h5")
+        os.remove(f"{self.filename}.xdmf")
+
+
+class TestMeshesToXdmf(unittest.TestCase):
+    def setUp(self):
+        self.meshes_2d = [
+            meshio.read(os.path.join(MOCK_VTU_FOLDER_PATH, f))
+            for f in os.listdir(MOCK_VTU_FOLDER_PATH)
+        ]
+        self.meshes_3d = [
+            meshio.read(os.path.join(MOCK_VTU_ANEURYSM_FOLDER_PATH, f))
+            for f in os.listdir(MOCK_VTU_ANEURYSM_FOLDER_PATH)
+        ]
+
+        self.tmp_dir = "tests/mock_vtu_tmp"
+        self.filename = os.path.join(self.tmp_dir, "test_xdmf_compression")
+        shutil.copytree(MOCK_VTU_FOLDER_PATH, self.tmp_dir)
+        self.tmp_files = [
+            os.path.join(self.tmp_dir, f) for f in os.listdir(self.tmp_dir)
+        ]
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir)
+
+    def test_2d_meshes(self):
+        """Test 2D meshes compression"""
+        meshes_to_xdmf(self.filename, self.meshes_2d)
+
+        self.assertTrue(os.path.exists(f"{self.filename}.h5"))
+        self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(self.meshes_2d[0].points))
+            self.assertEqual(reader.num_steps, len(self.meshes_2d))
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), self.meshes_2d[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(
+                            point_data[key], self.meshes_2d[i].point_data[key]
+                        )
+                    )
+
+        os.remove(f"{self.filename}.h5")
+        os.remove(f"{self.filename}.xdmf")
+
+    def test_3d_meshes(self):
+        """Test 3D meshes compression"""
+
+        meshes_to_xdmf(self.filename, self.meshes_3d)
+
+        self.assertTrue(os.path.exists(f"{self.filename}.h5"))
+        self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(self.meshes_3d[0].points))
+            self.assertEqual(reader.num_steps, len(self.meshes_3d))
+
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), self.meshes_3d[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(
+                            point_data[key], self.meshes_3d[i].point_data[key]
+                        )
+                    )
+
+        os.remove(f"{self.filename}.h5")
+        os.remove(f"{self.filename}.xdmf")
+
+
+class TestAppendMeshToXdmf(unittest.TestCase):
+    def setUp(self):
+        self.meshes_2d = [
+            meshio.read(os.path.join(MOCK_VTU_FOLDER_PATH, f))
+            for f in os.listdir(MOCK_VTU_FOLDER_PATH)
+        ]
+        self.meshes_3d = [
+            meshio.read(os.path.join(MOCK_VTU_ANEURYSM_FOLDER_PATH, f))
+            for f in os.listdir(MOCK_VTU_ANEURYSM_FOLDER_PATH)
+        ]
+
+        self.tmp_dir = "tests/mock_vtu_tmp"
+        self.filename = os.path.join(self.tmp_dir, "test_xdmf_compression")
+        shutil.copytree(MOCK_VTU_FOLDER_PATH, self.tmp_dir)
+        self.tmp_files = [
+            os.path.join(self.tmp_dir, f) for f in os.listdir(self.tmp_dir)
+        ]
+
+    def tearDown(self):
+        shutil.rmtree(self.tmp_dir)
+
+    def test_append_2d_mesh(self,):
+        """Test 2D meshes compression, adding meshes one at a time"""
+        meshes_to_xdmf(self.filename, [self.meshes_2d[0]])
+        for mesh in self.meshes_2d[1:]:
+            append_mesh_to_xdmf(self.filename, mesh)
+
+        self.assertTrue(os.path.exists(f"{self.filename}.h5"))
+        self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(self.meshes_2d[0].points))
+            self.assertEqual(reader.num_steps, len(self.meshes_2d))
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), self.meshes_2d[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(
+                            point_data[key], self.meshes_2d[i].point_data[key]
+                        )
+                    )
+
+        os.remove(f"{self.filename}.h5")
+        os.remove(f"{self.filename}.xdmf")
+
+    def test_append_3d_mesh(self,):
+        """Test 3D meshes compression, adding meshes one at a time"""
+        meshes_to_xdmf(self.filename, [self.meshes_3d[0]])
+        for mesh in self.meshes_3d[1:]:
+            append_mesh_to_xdmf(self.filename, mesh)
+
+        self.assertTrue(os.path.exists(f"{self.filename}.h5"))
+        self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(self.meshes_3d[0].points))
+            self.assertEqual(reader.num_steps, len(self.meshes_3d))
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), self.meshes_3d[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(
+                            point_data[key], self.meshes_3d[i].point_data[key]
+                        )
+                    )
+
+        os.remove(f"{self.filename}.h5")
+        os.remove(f"{self.filename}.xdmf")
+
+    def test_append_mesh_with_compression(self,):
+        meshes_to_xdmf(self.filename, [self.meshes_2d[0]])
+        for mesh in self.meshes_2d[1:]:
+            append_mesh_to_xdmf(self.filename, mesh, compress=True)
+
+        self.assertTrue(os.path.exists(f"{self.filename}.h5"))
+        self.assertTrue(os.path.exists(f"{self.filename}.xdmf"))
+
+        with meshio.xdmf.TimeSeriesReader(f"{self.filename}.xdmf") as reader:
+            points, cells = reader.read_points_cells()
+            self.assertEqual(len(points), len(self.meshes_2d[0].points))
+            self.assertEqual(reader.num_steps, len(self.meshes_2d))
+            for i in range(reader.num_steps):
+                time, point_data, cell_data = reader.read_data(i)
+                self.assertEqual(point_data.keys(), self.meshes_2d[i].point_data.keys())
+                for key in point_data.keys():
+                    self.assertTrue(
+                        np.array_equal(
+                            point_data[key], self.meshes_2d[i].point_data[key]
+                        )
+                    )
+
         os.remove(f"{self.filename}.h5")
         os.remove(f"{self.filename}.xdmf")
 
