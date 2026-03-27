@@ -283,6 +283,12 @@ Second, in the case of dealing with multiple meshes, you can add extra edges bas
 
 See the [description](https://arxiv.org/abs/2010.03409) regarding world edges.
 
+Third, you can decide on adding extra compression when saving your results during validation or prediction to XDMF/HDF5 archive. This will slow down the results archiving but lower the h5 file size:
+
+```json 
+"compress_predictions": true
+```
+
 Finally, in the case where: 
 - you need to build the node type 
 - you need to build extra features that were not in your dataset

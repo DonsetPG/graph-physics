@@ -39,6 +39,7 @@ jobs:
         pip install "wandb[media]"
         pip install panel
         pip install einops
+        pip install lxml
     - name: Linting code
       run: |
         make lint

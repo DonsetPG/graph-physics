@@ -163,6 +163,25 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             # Check that last_previous_data_prediction is not set
             self.assertIsNone(self.model.last_previous_data_prediction)
 
+            # Check that .xdmf is created after validation step
+            xdmf_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.xdmf",
+            )
+            h5_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+
+            # Delete created validation files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
         def test_validation_step_w_previous_data(self):
             self.dataloader = DataLoader(self.dataset, batch_size=1)
             batch = next(iter(self.dataloader))
@@ -194,6 +213,25 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.use_previous_data = False
             self.model.previous_data_start = None
             self.model.previous_data_end = None
+
+            # Check that .xdmf is created after validation step
+            xdmf_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.xdmf",
+            )
+            h5_path = os.path.join(
+                "meshes",
+                f"epoch_{self.model.current_epoch}",
+                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+
+            # Delete created validation files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
 
         def test_spatial_mtp_setup(self):
             params = deepcopy(self.parameters)
@@ -241,30 +279,6 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             output_dim = 2
             self.model.eval()
 
-            # Simulate trajectory_to_save with sample graphs
-            num_graphs = 3
-            for i in range(num_graphs):
-                # Create a simple graph
-                pos = torch.tensor(
-                    [[0.0 + i, 0.0], [1.0 + i, 0.0], [1.0 + i, 1.0], [0.0 + i, 1.0]],
-                    dtype=torch.float,
-                )
-                edge_index = torch.tensor(
-                    [[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long
-                )
-                x = torch.tensor(
-                    [
-                        [i * 10 + 1, i * 10 + 1],
-                        [i * 10 + 2, i * 10 + 2],
-                        [i * 10 + 3, i * 10 + 3],
-                        [i * 10 + 4, i * 10 + 4],
-                    ],
-                    dtype=torch.float,
-                )
-                face = torch.tensor([[0], [1], [2]])
-                graph = Data(pos=pos, edge_index=edge_index, x=x, face=face)
-                self.model.trajectory_to_save.append(graph)
-
             # Simulate val_step_outputs and val_step_targets
             for i in range(num_steps):
                 predicted_outputs = torch.randn(batch_size, output_dim)
@@ -291,23 +305,6 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertEqual(self.model.current_val_trajectory, 0)
             self.assertIsNone(self.model.last_val_prediction)
 
-            # Check that .xdmf is present
-            xdmf_path = os.path.join(
-                "meshes",
-                f"epoch_{self.model.current_epoch}",
-                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.xdmf",
-            )
-            h5_path = os.path.join(
-                "meshes",
-                f"epoch_{self.model.current_epoch}",
-                f"graph_epoch_{self.model.current_epoch}_{self.model.current_val_trajectory}.h5",
-            )
-
-            self.assertTrue(os.path.exists(xdmf_path))
-            self.assertTrue(os.path.exists(h5_path))
-
-            _ = meshio.xdmf.TimeSeriesReader(xdmf_path)
-
         def test_validation_step_resets_trajectory(self):
             # Create mock batches
             self.dataloader = DataLoader(self.dataset, batch_size=1)
@@ -333,15 +330,30 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.eval()
             self.model.predict_step(batch.to(device))
 
-            # Check that prediction_trajectory is set
-            self.assertIsNotNone(self.model.prediction_trajectory)
-
             # Check that last_pred_prediction is set
             self.assertIsNotNone(self.model.last_pred_prediction)
             self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
 
             # Check that last_previous_data_pred_prediction is not set
             self.assertIsNone(self.model.last_previous_data_pred_prediction)
+
+            # Check that prediction files are saved
+            traj_idx = 0
+            xdmf_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.xdmf",
+            )
+            h5_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+
+            # Delete created prediction files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
 
         def test_predict_step_w_previous_data(self):
             self.dataloader = DataLoader(self.dataset, batch_size=1)
@@ -357,9 +369,6 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.eval()
             self.model.predict_step(batch.to(device))
 
-            # Check that prediction_trajectory is set
-            self.assertIsNotNone(self.model.prediction_trajectory)
-
             # Check that last_pred_prediction is set
             self.assertIsNotNone(self.model.last_pred_prediction)
             self.assertEqual(self.model.last_pred_prediction.shape, (10, 3))
@@ -374,42 +383,36 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.model.previous_data_start = None
             self.model.previous_data_end = None
 
+            # Check that prediction files are saved
+            traj_idx = 0
+            xdmf_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.xdmf",
+            )
+            h5_path = os.path.join(
+                "predictions",
+                f"graph_{traj_idx}.h5",
+            )
+
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+
+            # Delete created prediction files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
         def test_on_predict_epoch_end(self):
-            # Simulate prediction_trajectory with sample graphs
-            num_graphs = 3
-            for i in range(num_graphs):
-                # Create a simple graph
-                pos = torch.tensor(
-                    [[0.0 + i, 0.0], [1.0 + i, 0.0], [1.0 + i, 1.0], [0.0 + i, 1.0]],
-                    dtype=torch.float,
-                )
-                edge_index = torch.tensor(
-                    [[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long
-                )
-                x = torch.tensor(
-                    [
-                        [i * 10 + 1, i * 10 + 1],
-                        [i * 10 + 2, i * 10 + 2],
-                        [i * 10 + 3, i * 10 + 3],
-                        [i * 10 + 4, i * 10 + 4],
-                    ],
-                    dtype=torch.float,
-                )
-                face = torch.tensor([[0], [1], [2]])
-                graph = Data(
-                    pos=pos,
-                    edge_index=edge_index,
-                    x=x,
-                    face=face,
-                )
-                self.model.prediction_trajectory.append(graph)
+            # Make a prediction step
+            self.dataloader = DataLoader(self.dataset, batch_size=1)
+            batch = next(iter(self.dataloader))
+            self.model.eval()
+            self.model.predict_step(batch.to(device))
 
             # Run on_validation_epoch_end
             self.model.on_predict_epoch_end()
 
-            # Check that prediction_trajectory is cleared
+            # Check that predictions are cleared
             self.assertEqual(self.model.current_pred_trajectory, 0)
-            self.assertEqual(len(self.model.prediction_trajectory), 0)
             self.assertIsNone(self.model.last_pred_prediction)
             self.assertIsNone(self.model.last_previous_data_pred_prediction)
 
@@ -427,38 +430,23 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertTrue(os.path.exists(xdmf_path))
             self.assertTrue(os.path.exists(h5_path))
 
+            # Delete created prediction files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
         def test_on_predict_epoch_end_with_traj_id(self):
-            # Simulate prediction_trajectory with sample graphs that includ an ID
-            num_graphs = 3
-            for i in range(num_graphs):
-                # Create a simple graph
-                pos = torch.tensor(
-                    [[0.0 + i, 0.0], [1.0 + i, 0.0], [1.0 + i, 1.0], [0.0 + i, 1.0]],
-                    dtype=torch.float,
-                )
-                edge_index = torch.tensor(
-                    [[0, 1, 2, 3], [1, 2, 3, 0]], dtype=torch.long
-                )
-                x = torch.tensor(
-                    [
-                        [i * 10 + 1, i * 10 + 1],
-                        [i * 10 + 2, i * 10 + 2],
-                        [i * 10 + 3, i * 10 + 3],
-                        [i * 10 + 4, i * 10 + 4],
-                    ],
-                    dtype=torch.float,
-                )
-                face = torch.tensor([[0], [1], [2]])
-                traj_id = torch.tensor([123])
-                graph = Data(pos=pos, edge_index=edge_index, x=x, face=face, id=traj_id)
-                self.model.prediction_trajectory.append(graph)
+            # Make a prediction step with a batch having an id
+            self.dataloader = DataLoader(self.dataset, batch_size=1)
+            batch = next(iter(self.dataloader))
+            batch.id = torch.tensor([123])
+            self.model.eval()
+            self.model.predict_step(batch.to(device))
 
             # Run on_validation_epoch_end
             self.model.on_predict_epoch_end()
 
-            # Check that prediction_trajectory is cleared
+            # Check that predictions are cleared
             self.assertEqual(self.model.current_pred_trajectory, 0)
-            self.assertEqual(len(self.model.prediction_trajectory), 0)
             self.assertIsNone(self.model.last_pred_prediction)
             self.assertIsNone(self.model.last_previous_data_pred_prediction)
 
@@ -476,6 +464,10 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             self.assertTrue(os.path.exists(xdmf_path))
             self.assertTrue(os.path.exists(h5_path))
 
+            # Delete created prediction files
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
         def test_predict_step_saves_and_resets_trajectory(self):
             # Create mock batches
             self.dataloader = DataLoader(self.dataset, batch_size=1)
@@ -490,7 +482,8 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             batch.traj_index = 2
             self.model.predict_step(batch)
 
-            # Check that trajectory is saved and traj index changed
+            # Check that all trajectories are saved and traj index changed
+
             xdmf_path = os.path.join(
                 "predictions",
                 "graph_1.xdmf",
@@ -501,8 +494,23 @@ with patch("graphphysics.training.parse_parameters.get_model") as mock_get_model
             )
             self.assertTrue(os.path.exists(xdmf_path))
             self.assertTrue(os.path.exists(h5_path))
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
+            xdmf_path = os.path.join(
+                "predictions",
+                "graph_2.xdmf",
+            )
+            h5_path = os.path.join(
+                "predictions",
+                "graph_2.h5",
+            )
+            self.assertTrue(os.path.exists(xdmf_path))
+            self.assertTrue(os.path.exists(h5_path))
+            os.remove(xdmf_path)
+            os.remove(h5_path)
+
             assert self.model.current_pred_trajectory == 2
-            # traj 2 is not saved until predict epoch end
 
         def test_wandb_run_id_on_checkpoint_save_and_load(self):
             self.model.wandb_run_id = "saved_run_id"
