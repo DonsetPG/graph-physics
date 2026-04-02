@@ -7,7 +7,10 @@ from torch_geometric.data import Data
 from graphphysics.dataset.h5_dataset import H5Dataset
 from graphphysics.dataset.preprocessing import build_preprocessing
 from graphphysics.dataset.xdmf_dataset import XDMFDataset
-from graphphysics.models.layers import set_use_silu_activation
+from graphphysics.models.layers import (
+    set_memory_optimized_training,
+    set_use_silu_activation,
+)
 from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
@@ -93,6 +96,7 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     node_input_size = param["model"]["node_input_size"] + NodeType.SIZE
     use_silu = param.get("model", {}).get("use_silu_activation", False)
     training_params = param.get("training", {})
+    enable_vram_optimizations = training_params.get("enable_vram_optimizations", False)
     use_rope = param.get("model", {}).get("use_rope_embeddings", False)
     use_gated_attention = param.get("model", {}).get("use_gated_attention", False)
     use_gated_mlp = param.get("model", {}).get("use_gated_mlp", False)
@@ -105,6 +109,7 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     ref = param.get("model", {}).get("ref", 8)
     unified_pos = param.get("model", {}).get("unified_pos", False)
     set_use_silu_activation(use_silu)
+    set_memory_optimized_training(enable_vram_optimizations)
 
     if model_type == "epd":
         return EncodeProcessDecode(

@@ -35,6 +35,23 @@ class LogPyVistaPredictionsCallback(Callback):
         self.indices = indices
         self.output_dir = output_dir
 
+    def _forward_with_autocast_if_needed(
+        self, model: pl.LightningModule, graph: Data
+    ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+        """
+        Runs callback-side forward under CUDA autocast when model weights are reduced precision.
+        """
+        first_param = next(model.parameters(), None)
+        use_cuda_autocast = (
+            graph.x.is_cuda
+            and first_param is not None
+            and first_param.dtype in (torch.float16, torch.bfloat16)
+        )
+        if use_cuda_autocast:
+            with torch.autocast(device_type="cuda", dtype=first_param.dtype):
+                return model(graph)
+        return model(graph)
+
     def on_validation_epoch_end(
         self, trainer: pl.Trainer, pl_module: pl.LightningModule
     ):
@@ -55,7 +72,9 @@ class LogPyVistaPredictionsCallback(Callback):
         with torch.no_grad():
             for idx in self.indices:
                 graph = self.dataset[idx].to(device)
-                _, _, predicted_outputs = model(graph)
+                _, _, predicted_outputs = self._forward_with_autocast_if_needed(
+                    model, graph
+                )
 
                 graph.x = predicted_outputs
 
@@ -102,7 +121,9 @@ class LogPyVistaPredictionsCallback(Callback):
                     mask = build_mask(model.param, graph)
                     target = graph.y
 
-                    _, _, predicted_outputs = model(graph)
+                    _, _, predicted_outputs = self._forward_with_autocast_if_needed(
+                        model, graph
+                    )
                     predicted_outputs[mask] = target[mask]
 
                     graph.x = predicted_outputs

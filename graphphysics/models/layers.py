@@ -1,8 +1,10 @@
 import math
+from contextlib import contextmanager
 from typing import Any, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
+from torch.utils.checkpoint import checkpoint
 from torch_geometric.nn import MessagePassing
 
 try:
@@ -14,6 +16,58 @@ except ImportError:
     HAS_DGL_SPARSE = False
     dglsp = None
     SparseMatrix = Any  # Use Any as a placeholder for SparseMatrix
+
+
+_MEMORY_OPTIMIZED_TRAINING: bool = False
+
+
+def set_memory_optimized_training(enabled: bool) -> None:
+    """
+    Toggles memory-optimized training features (AMP-safe sparse ops + checkpointing).
+    """
+    global _MEMORY_OPTIMIZED_TRAINING
+    _MEMORY_OPTIMIZED_TRAINING = bool(enabled)
+
+
+def use_memory_optimized_training() -> bool:
+    """
+    Returns True if global memory-optimized training is enabled.
+    """
+    return _MEMORY_OPTIMIZED_TRAINING
+
+
+@contextmanager
+def _no_cuda_autocast_if_needed(is_cuda_tensor: bool):
+    """Temporarily disables CUDA autocast for kernels that must run in fp32."""
+    if is_cuda_tensor and torch.is_autocast_enabled():
+        with torch.amp.autocast("cuda", enabled=False):
+            yield
+    else:
+        yield
+
+
+def _bsddmm_fp32(mask, q: torch.Tensor, k_t: torch.Tensor):
+    """Runs DGL `bsddmm` in fp32 and returns a sparse attention tensor."""
+    q32 = q.float()
+    k_t32 = k_t.float()
+    try:
+        mask32 = mask.astype(torch.float32)
+    except AttributeError:
+        mask32 = mask
+    with _no_cuda_autocast_if_needed(q.is_cuda):
+        return dglsp.bsddmm(mask32, q32, k_t32)
+
+
+def _bspmm_fp32(attn, v: torch.Tensor, out_dtype: torch.dtype) -> torch.Tensor:
+    """Runs DGL `bspmm` in fp32 and casts the dense output back to `out_dtype`."""
+    v32 = v.float()
+    try:
+        attn32 = attn.astype(torch.float32)
+    except AttributeError:
+        attn32 = attn
+    with _no_cuda_autocast_if_needed(v.is_cuda):
+        y32 = dglsp.bspmm(attn32, v32)
+    return y32.to(out_dtype)
 
 
 class RMSNorm(nn.Module):
@@ -456,7 +510,10 @@ def scaled_query_key_softmax(
     q = q / scaling_factor
 
     if att_mask is not None and HAS_DGL_SPARSE:
-        attn = dglsp.bsddmm(att_mask, q, k.transpose(1, 0))
+        if _MEMORY_OPTIMIZED_TRAINING and q.is_cuda and torch.is_autocast_enabled():
+            attn = _bsddmm_fp32(att_mask, q, k.transpose(1, 0))
+        else:
+            attn = dglsp.bsddmm(att_mask, q, k.transpose(1, 0))
         attn = attn.softmax()
     else:
         attn = q @ k.transpose(-2, -1)
@@ -491,7 +548,10 @@ def scaled_dot_product_attention(
 
     # Compute the output
     if att_mask is not None and HAS_DGL_SPARSE:
-        y = dglsp.bspmm(attn, v)
+        if _MEMORY_OPTIMIZED_TRAINING and v.is_cuda and torch.is_autocast_enabled():
+            y = _bspmm_fp32(attn, v, v.dtype)
+        else:
+            y = dglsp.bspmm(attn, v)
     else:
         y = attn @ v
 
@@ -701,6 +761,7 @@ class Transformer(nn.Module):
         )
 
         self.use_adjacency = HAS_DGL_SPARSE
+        self.use_activation_checkpointing = _MEMORY_OPTIMIZED_TRAINING
 
     def forward(
         self,
@@ -736,15 +797,26 @@ class Transformer(nn.Module):
                 self.norm1(x), adj, pos=pos, return_attention=True
             )
             x = x + x_
-        else:
-            x = x + self.attention(self.norm1(x), adj, pos=pos)
-
-        x = x + self.gated_mlp(self.norm2(x))
-
-        if return_attention:
+            x = x + self.gated_mlp(self.norm2(x))
             return x, attn
+
+        if self.training and self.use_activation_checkpointing and torch.is_grad_enabled():
+
+            def _attn_only(tensor_x: torch.Tensor) -> torch.Tensor:
+                return self.attention(
+                    self.norm1(tensor_x), adj, pos=pos, return_attention=False
+                )
+
+            def _mlp_only(tensor_x: torch.Tensor) -> torch.Tensor:
+                return self.gated_mlp(self.norm2(tensor_x))
+
+            x = x + checkpoint(_attn_only, x, use_reentrant=False)
+            x = x + checkpoint(_mlp_only, x, use_reentrant=False)
         else:
-            return x
+            x = x + self.attention(self.norm1(x), adj, pos=pos, return_attention=False)
+            x = x + self.gated_mlp(self.norm2(x))
+
+        return x
 
 
 class TemporalAttention(nn.Module):
