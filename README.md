@@ -394,7 +394,7 @@ We also allow the customization of the loss function by combining physics-based 
 }
 ```
 
-- `type`: Type of the model, either `transformer` or `epd` (message passing)
+- `type`: Type of the model, one of `transformer`, `looped_transformer`, or `epd` (message passing)
 - `message_passing_num`: Number of Layers
 - `hidden_size`: Number of hidden neurons
 - `node_input_size`: Number of node features
@@ -405,6 +405,52 @@ We also allow the customization of the loss function by combining physics-based 
 - `edge_input_size`: Size of the edge features. 3 in 2D and 4 in 3D. 0 for transformer based model.
 - `output_size`: Size of the output
 - `num_heads`: Number of heads for transformer based model.
+
+### Looped Transformer
+
+`looped_transformer` adds a Parcae-style `Prelude -> shared recurrent core -> Coda` scaffold on top of the sparse graph transformer path. Exact research runs should use the DGL sparse backend; the PyG fallback exists for compatibility only.
+
+```json
+"model": {
+    "type": "looped_transformer",
+    "hidden_size": 64,
+    "node_input_size": 14,
+    "output_size": 3,
+    "edge_input_size": 0,
+    "num_heads": 4,
+    "prc_depth": 3,
+    "eval_loops": 8,
+    "loop_embedding_dim": 8,
+    "use_loop_embedding": true,
+    "use_stable_injection": true,
+    "use_moe_ffn": false,
+    "num_experts": 4,
+    "num_shared_experts": 0,
+    "top_k_experts": 2,
+    "halting_mode": "off",
+    "adaptive_adjacency": "off"
+},
+"training": {
+    "max_loops": 8,
+    "loop_sampling": "off",
+    "mu_rec": 8,
+    "mu_bwd": 4
+}
+```
+
+- `prc_depth`: Number of blocks in each of Prelude, recurrent core, and Coda.
+- `eval_loops`: Number of recurrent loops used at evaluation time.
+- `loop_embedding_dim`: Number of channels that receive sinusoidal loop-index embeddings. Defaults to `hidden_size // 8`.
+- `use_loop_embedding`: Enables loop-index embeddings in the recurrent core.
+- `use_stable_injection`: Enables the stable diagonal update `A * h + B * e + update`.
+- `use_moe_ffn`: Replaces the recurrent FFN with a node-wise MoE FFN.
+- `num_experts`, `num_shared_experts`, `top_k_experts`: MoE routing controls for the recurrent FFN.
+- `halting_mode`: `off` or `act` for ACT-style node-wise halting.
+- `adaptive_adjacency`: `off`, `target_active`, `edge_gate`, or `topk_edge_gate`.
+- `training.max_loops`: Maximum recurrent depth used during training.
+- `training.loop_sampling`: `off` or `truncated_poisson` for per-graph loop sampling.
+- `training.mu_rec`: Mean recurrent depth used by Poisson loop sampling.
+- `training.mu_bwd`: Truncated backpropagation interval across recurrent loops.
   
 ### Dataset Settings
 

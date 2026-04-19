@@ -1,0 +1,53 @@
+{
+  "sweep_name": "looped_transformer_scaling_aneurysm",
+  "matrix": {
+    "model.hidden_size": [16, 64, 128, 256],
+    "model.prc_depth": [1, 3, 5],
+    "model.num_heads": [2, 4],
+    "model.eval_loops": [4, 8, 16]
+  },
+  "constants": {
+    "model.type": "looped_transformer",
+    "model.node_input_size": 14,
+    "model.output_size": 3,
+    "model.edge_input_size": 0,
+    "model.use_stable_injection": true,
+    "model.use_loop_embedding": true,
+    "model.use_moe_ffn": false,
+    "model.halting_mode": "off",
+    "model.adaptive_adjacency": "off",
+    "training.max_loops": 16,
+    "training.loop_sampling": "off",
+    "training.mu_rec": 8,
+    "training.mu_bwd": 4,
+    "training.use_spatial_mtp": false,
+    "training.use_temporal_block": false
+  },
+  "excludes": [
+    {
+      "model.hidden_size": 16,
+      "model.num_heads": 4
+    },
+    {
+      "model.hidden_size": 64,
+      "model.num_heads": 4
+    },
+    {
+      "model.hidden_size": 128,
+      "model.num_heads": 2
+    },
+    {
+      "model.hidden_size": 256,
+      "model.num_heads": 2
+    }
+  ],
+  "train_flags": {
+    "project_name": "graphphysics-looped-scaling",
+    "num_epochs": 1,
+    "batch_size": 1,
+    "init_lr": 0.001,
+    "warmup": 100,
+    "num_workers": 0,
+    "no_edge_feature": false
+  }
+}

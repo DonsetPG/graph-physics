@@ -76,6 +76,7 @@ class Simulator(nn.Module):
         )
 
         self.device = device
+        self.last_processor_metrics = {}
 
     def _get_pre_target(self, inputs: Data) -> torch.Tensor:
         """
@@ -172,6 +173,12 @@ class Simulator(nn.Module):
             edge_attr=edge_attr,
             edge_index=inputs.edge_index,
         )
+        if hasattr(inputs, "batch"):
+            graph.batch = inputs.batch
+        if hasattr(inputs, "ptr"):
+            graph.ptr = inputs.ptr
+        if hasattr(inputs, "phi"):
+            graph.phi = inputs.phi
 
         return graph, target_delta_normalized
 
@@ -209,6 +216,7 @@ class Simulator(nn.Module):
             inputs=inputs, is_training=self.training
         )
         network_output = self.model(graph)
+        self.last_processor_metrics = getattr(self.model, "last_loop_metrics", {})
 
         if self.training:
             return network_output, target_delta_normalized, None

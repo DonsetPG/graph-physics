@@ -1,9 +1,9 @@
 import math
-from typing import Any, Dict, Optional, Tuple, Union
+from typing import Any, Callable, Dict, Optional, Tuple, Union
 
 import torch
 import torch.nn as nn
-from torch_geometric.nn import MessagePassing
+from torch_geometric.nn import MessagePassing, TransformerConv
 
 try:
     import dgl.sparse as dglsp
@@ -745,6 +745,593 @@ class Transformer(nn.Module):
             return x, attn
         else:
             return x
+
+
+class StableInjection(nn.Module):
+    """Stable diagonal recurrence used by the looped transformer core."""
+
+    def __init__(self, dim: int):
+        super().__init__()
+        self.log_A = nn.Parameter(torch.zeros(dim))
+        self.log_dt = nn.Parameter(torch.zeros(1))
+        self.B = nn.Parameter(torch.full((dim,), 0.1))
+
+    def get_A(self) -> torch.Tensor:
+        coeff = torch.clamp(self.log_A + self.log_dt, min=-20.0, max=20.0)
+        return torch.exp(-torch.exp(coeff))
+
+    def forward(
+        self,
+        h: torch.Tensor,
+        encoded_input: torch.Tensor,
+        update: torch.Tensor,
+    ) -> torch.Tensor:
+        a = self.get_A().view(1, -1)
+        b = self.B.view(1, -1)
+        return a * h + b * encoded_input + update
+
+
+class LoopIndexEmbedding(nn.Module):
+    """Broadcast sinusoidal loop-depth embeddings over node states."""
+
+    def __init__(self, hidden_size: int, loop_dim: int, theta: float = 10000.0):
+        super().__init__()
+        self.hidden_size = hidden_size
+        self.loop_dim = max(0, min(loop_dim, hidden_size))
+        self.theta = theta
+        if self.loop_dim > 0:
+            inv_freq = theta ** (
+                -torch.arange(0, self.loop_dim, 2, dtype=torch.float32)
+                / max(self.loop_dim, 1)
+            )
+        else:
+            inv_freq = torch.empty(0, dtype=torch.float32)
+        self.register_buffer("inv_freq", inv_freq, persistent=False)
+
+    def forward(self, x: torch.Tensor, loop_index: int) -> torch.Tensor:
+        if self.loop_dim == 0:
+            return x
+        freq = self.inv_freq.to(device=x.device, dtype=x.dtype)
+        angles = loop_index * freq
+        emb = torch.cat((angles.sin(), angles.cos()), dim=0)[: self.loop_dim]
+        full = torch.zeros(self.hidden_size, dtype=x.dtype, device=x.device)
+        full[: self.loop_dim] = emb
+        return x + full.view(1, -1)
+
+
+class NodeMoEFFN(nn.Module):
+    """Node-wise top-k MoE feed-forward layer for recurrent blocks."""
+
+    def __init__(
+        self,
+        dim: int,
+        n_experts: int,
+        top_k: int,
+        expert_ctor: Optional[Callable[[], nn.Module]] = None,
+        n_shared: int = 0,
+    ):
+        super().__init__()
+        if n_experts <= 0:
+            raise ValueError("n_experts must be positive.")
+        self.dim = dim
+        self.n_experts = n_experts
+        self.top_k = max(1, min(top_k, n_experts))
+        self.router = nn.Linear(dim, n_experts, bias=False)
+        expert_ctor = expert_ctor or (
+            lambda: build_gated_mlp(
+                in_size=dim,
+                hidden_size=dim,
+                out_size=dim,
+            )
+        )
+        self.experts = nn.ModuleList([expert_ctor() for _ in range(n_experts)])
+        self.shared = nn.ModuleList([expert_ctor() for _ in range(n_shared)])
+        self.last_stats: Dict[str, torch.Tensor] = {}
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        probs = torch.softmax(self.router(x), dim=-1)
+        weights, indices = probs.topk(self.top_k, dim=-1)
+        weights = weights / weights.sum(dim=-1, keepdim=True).clamp_min(1e-9)
+
+        out = torch.zeros_like(x)
+        expert_counts = torch.zeros(
+            self.n_experts,
+            device=x.device,
+            dtype=x.dtype,
+        )
+
+        for expert_id, expert in enumerate(self.experts):
+            expert_out = expert(x)
+            expert_mask = indices == expert_id
+            routed_weight = (weights * expert_mask.float()).sum(dim=-1, keepdim=True)
+            out = out + routed_weight * expert_out
+            expert_counts[expert_id] = expert_mask.any(dim=-1).float().sum()
+
+        for expert in self.shared:
+            out = out + expert(x)
+
+        router_entropy = -(probs * probs.clamp_min(1e-9).log()).sum(dim=-1).mean()
+        utilization = expert_counts / max(float(x.size(0)), 1.0)
+        self.last_stats = {
+            "moe/router_entropy": router_entropy.detach(),
+        }
+        for expert_id in range(self.n_experts):
+            self.last_stats[f"moe/expert_{expert_id}_utilization"] = utilization[
+                expert_id
+            ].detach()
+        return out
+
+
+class NodeACTHalting(nn.Module):
+    """Online ACT-style halting for per-node recurrent depth."""
+
+    def __init__(self, dim: int, threshold: float = 0.99):
+        super().__init__()
+        self.threshold = threshold
+        self.halt_head = nn.Linear(dim, 1)
+
+    def initial_state(
+        self,
+        num_nodes: int,
+        hidden_size: int,
+        device: torch.device,
+        dtype: torch.dtype,
+    ) -> Dict[str, torch.Tensor]:
+        return {
+            "halted": torch.zeros(num_nodes, dtype=torch.bool, device=device),
+            "cum_prob": torch.zeros(num_nodes, dtype=dtype, device=device),
+            "output": torch.zeros(num_nodes, hidden_size, dtype=dtype, device=device),
+            "exit_depth_sum": torch.zeros(num_nodes, dtype=dtype, device=device),
+            "exit_count": torch.zeros(num_nodes, dtype=dtype, device=device),
+        }
+
+    def detach_state(
+        self, state: Dict[str, torch.Tensor]
+    ) -> Dict[str, torch.Tensor]:
+        return {
+            key: value.detach() if torch.is_tensor(value) else value
+            for key, value in state.items()
+        }
+
+    def step(
+        self,
+        candidate: torch.Tensor,
+        previous: torch.Tensor,
+        state: Dict[str, torch.Tensor],
+        loop_active: torch.Tensor,
+        loop_index: int,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        halted = state["halted"]
+        effective = loop_active & (~halted)
+        if not effective.any():
+            return previous, state
+
+        probs = torch.sigmoid(self.halt_head(candidate)).squeeze(-1)
+        probs = probs * effective.float()
+        remainder = (1.0 - state["cum_prob"]).clamp(min=0.0)
+        will_halt = effective & ((state["cum_prob"] + probs) >= self.threshold)
+        weights = torch.where(will_halt, remainder, probs)
+
+        updated_state = dict(state)
+        updated_state["output"] = state["output"] + weights.unsqueeze(-1) * candidate
+        updated_state["cum_prob"] = state["cum_prob"] + weights
+        updated_state["exit_depth_sum"] = state["exit_depth_sum"] + will_halt.float() * (
+            loop_index + 1
+        )
+        updated_state["exit_count"] = state["exit_count"] + will_halt.float()
+        updated_state["halted"] = halted | will_halt
+
+        new_hidden = torch.where(halted.unsqueeze(-1), previous, candidate)
+        return new_hidden, updated_state
+
+    def finalize(
+        self,
+        current_hidden: torch.Tensor,
+        state: Dict[str, torch.Tensor],
+        final_depths: torch.Tensor,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        remaining = ~state["halted"]
+        remainder = (1.0 - state["cum_prob"]).clamp(min=0.0)
+        output = state["output"] + remainder.unsqueeze(-1) * current_hidden * remaining.unsqueeze(
+            -1
+        )
+        exit_depth_sum = state["exit_depth_sum"] + remaining.float() * final_depths.float()
+        exit_count = state["exit_count"] + remaining.float()
+        mean_exit_depth = exit_depth_sum.sum() / exit_count.sum().clamp_min(1.0)
+        return output, {"act/mean_exit_depth": mean_exit_depth.detach()}
+
+
+class AdaptiveAdjacencyPolicy(nn.Module):
+    """Target-active masking and learned edge pruning over the base adjacency."""
+
+    def __init__(
+        self,
+        hidden_size: int,
+        mode: str = "off",
+        pos_dim: int = 3,
+        top_k_edges: int = 8,
+        edge_gate_threshold: float = 0.5,
+    ):
+        super().__init__()
+        valid_modes = {"off", "target_active", "edge_gate", "topk_edge_gate"}
+        if mode not in valid_modes:
+            raise ValueError(f"Unsupported adaptive adjacency mode: {mode}")
+        self.mode = mode
+        self.pos_dim = max(0, pos_dim)
+        self.top_k_edges = max(1, top_k_edges)
+        self.edge_gate_threshold = edge_gate_threshold
+        gate_input_dim = 2 * hidden_size + self.pos_dim
+        self.edge_gate = (
+            build_mlp(
+                in_size=gate_input_dim,
+                hidden_size=hidden_size,
+                out_size=1,
+                nb_of_layers=3,
+                layer_norm=False,
+                act="silu",
+            )
+            if mode in {"edge_gate", "topk_edge_gate"}
+            else None
+        )
+
+    def _edge_features(
+        self,
+        hidden: torch.Tensor,
+        edge_index: torch.Tensor,
+        pos: Optional[torch.Tensor],
+    ) -> torch.Tensor:
+        senders, receivers = edge_index
+        feats = [hidden[receivers], hidden[senders]]
+        if self.pos_dim > 0:
+            if pos is None:
+                delta = hidden.new_zeros(edge_index.size(1), self.pos_dim)
+            else:
+                delta = pos[receivers, : self.pos_dim] - pos[senders, : self.pos_dim]
+            feats.append(delta)
+        return torch.cat(feats, dim=-1)
+
+    def _topk_mask(
+        self,
+        receivers: torch.Tensor,
+        scores: torch.Tensor,
+    ) -> torch.Tensor:
+        keep = torch.zeros_like(scores, dtype=torch.bool)
+        for receiver in receivers.unique(sorted=False):
+            receiver_idx = torch.nonzero(receivers == receiver, as_tuple=False).view(-1)
+            top_k = min(self.top_k_edges, receiver_idx.numel())
+            if top_k <= 0:
+                continue
+            local_scores = scores.index_select(0, receiver_idx)
+            local_topk = torch.topk(local_scores, k=top_k, dim=0).indices
+            keep.index_fill_(0, receiver_idx.index_select(0, local_topk), True)
+        return keep
+
+    def forward(
+        self,
+        base_edge_index: torch.Tensor,
+        hidden: torch.Tensor,
+        active_targets: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        if active_targets is None:
+            active_targets = torch.ones(
+                hidden.size(0),
+                dtype=torch.bool,
+                device=hidden.device,
+            )
+        base_edges = max(base_edge_index.size(1), 1)
+        receiver_mask = active_targets[base_edge_index[1]]
+
+        if self.mode == "off":
+            filtered_edge_index = base_edge_index
+        elif self.mode == "target_active":
+            filtered_edge_index = base_edge_index[:, receiver_mask]
+        else:
+            candidate_edges = base_edge_index[:, receiver_mask]
+            if candidate_edges.numel() == 0:
+                filtered_edge_index = candidate_edges
+            else:
+                gate_inputs = self._edge_features(hidden, candidate_edges, pos)
+                scores = torch.sigmoid(self.edge_gate(gate_inputs)).squeeze(-1)
+                if self.mode == "edge_gate":
+                    keep = scores >= self.edge_gate_threshold
+                    if not keep.any():
+                        keep = scores >= scores.max()
+                else:
+                    keep = self._topk_mask(candidate_edges[1], scores)
+                filtered_edge_index = candidate_edges[:, keep]
+
+        stats = {
+            "adj/active_target_ratio": active_targets.float().mean().detach(),
+            "adj/retained_edge_ratio": hidden.new_tensor(
+                filtered_edge_index.size(1) / base_edges
+            ).detach(),
+        }
+        return filtered_edge_index, stats
+
+
+class LoopedProcessorBlock(nn.Module):
+    """Transformer-style block that supports custom recurrent FFNs."""
+
+    def __init__(
+        self,
+        input_dim: int,
+        output_dim: int,
+        num_heads: int,
+        use_proj_bias: bool = True,
+        use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        pos_dimension: int = 3,
+        rope_base: float = 10000.0,
+        feedforward: Optional[nn.Module] = None,
+    ):
+        super().__init__()
+        self.use_sparse_adjacency = HAS_DGL_SPARSE
+        self.use_rope_embeddings = use_rope_embeddings and HAS_DGL_SPARSE
+        self.norm1 = RMSNorm(output_dim)
+        self.norm2 = RMSNorm(output_dim)
+        self.feedforward = feedforward or build_gated_mlp(
+            in_size=output_dim,
+            hidden_size=output_dim,
+            out_size=output_dim,
+        )
+        self.last_ffn_metrics: Dict[str, torch.Tensor] = {}
+
+        if self.use_sparse_adjacency:
+            self.processor = Attention(
+                input_dim=input_dim,
+                output_dim=output_dim,
+                num_heads=num_heads,
+                pos_dimension=pos_dimension,
+                use_proj_bias=use_proj_bias,
+                use_separate_proj_weight=use_separate_proj_weight,
+                use_rope_embeddings=self.use_rope_embeddings,
+                use_gated_attention=use_gated_attention,
+                rope_base=rope_base,
+            )
+        else:
+            self.processor = TransformerConv(
+                in_channels=input_dim,
+                out_channels=output_dim,
+                heads=num_heads,
+                concat=False,
+                beta=True,
+            )
+
+    def forward(
+        self,
+        x: torch.Tensor,
+        structure,
+        pos: Optional[torch.Tensor] = None,
+    ) -> torch.Tensor:
+        residual = self.norm1(x)
+        if self.use_sparse_adjacency:
+            if self.use_rope_embeddings and pos is None:
+                raise ValueError(
+                    "LoopedProcessorBlock requires node positions when use_rope_embeddings=True."
+                )
+            x = x + self.processor(residual, structure, pos=pos)
+        else:
+            x = x + self.processor(residual, structure)
+
+        ff_out = self.feedforward(self.norm2(x))
+        self.last_ffn_metrics = getattr(self.feedforward, "last_stats", {})
+        return x + ff_out
+
+
+class RecurrentGraphCore(nn.Module):
+    """Shared recurrent stack with stable injection, loop sampling, and ACT."""
+
+    def __init__(
+        self,
+        recurrent_blocks: nn.ModuleList,
+        hidden_size: int,
+        max_loops: int,
+        eval_loops: int,
+        loop_embedding: Optional[LoopIndexEmbedding] = None,
+        stable_injection: Optional[StableInjection] = None,
+        halting: Optional[NodeACTHalting] = None,
+        adjacency_policy: Optional[AdaptiveAdjacencyPolicy] = None,
+        loop_sampling: str = "off",
+        mu_rec: int = 8,
+        mu_bwd: int = 4,
+    ):
+        super().__init__()
+        self.recurrent_blocks = recurrent_blocks
+        self.hidden_size = hidden_size
+        self.max_loops = max(1, max_loops)
+        self.eval_loops = max(1, eval_loops)
+        self.loop_embedding = loop_embedding
+        self.stable_injection = stable_injection
+        self.halting = halting
+        self.adjacency_policy = adjacency_policy
+        self.loop_sampling = loop_sampling
+        self.mu_rec = mu_rec
+        self.mu_bwd = max(1, mu_bwd)
+        self.input_norm = RMSNorm(hidden_size)
+        self.last_metrics: Dict[str, torch.Tensor] = {}
+
+    def _build_structure(self, edge_index: torch.Tensor, num_nodes: int):
+        if HAS_DGL_SPARSE:
+            return dglsp.spmatrix(indices=edge_index, shape=(num_nodes, num_nodes))
+        return edge_index
+
+    def _sample_loops(
+        self,
+        batch_index: Optional[torch.Tensor],
+        device: torch.device,
+    ) -> torch.Tensor:
+        if batch_index is None:
+            num_graphs = 1
+        else:
+            num_graphs = int(batch_index.max().item()) + 1
+
+        if not self.training:
+            return torch.full(
+                (num_graphs,),
+                self.eval_loops,
+                device=device,
+                dtype=torch.long,
+            )
+        if self.loop_sampling != "truncated_poisson":
+            return torch.full(
+                (num_graphs,),
+                self.max_loops,
+                device=device,
+                dtype=torch.long,
+            )
+
+        sampled = torch.poisson(
+            torch.full((num_graphs,), float(self.mu_rec), device=device)
+        ).long()
+        return sampled.clamp(min=1, max=self.max_loops)
+
+    def _collect_ffn_metrics(self) -> Dict[str, torch.Tensor]:
+        metrics: Dict[str, torch.Tensor] = {}
+        for block in self.recurrent_blocks:
+            for key, value in getattr(block, "last_ffn_metrics", {}).items():
+                if key not in metrics:
+                    metrics[key] = value.detach().float()
+                else:
+                    metrics[key] = metrics[key] + value.detach().float()
+        if metrics:
+            for key in list(metrics.keys()):
+                metrics[key] = metrics[key] / max(len(self.recurrent_blocks), 1)
+        return metrics
+
+    def _detach_state(
+        self,
+        hidden: torch.Tensor,
+        halting_state: Optional[Dict[str, torch.Tensor]],
+    ) -> Tuple[torch.Tensor, Optional[Dict[str, torch.Tensor]]]:
+        hidden = hidden.detach()
+        if self.halting is not None and halting_state is not None:
+            halting_state = self.halting.detach_state(halting_state)
+        return hidden, halting_state
+
+    def forward(
+        self,
+        encoded_input: torch.Tensor,
+        base_edge_index: torch.Tensor,
+        batch_index: Optional[torch.Tensor] = None,
+        pos: Optional[torch.Tensor] = None,
+    ) -> Tuple[torch.Tensor, Dict[str, torch.Tensor]]:
+        hidden = encoded_input
+        sampled_loops = self._sample_loops(batch_index, hidden.device)
+        total_loops = int(sampled_loops.max().item())
+        node_loop_limits = (
+            sampled_loops[batch_index]
+            if batch_index is not None
+            else sampled_loops.new_full((hidden.size(0),), sampled_loops.item())
+        )
+
+        halting_state = (
+            self.halting.initial_state(
+                num_nodes=hidden.size(0),
+                hidden_size=self.hidden_size,
+                device=hidden.device,
+                dtype=hidden.dtype,
+            )
+            if self.halting is not None
+            else None
+        )
+
+        scalar_accumulators: Dict[str, torch.Tensor] = {}
+        counts: Dict[str, int] = {}
+        last_residual_jump = hidden.new_tensor(0.0)
+
+        for loop_idx in range(total_loops):
+            active_nodes = node_loop_limits > loop_idx
+            if halting_state is not None:
+                active_nodes = active_nodes & (~halting_state["halted"])
+            if not active_nodes.any():
+                break
+
+            loop_hidden = hidden
+            if self.loop_embedding is not None:
+                loop_hidden = self.loop_embedding(loop_hidden, loop_idx)
+            recurrent_input = self.input_norm(loop_hidden + encoded_input)
+
+            edge_index = base_edge_index
+            if self.adjacency_policy is not None:
+                edge_index, adj_stats = self.adjacency_policy(
+                    base_edge_index,
+                    hidden=hidden,
+                    active_targets=active_nodes,
+                    pos=pos,
+                )
+                for key, value in adj_stats.items():
+                    scalar_accumulators[key] = scalar_accumulators.get(
+                        key, hidden.new_tensor(0.0)
+                    ) + value.float()
+                    counts[key] = counts.get(key, 0) + 1
+
+            structure = self._build_structure(edge_index, hidden.size(0))
+            update = recurrent_input
+            for block in self.recurrent_blocks:
+                update = block(update, structure, pos=pos)
+
+            if self.stable_injection is not None:
+                candidate = self.stable_injection(hidden, encoded_input, update)
+            else:
+                candidate = hidden + update
+
+            candidate = torch.where(active_nodes.unsqueeze(-1), candidate, hidden)
+            last_residual_jump = (candidate - hidden).norm(dim=-1).mean().detach()
+
+            if halting_state is not None:
+                hidden, halting_state = self.halting.step(
+                    candidate=candidate,
+                    previous=hidden,
+                    state=halting_state,
+                    loop_active=active_nodes,
+                    loop_index=loop_idx,
+                )
+            else:
+                hidden = candidate
+
+            loop_metrics = self._collect_ffn_metrics()
+            for key, value in loop_metrics.items():
+                scalar_accumulators[key] = scalar_accumulators.get(
+                    key, hidden.new_tensor(0.0)
+                ) + value.float()
+                counts[key] = counts.get(key, 0) + 1
+
+            if self.stable_injection is not None:
+                spectral_radius = self.stable_injection.get_A().max().detach()
+                scalar_accumulators["loop/spectral_radius_max"] = scalar_accumulators.get(
+                    "loop/spectral_radius_max", hidden.new_tensor(0.0)
+                ) + spectral_radius.float()
+                counts["loop/spectral_radius_max"] = (
+                    counts.get("loop/spectral_radius_max", 0) + 1
+                )
+
+            state_norm = hidden.norm(dim=-1).mean().detach()
+            scalar_accumulators["loop/state_norm"] = scalar_accumulators.get(
+                "loop/state_norm", hidden.new_tensor(0.0)
+            ) + state_norm.float()
+            counts["loop/state_norm"] = counts.get("loop/state_norm", 0) + 1
+
+            if self.training and (loop_idx + 1) % self.mu_bwd == 0 and (loop_idx + 1) < total_loops:
+                hidden, halting_state = self._detach_state(hidden, halting_state)
+
+        metrics: Dict[str, torch.Tensor] = {}
+        for key, value in scalar_accumulators.items():
+            metrics[key] = value / max(counts.get(key, 1), 1)
+        metrics["loop/mean_sampled_loops"] = sampled_loops.float().mean().detach()
+        metrics["loop/residual_jump"] = last_residual_jump
+
+        if halting_state is not None:
+            hidden, act_metrics = self.halting.finalize(
+                current_hidden=hidden,
+                state=halting_state,
+                final_depths=node_loop_limits.float(),
+            )
+            metrics.update(act_metrics)
+
+        self.last_metrics = metrics
+        return hidden, metrics
 
 
 class TemporalAttention(nn.Module):

@@ -1,0 +1,39 @@
+{
+  "sweep_name": "looped_transformer_vram_aneurysm",
+  "matrix": {
+    "model.hidden_size": [64, 128],
+    "training.max_loops": [4, 8, 16],
+    "model.use_moe_ffn": [false, true],
+    "model.halting_mode": ["off", "act"],
+    "model.adaptive_adjacency": ["off", "target_active", "topk_edge_gate"]
+  },
+  "constants": {
+    "model.type": "looped_transformer",
+    "model.node_input_size": 14,
+    "model.output_size": 3,
+    "model.edge_input_size": 0,
+    "model.num_heads": 4,
+    "model.prc_depth": 3,
+    "model.eval_loops": 8,
+    "model.loop_embedding_dim": 8,
+    "model.use_stable_injection": true,
+    "model.use_loop_embedding": true,
+    "model.num_experts": 4,
+    "model.num_shared_experts": 1,
+    "model.top_k_experts": 2,
+    "training.loop_sampling": "off",
+    "training.mu_rec": 8,
+    "training.mu_bwd": 4,
+    "training.use_spatial_mtp": false,
+    "training.use_temporal_block": false
+  },
+  "train_flags": {
+    "project_name": "graphphysics-looped-vram",
+    "num_epochs": 1,
+    "batch_size": 1,
+    "init_lr": 0.001,
+    "warmup": 100,
+    "num_workers": 0,
+    "no_edge_feature": false
+  }
+}

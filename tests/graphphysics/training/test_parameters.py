@@ -27,11 +27,16 @@ with patch(
 ) as MockEncodeProcessDecode, patch(
     "graphphysics.models.processors.EncodeTransformDecode"
 ) as MockEncodeTransformDecode, patch(
+    "graphphysics.models.processors.LoopedEncodeTransformDecode"
+) as MockLoopedEncodeTransformDecode, patch(
     "graphphysics.training.parse_parameters.EncodeTransformDecode",
     new=MockEncodeTransformDecode,
 ), patch(
     "graphphysics.training.parse_parameters.EncodeProcessDecode",
     new=MockEncodeProcessDecode,
+), patch(
+    "graphphysics.training.parse_parameters.LoopedEncodeTransformDecode",
+    new=MockLoopedEncodeTransformDecode,
 ), patch(
     "graphphysics.training.parse_parameters.TransolverProcessor"
 ) as MockTransolverProcessor, patch(
@@ -127,6 +132,27 @@ with patch(
             self.param["training"]["use_temporal_block"] = True
             model = get_model(self.param)
             self.assertTrue(use_silu_activation())
+
+        def test_get_model_looped_transformer(self):
+            MockLoopedEncodeTransformDecode.reset_mock()
+            self.param["model"]["type"] = "looped_transformer"
+            self.param["model"]["num_heads"] = 4
+            self.param["model"]["prc_depth"] = 3
+            self.param["model"]["eval_loops"] = 8
+            self.param["model"]["loop_embedding_dim"] = 8
+            self.param["model"]["use_loop_embedding"] = True
+            self.param["model"]["use_stable_injection"] = True
+            self.param["model"]["use_moe_ffn"] = True
+            self.param["model"]["num_experts"] = 4
+            self.param["model"]["num_shared_experts"] = 1
+            self.param["model"]["top_k_experts"] = 2
+            self.param["model"]["halting_mode"] = "act"
+            self.param["model"]["adaptive_adjacency"] = "target_active"
+            self.param["training"]["loop_sampling"] = "truncated_poisson"
+            self.param["training"]["max_loops"] = 8
+            self.param["training"]["mu_rec"] = 8
+            self.param["training"]["mu_bwd"] = 4
+            get_model(self.param)
 
         def test_get_model_invalid(self):
             self.param["model"]["type"] = "invalid_model_type"

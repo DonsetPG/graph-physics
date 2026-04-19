@@ -11,6 +11,7 @@ from graphphysics.models.layers import set_use_silu_activation
 from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
+    LoopedEncodeTransformDecode,
     TransolverProcessor,
 )
 from graphphysics.models.simulator import Simulator
@@ -104,6 +105,33 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
     slice_num = param.get("model", {}).get("slice_num", 32)
     ref = param.get("model", {}).get("ref", 8)
     unified_pos = param.get("model", {}).get("unified_pos", False)
+    prc_depth = param.get("model", {}).get(
+        "prc_depth",
+        max(1, param["model"].get("message_passing_num", 1) // 3),
+    )
+    eval_loops = param.get("model", {}).get(
+        "eval_loops",
+        training_params.get("max_loops", prc_depth),
+    )
+    max_loops = training_params.get("max_loops", eval_loops)
+    loop_embedding_dim = param.get("model", {}).get(
+        "loop_embedding_dim",
+        max(1, param["model"]["hidden_size"] // 8),
+    )
+    use_loop_embedding = param.get("model", {}).get("use_loop_embedding", True)
+    use_stable_injection = param.get("model", {}).get("use_stable_injection", True)
+    use_moe_ffn = param.get("model", {}).get("use_moe_ffn", False)
+    num_experts = param.get("model", {}).get("num_experts", 4)
+    num_shared_experts = param.get("model", {}).get("num_shared_experts", 0)
+    top_k_experts = param.get("model", {}).get("top_k_experts", 2)
+    halting_mode = param.get("model", {}).get("halting_mode", "off")
+    adaptive_adjacency = param.get("model", {}).get("adaptive_adjacency", "off")
+    top_k_edges = param.get("model", {}).get("top_k_edges", 8)
+    edge_gate_threshold = param.get("model", {}).get("edge_gate_threshold", 0.5)
+    act_threshold = param.get("model", {}).get("act_threshold", 0.99)
+    loop_sampling = training_params.get("loop_sampling", "off")
+    mu_rec = training_params.get("mu_rec", 8)
+    mu_bwd = training_params.get("mu_bwd", 4)
     set_use_silu_activation(use_silu)
 
     if model_type == "epd":
@@ -134,6 +162,36 @@ def get_model(param: Dict[str, Any], only_processor: bool = False):
             rope_pos_dimension=rope_pos_dimension,
             rope_base=rope_base,
             use_temporal_block=use_temporal_block,
+        )
+    elif model_type == "looped_transformer":
+        return LoopedEncodeTransformDecode(
+            prc_depth=prc_depth,
+            node_input_size=node_input_size,
+            output_size=param["model"]["output_size"],
+            hidden_size=param["model"]["hidden_size"],
+            num_heads=param["model"]["num_heads"],
+            eval_loops=eval_loops,
+            max_loops=max_loops,
+            only_processor=only_processor,
+            use_rope_embeddings=use_rope,
+            use_gated_attention=use_gated_attention,
+            rope_pos_dimension=rope_pos_dimension,
+            rope_base=rope_base,
+            loop_embedding_dim=loop_embedding_dim,
+            use_loop_embedding=use_loop_embedding,
+            use_stable_injection=use_stable_injection,
+            use_moe_ffn=use_moe_ffn,
+            num_experts=num_experts,
+            num_shared_experts=num_shared_experts,
+            top_k_experts=top_k_experts,
+            halting_mode=halting_mode,
+            adaptive_adjacency=adaptive_adjacency,
+            loop_sampling=loop_sampling,
+            mu_rec=mu_rec,
+            mu_bwd=mu_bwd,
+            top_k_edges=top_k_edges,
+            edge_gate_threshold=edge_gate_threshold,
+            act_threshold=act_threshold,
         )
     elif model_type == "transolver":
         return TransolverProcessor(

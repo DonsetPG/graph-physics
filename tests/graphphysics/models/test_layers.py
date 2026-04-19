@@ -4,7 +4,13 @@ import torch.nn as nn
 from torch_geometric.utils import to_undirected
 
 from graphphysics.models.layers import (
+    AdaptiveAdjacencyPolicy,
     RMSNorm,
+    LoopIndexEmbedding,
+    NodeACTHalting,
+    NodeMoEFFN,
+    RecurrentGraphCore,
+    StableInjection,
     build_mlp,
     GatedMLP,
     build_gated_mlp,
@@ -244,6 +250,112 @@ class TestTransformerComponents(unittest.TestCase):
         x = torch.randn(5, input_dim)
         output = transformer(x, None)
         self.assertEqual(output.shape, (5, output_dim))
+
+    def test_stable_injection_bounds(self):
+        layer = StableInjection(dim=8)
+        coeff = layer.get_A()
+        self.assertTrue(torch.all(coeff > 0))
+        self.assertTrue(torch.all(coeff < 1))
+
+        h = torch.randn(4, 8)
+        e = torch.randn(4, 8)
+        update = torch.randn(4, 8)
+        output = layer(h, e, update)
+        self.assertEqual(output.shape, h.shape)
+
+    def test_loop_index_embedding_broadcast(self):
+        layer = LoopIndexEmbedding(hidden_size=8, loop_dim=4)
+        x = torch.zeros(3, 8)
+        y = layer(x, loop_index=2)
+        self.assertEqual(y.shape, x.shape)
+        self.assertTrue(torch.allclose(y[0] - x[0], y[1] - x[1]))
+
+    def test_node_moe_ffn_shape_and_stats(self):
+        moe = NodeMoEFFN(dim=8, n_experts=4, top_k=2, n_shared=1)
+        x = torch.randn(6, 8)
+        y = moe(x)
+        self.assertEqual(y.shape, x.shape)
+        self.assertIn("moe/router_entropy", moe.last_stats)
+        self.assertIn("moe/expert_0_utilization", moe.last_stats)
+
+    def test_node_act_halting_freezes_halted_nodes(self):
+        halting = NodeACTHalting(dim=8, threshold=0.99)
+        halting.halt_head.weight.data.zero_()
+        halting.halt_head.bias.data.fill_(20.0)
+
+        state = halting.initial_state(
+            num_nodes=4,
+            hidden_size=8,
+            device=torch.device("cpu"),
+            dtype=torch.float32,
+        )
+        candidate = torch.randn(4, 8)
+        previous = torch.zeros_like(candidate)
+        active = torch.ones(4, dtype=torch.bool)
+
+        hidden, state = halting.step(candidate, previous, state, active, loop_index=0)
+        self.assertTrue(state["halted"].all())
+
+        next_candidate = torch.randn(4, 8)
+        hidden_next, _ = halting.step(
+            next_candidate,
+            hidden,
+            state,
+            active,
+            loop_index=1,
+        )
+        self.assertTrue(torch.allclose(hidden, hidden_next))
+
+        final_output, metrics = halting.finalize(
+            current_hidden=hidden_next,
+            state=state,
+            final_depths=torch.ones(4),
+        )
+        self.assertEqual(final_output.shape, hidden.shape)
+        self.assertIn("act/mean_exit_depth", metrics)
+
+    def test_adaptive_adjacency_target_active_mask(self):
+        policy = AdaptiveAdjacencyPolicy(hidden_size=8, mode="target_active", pos_dim=0)
+        edge_index = torch.tensor([[0, 1, 2, 0], [1, 2, 0, 2]], dtype=torch.long)
+        hidden = torch.randn(3, 8)
+        active_targets = torch.tensor([True, False, True])
+
+        filtered_edge_index, stats = policy(
+            base_edge_index=edge_index,
+            hidden=hidden,
+            active_targets=active_targets,
+        )
+        self.assertTrue(torch.all(active_targets[filtered_edge_index[1]]))
+        self.assertIn("adj/retained_edge_ratio", stats)
+
+    def test_recurrent_graph_core_reports_metrics(self):
+        class ResidualBlock(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.last_ffn_metrics = {}
+
+            def forward(self, x, structure, pos=None):
+                return x + 0.1
+
+        core = RecurrentGraphCore(
+            recurrent_blocks=nn.ModuleList([ResidualBlock()]),
+            hidden_size=8,
+            max_loops=2,
+            eval_loops=2,
+            loop_embedding=LoopIndexEmbedding(hidden_size=8, loop_dim=4),
+            stable_injection=StableInjection(dim=8),
+            halting=None,
+            adjacency_policy=None,
+            loop_sampling="off",
+            mu_rec=2,
+            mu_bwd=1,
+        )
+        encoded = torch.randn(5, 8)
+        edge_index = torch.tensor([[0, 1, 2, 3], [1, 2, 3, 4]], dtype=torch.long)
+        output, metrics = core(encoded, edge_index)
+        self.assertEqual(output.shape, encoded.shape)
+        self.assertIn("loop/mean_sampled_loops", metrics)
+        self.assertIn("loop/spectral_radius_max", metrics)
 
 
 class TestGraphNetBlock(unittest.TestCase):

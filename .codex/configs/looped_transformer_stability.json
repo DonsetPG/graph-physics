@@ -1,0 +1,57 @@
+{
+  "sweep_name": "looped_transformer_stability_aneurysm",
+  "matrix": {
+    "model.use_stable_injection": [false, true],
+    "model.use_loop_embedding": [false, true],
+    "training.mu_rec": [4, 8, 12, 16],
+    "training.mu_bwd": [2, 4, 6, 8]
+  },
+  "constants": {
+    "model.type": "looped_transformer",
+    "model.hidden_size": 64,
+    "model.node_input_size": 14,
+    "model.output_size": 3,
+    "model.edge_input_size": 0,
+    "model.num_heads": 4,
+    "model.prc_depth": 3,
+    "model.eval_loops": 8,
+    "model.loop_embedding_dim": 8,
+    "model.use_loop_embedding": true,
+    "model.use_moe_ffn": false,
+    "model.halting_mode": "off",
+    "model.adaptive_adjacency": "off",
+    "training.max_loops": 16,
+    "training.loop_sampling": "truncated_poisson",
+    "training.use_spatial_mtp": false,
+    "training.use_temporal_block": false
+  },
+  "excludes": [
+    {
+      "training.mu_rec": 4,
+      "training.mu_bwd": 6
+    },
+    {
+      "training.mu_rec": 4,
+      "training.mu_bwd": 8
+    },
+    {
+      "training.mu_rec": 8,
+      "training.mu_bwd": 6
+    },
+    {
+      "training.mu_rec": 8,
+      "training.mu_bwd": 8,
+      "model.use_stable_injection": false,
+      "model.use_loop_embedding": false
+    }
+  ],
+  "train_flags": {
+    "project_name": "graphphysics-looped-stability",
+    "num_epochs": 1,
+    "batch_size": 1,
+    "init_lr": 0.001,
+    "warmup": 100,
+    "num_workers": 0,
+    "no_edge_feature": false
+  }
+}

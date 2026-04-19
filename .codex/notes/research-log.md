@@ -1,0 +1,90 @@
+# Research Log (Living)
+
+Last updated: 2026-02-06
+
+## Entry Template
+- Date:
+- Objective:
+- Dataset/config:
+- Compared runs:
+- Metrics summary:
+- Decision:
+- Follow-up:
+
+## Session Log
+- 2026-02-06: Added deterministic sweep planner/runner/summarizer and subagent templates.
+- Date: 2026-02-10
+- Context: Added a non-autoregressive prediction entrypoint to evaluate one-step errors over every timestep.
+- Evidence: `graphphysics/predict_onestep.py` created; sanity checks ran with `python -m py_compile /Users/paulgarnier/github/phd/graph-physics/graphphysics/predict_onestep.py` and `GRAPH_PHYSICS_ASSUME_NO_DGL=1 /Users/paulgarnier/github/phd/graph-physics/venvuys/bin/python -m graphphysics.predict_onestep --helpshort`.
+- Decision: Keep existing `graphphysics/predict.py` unchanged and add `graphphysics/predict_onestep.py` as a separate CLI that computes per-timestep RMSE/MAE, exports CSV/JSON, and plots RMSE distribution histogram.
+- Next action: Run `predict_onestep.py` on target checkpoints/datasets and compare the one-step error histogram against autoregressive rollout metrics.
+- Date: 2026-02-10
+- Context: Added W&B extraction/aggregation plotting for KD noise sweep metrics.
+- Evidence: Created `.codex/scripts/plot_kd_noise_metrics.py`; ran `/Users/paulgarnier/github/phd/graph-physics/venvuys/bin/python .codex/scripts/plot_kd_noise_metrics.py --project KD --out-dir .codex/experiments/kd_noise_metrics`; outputs at `.codex/experiments/kd_noise_metrics/metrics_by_noise.csv` and `.codex/experiments/kd_noise_metrics/metrics_vs_noise.png`.
+- Decision: Standardize KD noise analysis on final summary metrics (`train_L2LOSS_epoch`, `val_1step_rmse`, `val_all_rollout_rmse`) with per-noise mean/std error bars.
+- Next action: Review runs with missing/noise-unparsable names in `.codex/experiments/kd_noise_metrics/runs_metrics.csv` and decide whether to widen the noise regex.
+- Date: 2026-02-10
+- Context: Updated KD noise plot axis scaling to log-compatible behavior.
+- Evidence: Updated `.codex/scripts/plot_kd_noise_metrics.py` with `--x-scale` (`auto|log|symlog|linear`) and reran `/Users/paulgarnier/github/phd/graph-physics/venvuys/bin/python .codex/scripts/plot_kd_noise_metrics.py --project KD --out-dir .codex/experiments/kd_noise_metrics`; console reported `X scale: symlog (linthresh=0.001)`.
+- Decision: Use `auto` by default to keep logarithmic spacing while supporting zero-noise points via `symlog`.
+- Next action: If strict log-only is required, rename/filter out zero-noise runs and run with `--x-scale log`.
+- Date: 2026-02-10
+- Context: Re-ran W&B extraction/aggregation for project `KD-long`.
+- Evidence: Ran `/Users/paulgarnier/github/phd/graph-physics/venvuys/bin/python .codex/scripts/plot_kd_noise_metrics.py --project KD-long --out-dir .codex/experiments/kd_long_noise_metrics`; console reported `Runs fetched: 20`, `Noise levels parsed: 4`, `X scale: symlog (linthresh=0.0002)`.
+- Decision: Keep separate artifacts per project (`kd_noise_metrics` vs `kd_long_noise_metrics`) to avoid mixing tables/plots.
+- Next action: Compare `.codex/experiments/kd_long_noise_metrics/metrics_by_noise.csv` against the KD counterpart for noise sensitivity shifts.
+- Date: 2026-03-05
+- Context: Added a single global VRAM optimization toggle in the PyTorch training stack.
+- Evidence: Updated `graphphysics/train.py`, `graphphysics/training/lightning_module.py`, `graphphysics/training/parse_parameters.py`, `graphphysics/models/layers.py`, and default JSON configs under `training_config/` with `training.enable_vram_optimizations=false`; validated with `GRAPH_PHYSICS_ASSUME_NO_DGL=1 PYTHONPATH=/Users/paulgarnier/github/phd/graph-physics /Users/paulgarnier/github/phd/graph-physics/venvuys/bin/python -m pytest -q tests/graphphysics/models/test_layers.py tests/graphphysics/training/test_parameters.py tests/graphphysics/training/test_lightningmodule.py` (55 passed).
+- Decision: `enable_vram_optimizations=true` now gates FlashOptim (`FlashAdamW` + bf16 model casting), mixed precision trainer mode (`bf16-mixed` or fallback `16-mixed`), activation checkpointing in transformer blocks, and BF16-safe DGL sparse attention matmul paths.
+- Next action: Install `flashoptim` in the training environment and run a baseline-vs-optimized memory comparison on the target dataset.
+- Date: 2026-03-05
+- Context: Added FlashOptim runtime preflight checks to fail fast on unsupported environments and avoid hard crashes.
+- Evidence: Updated `graphphysics/training/lightning_module.py` to validate Linux/CUDA build/PyTorch>=2.7/Triton before importing FlashOptim; updated README runtime requirements; sanity check with `python -m py_compile graphphysics/training/lightning_module.py tests/graphphysics/training/test_lightningmodule.py`.
+- Decision: Keep `enable_vram_optimizations=true` strict, but raise explicit RuntimeError with environment diagnostics before optimizer import when runtime is incompatible.
+- Next action: Re-run training in the target CUDA runtime and capture `python -c "import torch, triton; print(torch.__version__, torch.version.cuda)"` output if a crash persists.
+- Date: 2026-03-10
+- Context: Addressed code review comments on VRAM optimization integration.
+- Evidence: Added one-line docstrings for the mixed-precision sparse helpers in `graphphysics/models/layers.py`; moved CUDA availability validation into `_validate_flashoptim_runtime()` and simplified `configure_optimizers()` flow in `graphphysics/training/lightning_module.py`; removed CLI/config dual-source toggle in favor of config-only `training.enable_vram_optimizations` in `graphphysics/train.py` and README.
+- Decision: Keep VRAM optimization toggle single-source (training JSON) and keep FlashOptim path strict when enabled to avoid silent fallback behavior.
+- Next action: Re-run full graphphysics tests once the local `torch_scatter/torch_geometric` binary mismatch is fixed (current local test collection crashes with SIGSEGV in `torch_scatter` import).
+- Date: 2026-03-11
+- Context: Relaxed FlashOptim preflight by removing strict PyTorch version blocking.
+- Evidence: Removed `_torch_version_tuple` and deleted the `torch>=2.7` RuntimeError gate in `graphphysics/training/lightning_module.py`; validated syntax with `python -m py_compile graphphysics/training/lightning_module.py`.
+- Decision: Keep Linux/CUDA-device/CUDA-build/Triton checks, but do not hard-fail solely on reported PyTorch version.
+- Next action: Validate this behavior in the target runtime by re-running training with `training.enable_vram_optimizations=true`.
+- Date: 2026-03-11
+- Context: Fixed dtype mismatch during sanity-check visualization callback when VRAM optimizations cast model weights to bf16.
+- Evidence: Updated `graphphysics/training/callback.py` to run callback-side `model(graph)` calls under CUDA autocast when model parameters are `bf16/fp16`; syntax validated with `python -m py_compile graphphysics/training/callback.py`.
+- Decision: Keep callback inference precision aligned with model parameter dtype to avoid `mat1 and mat2 must have the same dtype` errors.
+- Next action: Re-run training sanity check in the target Colab runtime and confirm callback completes with `enable_vram_optimizations=true`.
+- Date: 2026-03-12
+- Context: Defined an autonomous 1-epoch aneurysm sweep protocol targeting minimum epoch wall time under a no-loss-regression guard.
+- Evidence: `graphphysics/train.py` exposes `--num_epochs` and maps it to Lightning `max_epochs`; `graphphysics/training/lightning_module.py` logs epoch-level training loss (`train_<LOSSNAME>`); `.codex/scripts/architecture_sweep.py` persists per-run `duration_seconds` and summary tables; baseline aneurysm config is `training_config/coarse-aneurysm.json`.
+- Decision: Use `train_L2LOSS_epoch` as the loss guard metric and `duration_seconds` as the one-epoch speed metric, with eligibility constraint `loss <= baseline * 1.01`.
+- Next action: Execute the planned sweep loop and store ranking artifacts under `.codex/experiments/sweeps/<timestamp>_aneurysm_1epoch_speed/`.
+- Date: 2026-03-12
+- Context: Added explicit training-process termination in the PyTorch training entrypoint to prevent hangs after `trainer.fit()` completion.
+- Evidence: Updated `graphphysics/train.py` to always run `wandb.finish()` in a `finally`, raise `SystemExit(0)` after successful training, and force hard termination in `__main__` via `os._exit(exit_code)` after `app.run(main)`; validated with `python -m py_compile graphphysics/train.py`.
+- Decision: Keep hard-exit behavior in entrypoint so residual worker threads/processes cannot keep jobs alive after completion.
+- Next action: Run one full aneurysm training job to verify expected success exit code and scheduler behavior in the target environment.
+- Date: 2026-03-12
+- Context: Captured user-requested autonomous sweep reporting constraints and committed local speed-run defaults.
+- Evidence: Updated external plan file `/Users/paulgarnier/Downloads/program (1).md` with two explicit requirements: `train.sh` is immutable and final output must include a labeled curve of `best_epoch_seconds` vs cumulative `agent_elapsed_seconds`; committed local repo edits in `train.sh` and `training_config/coarse-aneurysm.json` (commit `b7203ef`).
+- Decision: Keep run-script immutability as a hard rule in the autonomous plan, and track speed improvements over agent time in a persistent progress artifact for end-of-run plotting.
+- Next action: Execute the autonomous sweep loop and produce `.codex/experiments/sweeps/aneurysm_1epoch_speed_progress.png` from the cumulative tracker CSV.
+- Date: 2026-03-12
+- Context: Removed FlashOptim integration from the VRAM optimization PR due runtime instability (`SIGSEGV`) and dtype mismatch side effects from model casting.
+- Evidence: Deleted FlashOptim runtime checks/import/casting in `graphphysics/training/lightning_module.py`; kept optimizer as `torch.optim.AdamW`; updated user-facing docs in `README.md` and warning text in `graphphysics/train.py`; aligned tests in `tests/graphphysics/training/test_lightningmodule.py`; syntax validated with `python -m py_compile graphphysics/training/lightning_module.py graphphysics/train.py tests/graphphysics/training/test_lightningmodule.py`; codebase scan `rg -n "flashoptim|FlashOptim|FlashAdamW|cast_model\\(|_validate_flashoptim_runtime|_flashoptim_cast_applied" graphphysics README.md tests` returned no matches.
+- Decision: Keep `training.enable_vram_optimizations` for mixed precision + checkpointing only; drop FlashOptim hard dependency/path from this PR.
+- Next action: Re-run target training in Colab with `training.enable_vram_optimizations=true` and confirm no segfault and no dtype mismatch in callback sanity check.
+- Date: 2026-03-12
+- Context: Tightened autonomous aneurysm experiment policy to fixed-configuration, code-only optimization.
+- Evidence: Updated `/Users/paulgarnier/Downloads/program (1).md` to prohibit edits to `train.sh` and all JSON configs, prohibit network hyperparameter changes, require execution via `bash train.sh` only, and keep end-of-run labeled progress plot requirement (`epoch_seconds` vs cumulative `agent_elapsed_seconds`).
+- Decision: Replace sweep-style hyperparameter exploration with a fixed-run protocol where only Python code-level optimizations are allowed.
+- Next action: Run baseline + iterative code-only optimizations while enforcing forbidden-file checks before each run.
+- Date: 2026-04-19
+- Context: Implemented the PyTorch-first looped graph transformer scaffold and experiment surfaces.
+- Evidence: Added `model.type="looped_transformer"` dispatch in `graphphysics/training/parse_parameters.py`; added recurrent primitives in `graphphysics/models/layers.py` and `LoopedEncodeTransformDecode` in `graphphysics/models/processors.py`; added example config `training_config/coarse-aneurysm-looped.json`; copied canonical design doc to `.codex/playbooks/looped-graph-transformer.md`; validated syntax with `python -m py_compile graphphysics/models/layers.py graphphysics/models/processors.py graphphysics/models/simulator.py graphphysics/training/parse_parameters.py graphphysics/training/lightning_module.py graphphysics/train.py graphphysics/predict.py tests/graphphysics/models/test_layers.py tests/graphphysics/models/test_processors.py tests/graphphysics/training/test_parameters.py`; validated sweep planning with `python .codex/scripts/architecture_sweep.py plan --base-config training_config/coarse-aneurysm-looped.json --grid .codex/configs/looped_transformer_ablation.json --out-dir .codex/experiments/sweeps/20260419_looped_ablation_plan_smoke` which generated a 96-run manifest.
+- Decision: Keep the implementation PyTorch-first, with DGL sparse treated as the research path and the local PyG-only environment treated as compatibility-only until the runtime mismatch is fixed.
+- Next action: Run 1-epoch baseline vs `looped_transformer` smoke jobs in a compatible PyTorch/DGL runtime, then summarize `val_1step_rmse`, `val_all_rollout_rmse`, recurrent diagnostics, and throughput under `.codex/experiments/sweeps/`.

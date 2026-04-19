@@ -70,6 +70,25 @@ flags.DEFINE_integer(
 )
 
 
+def _model_logging_config(parameters: dict) -> dict:
+    model_cfg = parameters.get("model", {})
+    training_cfg = parameters.get("training", {})
+    config = {
+        "architecture": model_cfg.get("type"),
+        "#_neurons": model_cfg.get("hidden_size"),
+        "#_hops": parameters.get("dataset", {}).get("khop"),
+    }
+    if "message_passing_num" in model_cfg:
+        config["#_layers"] = model_cfg["message_passing_num"]
+    if "prc_depth" in model_cfg:
+        config["#_prc_depth"] = model_cfg["prc_depth"]
+    if "eval_loops" in model_cfg:
+        config["#_eval_loops"] = model_cfg["eval_loops"]
+    if "max_loops" in training_cfg:
+        config["#_max_loops"] = training_cfg["max_loops"]
+    return config
+
+
 def main(argv):
     del argv
 
@@ -239,16 +258,14 @@ def main(argv):
         checkpoint_callback = ModelCheckpoint(dirpath="checkpoints")
     lr_monitor = LearningRateMonitor(logging_interval="step")
 
-    wandb_logger.experiment.config.update(
+    wandb_config = _model_logging_config(parameters)
+    wandb_config.update(
         {
-            "architecture": parameters["model"]["type"],
-            "#_layers": parameters["model"]["message_passing_num"],
-            "#_neurons": parameters["model"]["hidden_size"],
-            "#_hops": parameters["dataset"]["khop"],
             "max_lr": initial_lr,
             "batch_size": batch_size,
         }
     )
+    wandb_logger.experiment.config.update(wandb_config)
 
     # Configure Trainer
     trainer = Trainer(

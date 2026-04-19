@@ -8,7 +8,15 @@ from torch_geometric.nn import TransformerConv
 
 import graphphysics.models.transolver as Transolver
 from graphphysics.models.layers import (
+    AdaptiveAdjacencyPolicy,
     GraphNetBlock,
+    LoopedProcessorBlock,
+    LoopIndexEmbedding,
+    NodeACTHalting,
+    NodeMoEFFN,
+    RecurrentGraphCore,
+    RMSNorm,
+    StableInjection,
     TemporalAttention,
     Transformer,
     build_mlp,
@@ -382,6 +390,199 @@ class EncodeTransformDecode(nn.Module):
         else:
             x_decoded = self.decode_module(x)
             return x_decoded
+
+
+class LoopedEncodeTransformDecode(nn.Module):
+    """Prelude / recurrent core / coda graph transformer."""
+
+    def __init__(
+        self,
+        prc_depth: int,
+        node_input_size: int,
+        output_size: int,
+        hidden_size: int = 128,
+        num_heads: int = 4,
+        eval_loops: int = 8,
+        max_loops: int = 8,
+        only_processor: bool = False,
+        use_proj_bias: bool = True,
+        use_separate_proj_weight: bool = True,
+        use_rope_embeddings: bool = False,
+        use_gated_attention: bool = False,
+        rope_pos_dimension: int = 3,
+        rope_base: float = 10000.0,
+        loop_embedding_dim: int = 0,
+        use_loop_embedding: bool = True,
+        use_stable_injection: bool = True,
+        use_moe_ffn: bool = False,
+        num_experts: int = 4,
+        num_shared_experts: int = 0,
+        top_k_experts: int = 2,
+        halting_mode: str = "off",
+        adaptive_adjacency: str = "off",
+        loop_sampling: str = "off",
+        mu_rec: int = 8,
+        mu_bwd: int = 4,
+        top_k_edges: int = 8,
+        edge_gate_threshold: float = 0.5,
+        act_threshold: float = 0.99,
+    ):
+        super().__init__()
+        if prc_depth <= 0:
+            raise ValueError("prc_depth must be positive for looped_transformer.")
+        if halting_mode not in {"off", "act"}:
+            raise ValueError(f"Unsupported halting_mode: {halting_mode}")
+        if loop_sampling not in {"off", "truncated_poisson"}:
+            raise ValueError(f"Unsupported loop_sampling: {loop_sampling}")
+
+        self.hidden_size = hidden_size
+        self.only_processor = only_processor
+        self.d = output_size
+        self.prc_depth = prc_depth
+        self.eval_loops = eval_loops
+        self.max_loops = max_loops
+        self.use_rope_embeddings = use_rope_embeddings and HAS_DGL_SPARSE
+        self.use_gated_attention = use_gated_attention
+        self.use_moe_ffn = use_moe_ffn
+        self.halting_mode = halting_mode
+        self.adaptive_adjacency = adaptive_adjacency
+        self.last_loop_metrics = {}
+
+        if use_rope_embeddings and not HAS_DGL_SPARSE:
+            logger.warning(
+                "looped_transformer requested RoPE without DGL sparse backend. "
+                "RoPE will be ignored in compatibility mode."
+            )
+        if use_gated_attention and not HAS_DGL_SPARSE:
+            logger.warning(
+                "looped_transformer requested gated attention without DGL sparse backend. "
+                "Gated sparse attention will be ignored in compatibility mode."
+            )
+
+        if not self.only_processor:
+            self.nodes_encoder = build_mlp(
+                in_size=node_input_size,
+                hidden_size=hidden_size,
+                out_size=hidden_size,
+            )
+            self.decode_module = build_mlp(
+                in_size=hidden_size,
+                hidden_size=hidden_size,
+                out_size=output_size,
+                layer_norm=False,
+            )
+
+        def _make_block(feedforward: nn.Module | None = None) -> LoopedProcessorBlock:
+            return LoopedProcessorBlock(
+                input_dim=hidden_size,
+                output_dim=hidden_size,
+                num_heads=num_heads,
+                use_proj_bias=use_proj_bias,
+                use_separate_proj_weight=use_separate_proj_weight,
+                use_rope_embeddings=self.use_rope_embeddings,
+                use_gated_attention=use_gated_attention,
+                pos_dimension=rope_pos_dimension,
+                rope_base=rope_base,
+                feedforward=feedforward,
+            )
+
+        def _make_recurrent_ffn() -> nn.Module | None:
+            if not use_moe_ffn:
+                return None
+            return NodeMoEFFN(
+                dim=hidden_size,
+                n_experts=num_experts,
+                top_k=top_k_experts,
+                n_shared=num_shared_experts,
+            )
+
+        self.prelude = nn.ModuleList([_make_block() for _ in range(prc_depth)])
+        self.recurrent_blocks = nn.ModuleList(
+            [_make_block(feedforward=_make_recurrent_ffn()) for _ in range(prc_depth)]
+        )
+        self.coda = nn.ModuleList([_make_block() for _ in range(prc_depth)])
+        self.prelude_norm = RMSNorm(hidden_size)
+
+        self.recurrent_core = RecurrentGraphCore(
+            recurrent_blocks=self.recurrent_blocks,
+            hidden_size=hidden_size,
+            max_loops=max_loops,
+            eval_loops=eval_loops,
+            loop_embedding=(
+                LoopIndexEmbedding(
+                    hidden_size=hidden_size,
+                    loop_dim=loop_embedding_dim,
+                )
+                if use_loop_embedding and loop_embedding_dim > 0
+                else None
+            ),
+            stable_injection=StableInjection(hidden_size)
+            if use_stable_injection
+            else None,
+            halting=NodeACTHalting(hidden_size, threshold=act_threshold)
+            if halting_mode == "act"
+            else None,
+            adjacency_policy=AdaptiveAdjacencyPolicy(
+                hidden_size=hidden_size,
+                mode=adaptive_adjacency,
+                pos_dim=rope_pos_dimension,
+                top_k_edges=top_k_edges,
+                edge_gate_threshold=edge_gate_threshold,
+            )
+            if adaptive_adjacency != "off"
+            else None,
+            loop_sampling=loop_sampling,
+            mu_rec=mu_rec,
+            mu_bwd=mu_bwd,
+        )
+
+    def _build_structure(self, edge_index: torch.Tensor, num_nodes: int):
+        if HAS_DGL_SPARSE:
+            return dglsp.spmatrix(indices=edge_index, shape=(num_nodes, num_nodes))
+        return edge_index
+
+    def forward(self, graph: Data) -> torch.Tensor:
+        edge_index = graph.edge_index
+        if self.only_processor:
+            x = graph.x
+        else:
+            x = self.nodes_encoder(graph.x)
+
+        pos = getattr(graph, "pos", None)
+        if self.use_rope_embeddings and pos is None:
+            raise ValueError(
+                "looped_transformer requires `pos` when use_rope_embeddings=True."
+            )
+
+        structure = self._build_structure(edge_index, x.shape[0])
+        for block in self.prelude:
+            x = block(x, structure, pos=pos)
+
+        encoded_input = self.prelude_norm(x)
+        batch_index = getattr(graph, "batch", None)
+        x, loop_metrics = self.recurrent_core(
+            encoded_input=encoded_input,
+            base_edge_index=edge_index,
+            batch_index=batch_index,
+            pos=pos,
+        )
+
+        structure = self._build_structure(edge_index, x.shape[0])
+        for block in self.coda:
+            x = block(x, structure, pos=pos)
+
+        self.last_loop_metrics = dict(loop_metrics)
+        self.last_loop_metrics["loop/eval_loops_config"] = x.new_tensor(
+            float(self.eval_loops)
+        )
+        self.last_loop_metrics["loop/max_loops_config"] = x.new_tensor(
+            float(self.max_loops)
+        )
+
+        if self.only_processor:
+            return x
+        x_decoded = self.decode_module(x)
+        return x_decoded
 
 
 class TransolverProcessor(nn.Module):

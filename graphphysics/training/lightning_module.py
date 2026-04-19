@@ -1,5 +1,6 @@
 import os
 import shutil
+import time
 from typing import Dict, List, Optional
 
 import lightning as L
@@ -117,6 +118,9 @@ class LightningModule(L.LightningModule):
         self.prediction_trajectory: list[Batch] = []
         self.last_pred_prediction = None
         self.last_previous_data_pred_prediction = None
+        self._fit_start_time: Optional[float] = None
+        self._train_batch_start_time: Optional[float] = None
+        self._validation_latencies: List[float] = []
 
         training_params: Dict = parameters.get("training", {})
         self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
@@ -256,6 +260,83 @@ class LightningModule(L.LightningModule):
         )
         return aux_loss, stats
 
+    def _processor_metrics(self) -> Dict[str, torch.Tensor]:
+        metrics = getattr(self.model, "last_processor_metrics", {})
+        return metrics if isinstance(metrics, dict) else {}
+
+    def _log_processor_metrics(self) -> None:
+        metrics = self._processor_metrics()
+        if not metrics:
+            return
+        flat_metrics: Dict[str, torch.Tensor] = {}
+        for key, value in metrics.items():
+            if torch.is_tensor(value):
+                if value.ndim == 0:
+                    flat_metrics[key] = value.detach()
+            elif isinstance(value, (int, float)):
+                flat_metrics[key] = torch.tensor(
+                    float(value), device=self.device, dtype=torch.float32
+                )
+        if flat_metrics:
+            self.log_dict(
+                flat_metrics,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
+                logger=True,
+            )
+
+    def on_fit_start(self) -> None:
+        self._fit_start_time = time.perf_counter()
+
+    def on_fit_end(self) -> None:
+        if self._fit_start_time is None:
+            return
+        duration = time.perf_counter() - self._fit_start_time
+        if (
+            hasattr(self.logger, "experiment")
+            and hasattr(self.logger.experiment, "summary")
+            and self.logger.experiment.summary is not None
+        ):
+            self.logger.experiment.summary["duration_seconds"] = duration
+
+    def on_train_batch_start(self, batch: Batch, batch_idx: int) -> None:
+        self._train_batch_start_time = time.perf_counter()
+        if torch.cuda.is_available():
+            torch.cuda.reset_peak_memory_stats(self.device)
+
+    def on_train_batch_end(self, outputs, batch: Batch, batch_idx: int) -> None:
+        if self._train_batch_start_time is None:
+            return
+        elapsed = max(time.perf_counter() - self._train_batch_start_time, 1e-9)
+        num_graphs = int(getattr(batch, "num_graphs", 1))
+        num_nodes = int(batch.x.size(0))
+        num_edges = int(batch.edge_index.size(1))
+        metric_device = batch.x.device
+        perf_metrics = {
+            "perf/step_time": torch.tensor(elapsed, device=metric_device),
+            "perf/graphs_per_sec": torch.tensor(num_graphs / elapsed, device=metric_device),
+            "perf/nodes_per_sec": torch.tensor(num_nodes / elapsed, device=metric_device),
+            "perf/edges_per_sec": torch.tensor(num_edges / elapsed, device=metric_device),
+        }
+        if torch.cuda.is_available():
+            perf_metrics["perf/peak_allocated"] = torch.tensor(
+                float(torch.cuda.max_memory_allocated(self.device)),
+                device=metric_device,
+            )
+            perf_metrics["perf/peak_reserved"] = torch.tensor(
+                float(torch.cuda.max_memory_reserved(self.device)),
+                device=metric_device,
+            )
+        self.log_dict(
+            perf_metrics,
+            on_step=True,
+            on_epoch=False,
+            prog_bar=False,
+            logger=True,
+            batch_size=max(num_graphs, 1),
+        )
+
     def training_step(self, batch: Batch):
         batch = batch.to(self.device, non_blocking=True)
         if self.use_spatial_mtp:
@@ -263,6 +344,7 @@ class LightningModule(L.LightningModule):
             self._H_nodeenc = None
         node_type = batch.x[:, self.model.node_type_index]
         network_output, target_delta_normalized, _ = self.model(batch)
+        self._log_processor_metrics()
 
         if self.is_multiloss:
             network_output_physical = self.model.build_outputs(batch, network_output)
@@ -419,6 +501,8 @@ class LightningModule(L.LightningModule):
             self._reset_validation_trajectory()
             self.step_counter = 0
 
+        inference_start = time.perf_counter()
+
         (
             batch,
             predicted_outputs,
@@ -428,6 +512,7 @@ class LightningModule(L.LightningModule):
         ) = self._make_prediction(
             batch, self.last_val_prediction, self.last_previous_data_prediction
         )
+        self._validation_latencies.append(time.perf_counter() - inference_start)
 
         if self.current_val_trajectory == 0:
             self.trajectory_to_save.append(batch)
@@ -459,6 +544,7 @@ class LightningModule(L.LightningModule):
         self.trajectory_to_save.clear()
         self.step_counter = 0
         self.first_step_losses = []
+        self._validation_latencies = []
 
     def on_validation_epoch_end(self):
         # Concatenate outputs and targets
@@ -482,6 +568,15 @@ class LightningModule(L.LightningModule):
             mean_first_step_loss = torch.stack(self.first_step_losses).mean().item()
             self.log(
                 "val_1step_rmse", mean_first_step_loss, on_epoch=True, prog_bar=True
+            )
+        if self._validation_latencies:
+            mean_latency = sum(self._validation_latencies) / len(self._validation_latencies)
+            self.log(
+                "perf/inference_latency",
+                mean_latency,
+                on_step=False,
+                on_epoch=True,
+                prog_bar=False,
             )
 
         # Save trajectory graphs

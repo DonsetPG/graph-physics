@@ -4,6 +4,7 @@ from torch_geometric.data import Data
 from graphphysics.models.processors import (
     EncodeProcessDecode,
     EncodeTransformDecode,
+    LoopedEncodeTransformDecode,
     TransolverProcessor,
 )
 
@@ -197,6 +198,87 @@ class TestEncodeTransformDecode(unittest.TestCase):
         )
         x_decoded = model(self.graph)
         self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+
+
+class TestLoopedEncodeTransformDecode(unittest.TestCase):
+    def setUp(self):
+        self.num_nodes = 6
+        self.node_input_size = 8
+        self.output_size = 3
+        self.hidden_size = 16
+        self.num_heads = 4
+
+        x = torch.randn(self.num_nodes, self.node_input_size)
+        edge_index = torch.randint(0, self.num_nodes, (2, self.num_nodes * 2))
+        batch = torch.tensor([0, 0, 0, 1, 1, 1], dtype=torch.long)
+        self.graph = Data(x=x, edge_index=edge_index, batch=batch)
+
+    def test_looped_forward(self):
+        model = LoopedEncodeTransformDecode(
+            prc_depth=2,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            eval_loops=3,
+            max_loops=3,
+        )
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+        self.assertIn("loop/mean_sampled_loops", model.last_loop_metrics)
+
+    def test_looped_only_processor(self):
+        self.graph.x = torch.randn(self.num_nodes, self.hidden_size)
+        model = LoopedEncodeTransformDecode(
+            prc_depth=1,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            eval_loops=2,
+            max_loops=2,
+            only_processor=True,
+        )
+        x_updated = model(self.graph)
+        self.assertEqual(x_updated.shape, (self.num_nodes, self.hidden_size))
+
+    def test_looped_gradients(self):
+        model = LoopedEncodeTransformDecode(
+            prc_depth=1,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            eval_loops=2,
+            max_loops=2,
+            use_stable_injection=True,
+            use_loop_embedding=True,
+        )
+        x_decoded = model(self.graph)
+        loss = x_decoded.sum()
+        loss.backward()
+        params = [p for p in model.parameters() if p.grad is not None]
+        self.assertTrue(len(params) > 0)
+
+    def test_looped_with_moe_act_and_adaptive_adjacency(self):
+        model = LoopedEncodeTransformDecode(
+            prc_depth=1,
+            node_input_size=self.node_input_size,
+            output_size=self.output_size,
+            hidden_size=self.hidden_size,
+            num_heads=self.num_heads,
+            eval_loops=2,
+            max_loops=2,
+            use_moe_ffn=True,
+            num_experts=4,
+            num_shared_experts=1,
+            top_k_experts=2,
+            halting_mode="act",
+            adaptive_adjacency="target_active",
+        )
+        x_decoded = model(self.graph)
+        self.assertEqual(x_decoded.shape, (self.num_nodes, self.output_size))
+        self.assertIn("act/mean_exit_depth", model.last_loop_metrics)
 
 
 class TestTransolverProcessor(unittest.TestCase):
