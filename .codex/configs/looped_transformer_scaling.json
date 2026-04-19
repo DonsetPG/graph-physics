@@ -48,6 +48,7 @@
     "init_lr": 0.001,
     "warmup": 1000,
     "num_workers": 2,
+    "seed": 42,
     "no_edge_feature": false
   }
 }

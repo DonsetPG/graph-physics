@@ -98,3 +98,43 @@ Last updated: 2026-02-06
 - Evidence: Revised `.codex/configs/looped_transformer_{ablation,stability,scaling,vram}.json` to use `batch_size=2`, `num_workers=2`, `warmup=1000`, and `num_epochs=20`; revised `.codex/playbooks/looped-transformer-autonomous-handoff.md` so smoke commands stay at `num_epochs=1` but use the same batch size, worker count, and warmup.
 - Decision: Standardize looped-transformer smoke runs on `1` epoch and all planned experiment sweeps on `20` epochs, with loader/training flags aligned to the existing repo-wide defaults.
 - Next action: Use the updated sweep grids and handoff as the source of truth for autonomous experiment execution.
+- Date: 2026-04-19
+- Context: Split the looped-transformer experiment program across 3 isolated GPU agents.
+- Evidence: Added `.codex/playbooks/looped-transformer-agent-{1,2,3}.md`; all four sweep grids plan to `96 + 51 + 36 + 72 = 255` experiment runs total, which split evenly with `--num-shards 3` into `85` runs per agent; Agent 1 owns baseline smoke and code fixes, Agent 2 owns looped smoke, and Agent 3 starts only after both smoke runs are visible in WandB.
+- Decision: Use deterministic shard ownership (`0/1/2`) for every sweep so agents can operate independently without direct communication.
+- Next action: Launch the three agents from the new playbooks, then use WandB to confirm smoke success before all three begin their sweep shards.
+- Date: 2026-04-19
+- Context: Simplified the looped-transformer autonomous run plan by folding dedicated VRAM measurement into scaling and dropping the standalone stability sweep.
+- Evidence: `graphphysics/training/lightning_module.py` already logs `perf/peak_allocated` and `perf/peak_reserved`; updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` and `.codex/playbooks/looped-transformer-agent-{1,2,3}.md`; removed `.codex/configs/looped_transformer_stability.json` and `.codex/configs/looped_transformer_vram.json`; the remaining sweep budget is `96 + 36 = 132` experiment runs total, or `44` runs per agent with `--num-shards 3`.
+- Decision: Use only smoke, ablation, and scaling in the 3-agent campaign, and read VRAM directly from scaling summaries or WandB rather than running a dedicated memory sweep.
+- Next action: Launch the two smoke jobs, then execute only the ablation and scaling shards and capture the memory metrics alongside the scaling results.
+- Date: 2026-04-19
+- Context: Added an automated train-loss guard for the 3-agent looped-transformer campaign.
+- Evidence: `graphphysics/training/lightning_module.py` now writes per-epoch JSONL metrics when `GRAPH_PHYSICS_EPOCH_METRICS_PATH` is set; `.codex/scripts/architecture_sweep.py run-shard` now supports `--loss-guard-baseline`, `--loss-guard-epoch`, and `--loss-guard-max-ratio`, and terminates runs that exceed the configured threshold; updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` and `.codex/playbooks/looped-transformer-agent-{1,2,3}.md` so Agent 1 publishes the epoch-10 baseline transformer loss and all guarded sweep shards use `epoch=10` and `max_ratio=1.2`.
+- Decision: Use the epoch-10 transformer baseline loss as the shared pruning reference and kill runs whose primary train loss is 20% or more above that baseline after epoch 10.
+- Next action: Have Agent 1 run the 20-epoch transformer baseline reference, publish the epoch-10 loss in `research-log.md`, then start all guarded ablation and scaling shards with that numeric baseline.
+- Date: 2026-04-19
+- Context: Replaced the factorial ablation sweep with an adaptive 9-stage ladder.
+- Evidence: Rewrote `.codex/configs/looped_transformer_ablation.json` as a stage-by-stage ladder spec with seeds `42,43,44`; added tracked state file `experiment_state/looped_transformer_ablation_state.json`; added tracked helpers `graphphysics/experiments/looped_ablation_ladder.py` and `graphphysics/experiments/run_guarded_training.py`; updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` so stage `1` seed `42` supplies the baseline epoch-10 train loss, stage `2` initializes the looped incumbent, stages `3` to `9` are only kept if the candidate mean `val_1step_rmse` improves over the incumbent mean, and a gate-seed loss-guard failure skips the other two seeds for that stage.
+- Decision: Cap the ablation ladder at `27` runs maximum (`9` stages x `3` seeds`), but allow fewer runs in practice through gate-seed cancellation and feature rejection.
+- Next action: Have Agent 1 run stage `1` seed `42`, publish its epoch-10 train loss as the guard baseline, initialize stage `2` as the looped incumbent, then advance the ladder one stage at a time with Agent 1 owning accept/reject decisions.
+- Date: 2026-04-19
+- Context: Switched execution from a mixed 3-agent ablation/scaling flow to a staged campaign.
+- Evidence: Updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` so Phase A is single-operator smoke + ablation and Phase B is 3-way scaling only after `experiment_state/looped_transformer_best_architecture.json` is built; updated local operator briefs so Agent 1 owns the ablation ladder and best-config export, while Agents 2 and 3 are scaling-only operators.
+- Decision: Run ablations sequentially on one GPU to lock the winning architecture before spending cluster time on scaling.
+- Next action: Have Agent 1 finish the ablation ladder, emit `experiment_state/looped_transformer_best_architecture.json`, then launch the 3 scaling agents against that fixed base config.
+- Date: 2026-04-19
+- Context: Reduced the campaign to a single seed for every run.
+- Evidence: Updated `.codex/configs/looped_transformer_ablation.json` to use only `seed_values=[42]`; updated `.codex/configs/looped_transformer_scaling.json` to pass `seed=42` explicitly; updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` and local Agent 1 brief so the ablation ladder compares single-run `val_1step_rmse` values rather than 3-seed means.
+- Decision: Use seed `42` everywhere for the current campaign to minimize total runtime and simplify stage decisions.
+- Next action: Run the 9-stage single-seed ablation ladder, freeze the winner into `experiment_state/looped_transformer_best_architecture.json`, then launch the 3 scaling shards with the same fixed seed.
+- Date: 2026-04-19
+- Context: Consolidated the local operator instructions into one reusable markdown.
+- Evidence: Replaced the three ignored local files `.codex/playbooks/looped-transformer-agent-{1,2,3}.md` with a single ignored local brief `.codex/playbooks/looped-transformer-agent.md` that supports `phase=ablation_owner` and `phase=scaling_worker shard_index=<0|1|2>`; the scaling section explicitly uses `experiment_state/looped_transformer_best_architecture.json` as the only valid base config.
+- Decision: Keep one operator brief locally and drive role selection through launch-time parameters instead of maintaining multiple divergent markdown files.
+- Next action: Give the same markdown file to the autonomous operator and specify `phase=ablation_owner` first; after ablations finish, reuse the same file for scaling workers with shard indices `0`, `1`, and `2`.
+- Date: 2026-04-19
+- Context: Finalized the shareable autonomous-run handoff assets for the staged ablation-plus-scaling campaign.
+- Evidence: Updated `.codex/playbooks/looped-transformer-agent.md` so the `ablation_owner` role runs both smoke jobs before the ablation ladder; added `.codex/playbooks/looped-transformer-agent-launch-prompt.md` as the canonical launch prompt; updated `.codex/playbooks/looped-transformer-autonomous-handoff.md` to point at both playbooks.
+- Decision: Use one operator brief plus one launch prompt as the canonical handoff package, with scaling always rooted in `experiment_state/looped_transformer_best_architecture.json`.
+- Next action: Force-add the ignored playbooks and sweep helper to the branch, then launch the ablation owner first and scaling workers only after the best-architecture config is pushed.

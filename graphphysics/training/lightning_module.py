@@ -1,3 +1,4 @@
+import json
 import os
 import shutil
 import time
@@ -121,6 +122,9 @@ class LightningModule(L.LightningModule):
         self._fit_start_time: Optional[float] = None
         self._train_batch_start_time: Optional[float] = None
         self._validation_latencies: List[float] = []
+        self.epoch_metrics_path: Optional[str] = os.environ.get(
+            "GRAPH_PHYSICS_EPOCH_METRICS_PATH"
+        )
 
         training_params: Dict = parameters.get("training", {})
         self.use_spatial_mtp: bool = training_params.get("use_spatial_mtp", False)
@@ -299,6 +303,71 @@ class LightningModule(L.LightningModule):
             and self.logger.experiment.summary is not None
         ):
             self.logger.experiment.summary["duration_seconds"] = duration
+
+    def _collect_epoch_metrics(self) -> Dict[str, float]:
+        metric_views = []
+        if hasattr(self, "trainer"):
+            metric_views.extend(
+                [
+                    getattr(self.trainer, "callback_metrics", {}),
+                    getattr(self.trainer, "logged_metrics", {}),
+                ]
+            )
+
+        metrics: Dict[str, float] = {}
+        for metric_view in metric_views:
+            for key, value in metric_view.items():
+                if torch.is_tensor(value):
+                    if value.ndim == 0:
+                        metrics[key] = float(value.detach().cpu())
+                elif isinstance(value, (int, float)):
+                    metrics[key] = float(value)
+        return metrics
+
+    def _primary_train_metric_candidates(self) -> List[str]:
+        if self.is_multiloss:
+            return ["train_multiloss_epoch", "train_multiloss"]
+        return [
+            f"train_{self.loss_name}_epoch",
+            f"train_{self.loss_name}",
+        ]
+
+    def _resolve_primary_train_metric(
+        self, metrics: Dict[str, float]
+    ) -> tuple[Optional[str], Optional[float]]:
+        for key in self._primary_train_metric_candidates():
+            if key in metrics:
+                return key, metrics[key]
+
+        for key in sorted(metrics):
+            if key.startswith("train_") and key.endswith("_epoch"):
+                return key, metrics[key]
+
+        for key in sorted(metrics):
+            if key.startswith("train_"):
+                return key, metrics[key]
+
+        return None, None
+
+    def on_train_epoch_end(self) -> None:
+        if not self.epoch_metrics_path:
+            return
+
+        metrics = self._collect_epoch_metrics()
+        primary_metric_name, primary_metric_value = self._resolve_primary_train_metric(
+            metrics
+        )
+        record = {
+            "epoch": int(self.current_epoch) + 1,
+            "global_step": int(self.global_step),
+            "primary_train_metric_name": primary_metric_name,
+            "primary_train_metric": primary_metric_value,
+            "metrics": metrics,
+        }
+        os.makedirs(os.path.dirname(self.epoch_metrics_path), exist_ok=True)
+        with open(self.epoch_metrics_path, "a", encoding="utf-8") as fp:
+            fp.write(json.dumps(record, sort_keys=True))
+            fp.write("\n")
 
     def on_train_batch_start(self, batch: Batch, batch_idx: int) -> None:
         self._train_batch_start_time = time.perf_counter()

@@ -1,0 +1,9 @@
+{
+  "baseline_epoch10_train_loss": null,
+  "baseline_guard_threshold": null,
+  "baseline_reference_stage": null,
+  "looped_incumbent_stage": null,
+  "looped_incumbent_metric_mean": null,
+  "accepted_stage_names": [],
+  "stage_history": []
+}

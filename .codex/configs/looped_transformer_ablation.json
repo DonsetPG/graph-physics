@@ -1,32 +1,10 @@
 {
-  "sweep_name": "looped_transformer_ablation_aneurysm",
-  "matrix": {
-    "model.use_stable_injection": [false, true],
-    "model.use_loop_embedding": [false, true],
-    "training.loop_sampling": ["off", "truncated_poisson"],
-    "model.use_moe_ffn": [false, true],
-    "model.halting_mode": ["off", "act"],
-    "model.adaptive_adjacency": ["off", "target_active", "edge_gate"]
+  "experiment_name": "looped_transformer_ablation_ladder_aneurysm",
+  "objective": {
+    "metric": "val_1step_rmse",
+    "mode": "min"
   },
-  "constants": {
-    "model.type": "looped_transformer",
-    "model.hidden_size": 64,
-    "model.node_input_size": 14,
-    "model.output_size": 3,
-    "model.edge_input_size": 0,
-    "model.num_heads": 4,
-    "model.prc_depth": 3,
-    "model.eval_loops": 8,
-    "model.loop_embedding_dim": 8,
-    "model.num_experts": 4,
-    "model.num_shared_experts": 1,
-    "model.top_k_experts": 2,
-    "training.max_loops": 8,
-    "training.mu_rec": 8,
-    "training.mu_bwd": 4,
-    "training.use_spatial_mtp": false,
-    "training.use_temporal_block": false
-  },
+  "seed_values": [42],
   "train_flags": {
     "project_name": "graphphysics-looped-ablation",
     "num_epochs": 20,
@@ -35,5 +13,109 @@
     "warmup": 1000,
     "num_workers": 2,
     "no_edge_feature": false
-  }
+  },
+  "loss_guard": {
+    "epoch": 10,
+    "max_ratio": 1.2,
+    "gate_seed_index": 0,
+    "baseline_source": "stage 1 seed 42 epoch-10 primary_train_metric"
+  },
+  "stages": [
+    {
+      "index": 1,
+      "name": "baseline_transformer",
+      "description": "Current untied transformer baseline. Reference-only stage.",
+      "stage_type": "reference",
+      "base_config": "training_config/coarse-aneurysm.json",
+      "set": {}
+    },
+    {
+      "index": 2,
+      "name": "looped_core",
+      "description": "Tied recurrent core without stable injection, loop embedding, loop sampling, MoE, ACT, or adaptive adjacency.",
+      "stage_type": "reset_incumbent",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.use_stable_injection": false,
+        "model.use_loop_embedding": false,
+        "training.loop_sampling": "off",
+        "model.use_moe_ffn": false,
+        "model.halting_mode": "off",
+        "model.adaptive_adjacency": "off"
+      }
+    },
+    {
+      "index": 3,
+      "name": "stable_injection",
+      "description": "Candidate = incumbent + StableInjection.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.use_stable_injection": true
+      }
+    },
+    {
+      "index": 4,
+      "name": "loop_embedding",
+      "description": "Candidate = incumbent + LoopIndexEmbedding.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.use_loop_embedding": true
+      }
+    },
+    {
+      "index": 5,
+      "name": "loop_sampling",
+      "description": "Candidate = incumbent + truncated Poisson loop sampling.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "training.loop_sampling": "truncated_poisson"
+      }
+    },
+    {
+      "index": 6,
+      "name": "moe_ffn",
+      "description": "Candidate = incumbent + node-wise MoE FFN.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.use_moe_ffn": true,
+        "model.num_experts": 4,
+        "model.num_shared_experts": 1,
+        "model.top_k_experts": 2
+      }
+    },
+    {
+      "index": 7,
+      "name": "act_halting",
+      "description": "Candidate = incumbent + ACT halting.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.halting_mode": "act"
+      }
+    },
+    {
+      "index": 8,
+      "name": "target_active_adjacency",
+      "description": "Candidate = incumbent + target_active adaptive adjacency.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.adaptive_adjacency": "target_active"
+      }
+    },
+    {
+      "index": 9,
+      "name": "edge_gate_adjacency",
+      "description": "Candidate = incumbent + edge_gate adaptive adjacency.",
+      "stage_type": "additive",
+      "base_config": "training_config/coarse-aneurysm-looped.json",
+      "set": {
+        "model.adaptive_adjacency": "edge_gate"
+      }
+    }
+  ]
 }

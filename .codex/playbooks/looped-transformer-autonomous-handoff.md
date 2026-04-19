@@ -44,7 +44,10 @@ The following work is already in the repo on `origin/loop`:
   - `README.md`
   - `training_config/coarse-aneurysm-looped.json`
   - `.codex/playbooks/looped-graph-transformer.md`
-  - `.codex/configs/looped_transformer_{ablation,stability,scaling,vram}.json`
+  - `.codex/configs/looped_transformer_{ablation,scaling}.json`
+  - `experiment_state/looped_transformer_ablation_state.json`
+  - `graphphysics/experiments/looped_ablation_ladder.py`
+  - `graphphysics/experiments/run_guarded_training.py`
 - tests added under `tests/graphphysics/...`
 
 ### Important constraints
@@ -70,13 +73,16 @@ Configs and experiment assets:
 - `training_config/coarse-aneurysm.json`
 - `training_config/coarse-aneurysm-looped.json`
 - `.codex/configs/looped_transformer_ablation.json`
-- `.codex/configs/looped_transformer_stability.json`
 - `.codex/configs/looped_transformer_scaling.json`
-- `.codex/configs/looped_transformer_vram.json`
+- `experiment_state/looped_transformer_ablation_state.json`
+- `graphphysics/experiments/looped_ablation_ladder.py`
+- `graphphysics/experiments/run_guarded_training.py`
 
 Documentation and notes:
 
 - `.codex/playbooks/looped-graph-transformer.md`
+- `.codex/playbooks/looped-transformer-agent.md`
+- `.codex/playbooks/looped-transformer-agent-launch-prompt.md`
 - `.codex/notes/research-log.md`
 - `.codex/notes/jax-backlog.md`
 - `.codex/templates/subagent-brief.md`
@@ -101,6 +107,26 @@ Reason:
 
 Do not widen these defaults at the start of the campaign. First establish that the looped model is stable and measurable with the current settings, then revisit throughput-oriented tuning if needed.
 
+## Train-Loss Guard
+
+Use a hard train-loss guard during sweeps once the baseline reference loss is known.
+
+Definition:
+
+- baseline reference = the epoch-10 primary training loss from **stage 1, seed 42** (`baseline_transformer`)
+- kill condition = at epoch `10` or later, if the current run's primary training loss is `>= 1.2 * baseline_reference`
+
+Implementation details:
+
+- `graphphysics/train.py` now writes per-epoch metrics when `GRAPH_PHYSICS_EPOCH_METRICS_PATH` is set
+- `.codex/scripts/architecture_sweep.py run-shard` supports the same guard flags for the scaling sweep
+- for the ablation ladder, use only seed `42`
+- if a stage is killed by the loss guard at epoch `10`, reject that stage and continue from the current incumbent
+
+Operational rule:
+
+- do not start guarded sweep shards until the baseline epoch-10 loss has been written down in `.codex/notes/research-log.md` and `experiment_state/looped_transformer_ablation_state.json`
+
 ## Non-Negotiable Workflow
 
 ### Branching and workspace
@@ -116,6 +142,15 @@ cd ../graph-physics-looped-exp
 ```
 
 Keep any experiment-only fixes on the new `codex/...` branch. Do not push directly to `loop` unless explicitly asked.
+
+### Phase gating
+
+The campaign has two execution phases:
+
+1. Phase A: one operator runs smoke validation and the full adaptive ablation ladder.
+2. Phase B: three operators run scaling only after the best accepted architecture has been materialized and pushed.
+
+Do not overlap these phases.
 
 ### Reporting contract
 
@@ -239,7 +274,7 @@ Only move on if the looped model completes a 1-epoch smoke run.
 
 ### Phase 1: core ablation ladder
 
-Goal: isolate which recurrent ingredients matter.
+Goal: isolate which recurrent ingredients matter with a sequential decision process rather than a factorial sweep.
 
 Required comparison order:
 
@@ -255,43 +290,93 @@ Required comparison order:
 
 Use:
 
-- base config: `training_config/coarse-aneurysm-looped.json`
-- grid: `.codex/configs/looped_transformer_ablation.json`
+- ladder spec: `.codex/configs/looped_transformer_ablation.json`
+- tracked state: `experiment_state/looped_transformer_ablation_state.json`
+- helper: `python -m graphphysics.experiments.looped_ablation_ladder`
 
-Planner:
+Protocol:
+
+1. Agent 1 owns the stage decision and updates the tracked state file.
+2. Use only one seed for the ablation ladder: `42`.
+3. Stage `1` seed `42` runs without the loss guard and establishes the baseline epoch-10 train loss.
+4. Starting at stage `2`, if seed `42` is killed by the loss guard at epoch `10`, reject that stage immediately.
+5. For additive stages, compare the candidate `val_1step_rmse` against the current incumbent `val_1step_rmse`.
+6. Accept the stage only if the candidate metric is strictly lower.
+7. If a stage is rejected, keep the incumbent unchanged and build the next stage on top of that incumbent, not on the rejected candidate.
+
+Important interpretation:
+
+- stage `1` (`baseline_transformer`) is reference-only
+- stage `1` seed `42` also defines `BASELINE_EPOCH10_TRAIN_LOSS` for the rest of the ladder
+- stage `2` (`looped_core`) initializes the looped incumbent even if it does not beat the transformer baseline
+- stages `3` to `9` are optional additions that must earn their place
+
+Build one config for one stage and one seed like this:
 
 ```bash
-python .codex/scripts/architecture_sweep.py plan \
-  --base-config training_config/coarse-aneurysm-looped.json \
-  --grid .codex/configs/looped_transformer_ablation.json \
-  --out-dir .codex/experiments/sweeps/<timestamp>_looped_ablation
+python -m graphphysics.experiments.looped_ablation_ladder build-stage \
+  --stage-index 3 \
+  --seed-index 0 \
+  --out .codex/experiments/ablation/stage03_seed42.json
 ```
 
-Then shard it with `run-shard` and aggregate with `summarize`.
+The helper reads `experiment_state/looped_transformer_ablation_state.json` and emits the correct candidate config for that stage based on the currently accepted features.
 
-If the grid is too broad for the current budget, reduce run count by editing a copy of the grid file in the worktree, but preserve the ablation order.
+Run the stage with the guarded single-run wrapper:
 
-### Phase 2: recurrence stability
+```bash
+python -m graphphysics.experiments.run_guarded_training \
+  --training-parameters-path .codex/experiments/ablation/stage03_seed42.json \
+  --project-name graphphysics-looped-ablation \
+  --num-epochs 20 \
+  --batch-size 2 \
+  --init-lr 0.001 \
+  --warmup 1000 \
+  --num-workers 2 \
+  --seed 42 \
+  --wandb-name s03_stable_injection_seed42 \
+  --epoch-metrics-path .codex/experiments/ablation/stage03_seed42.epochs.jsonl \
+  --log-path .codex/experiments/ablation/stage03_seed42.log \
+  --result-json .codex/experiments/ablation/stage03_seed42.result.json \
+  --loss-guard-baseline <BASELINE_EPOCH10_TRAIN_LOSS> \
+  --loss-guard-epoch 10 \
+  --loss-guard-max-ratio 1.2
+```
 
-Goal: determine whether stable injection and loop sampling improve optimization robustness.
+For stage `1` seed `42`, omit `--loss-guard-baseline` because that run defines the baseline.
 
-Use:
+After a stage decision, Agent 1 updates the tracked state:
 
-- grid: `.codex/configs/looped_transformer_stability.json`
+```bash
+python -m graphphysics.experiments.looped_ablation_ladder record-decision \
+  --stage-index 3 \
+  --decision accept \
+  --metric-mean <CANDIDATE_MEAN_VAL_1STEP_RMSE> \
+  --notes "Accepted over incumbent on the single seed run"
+```
 
-Required outputs:
+Maximum ablation budget:
 
-- `summary.csv`
-- ranked table by `metric.val_1step_rmse`
-- notes on NaNs, crashes, or instability
-- observations for `loop/spectral_radius_max`, `loop/state_norm`, `loop/residual_jump`
+- `9` stages x `1` seed = `9` runs
 
-### Phase 3: operating point and scaling
+Actual ablation budget can be smaller because loss-guard failures can stop a stage at epoch `10`.
+
+At the end of the ablation phase, materialize the current winner for scaling:
+
+```bash
+python -m graphphysics.experiments.looped_ablation_ladder build-incumbent \
+  --out experiment_state/looped_transformer_best_architecture.json
+```
+
+Push that config before the scaling phase starts.
+
+### Phase 2: operating point, scaling, and VRAM
 
 Goal: identify viable size/depth operating points.
 
 Use:
 
+- base config: `experiment_state/looped_transformer_best_architecture.json`
 - grid: `.codex/configs/looped_transformer_scaling.json`
 
 Focus on:
@@ -301,15 +386,9 @@ Focus on:
 - medium `(128, 5)`
 - large `(256, 5)`
 
-Do not claim scaling behavior from partial or failed rows. Summarize only completed rows.
+For each completed scaling row, also capture memory and throughput from the built-in trainer logs. There is no separate VRAM sweep in this campaign.
 
-### Phase 4: VRAM and throughput
-
-Goal: measure whether the looped architecture and adaptive compute controls change memory/latency in practice.
-
-Use:
-
-- grid: `.codex/configs/looped_transformer_vram.json`
+Scaling is the only parallel phase. Split only this phase across shards `0`, `1`, and `2`.
 
 Primary metrics:
 
@@ -322,7 +401,9 @@ Primary metrics:
 - `perf/peak_reserved`
 - `perf/inference_latency`
 
-This phase is only worth running after the smoke and ablation phases are stable.
+Do not claim scaling behavior from partial or failed rows. Summarize only completed rows.
+
+Use the same train-loss guard flags for scaling shards after the baseline reference has been recorded.
 
 ## What To Do If You Hit Problems
 
@@ -403,10 +484,13 @@ This handoff is complete when all of the following are true:
 3. Both 1-epoch smoke runs complete:
    - baseline transformer
    - looped transformer
-4. At least the ablation sweep has been run and summarized.
-5. `research-log.md` contains evidence-backed conclusions and next actions.
-6. Any code fixes made during experimentation are committed on the autonomous branch.
+4. The baseline epoch-10 train loss from stage `1` seed `42` has been recorded for the loss guard.
+5. The adaptive 9-stage ablation ladder has been run and summarized with the single fixed seed.
+6. `experiment_state/looped_transformer_best_architecture.json` has been built and pushed.
+7. The scaling sweep has been run and summarized.
+8. `research-log.md` contains evidence-backed conclusions and next actions.
+9. Any code fixes made during experimentation are committed on the autonomous branch.
 
 ## Short Version For The Agent
 
-Do not re-implement the looped transformer. It already exists. Validate it in a real DGL runtime, run the smoke jobs, then run the ablation, stability, scaling, and VRAM sweeps in that order, and write everything down with reproducible artifact paths.
+Do not re-implement the looped transformer. It already exists. Validate it in a real DGL runtime, run the smoke jobs, establish the epoch-10 baseline train-loss guard, finish the adaptive 9-stage single-seed ablation ladder on one operator, build and push the best-architecture config, then launch the 3-way scaling phase with the same guard, record VRAM metrics from scaling, and write everything down with reproducible artifact paths.
