@@ -86,11 +86,12 @@ Documentation and notes:
 
 Use these defaults unless a specific sweep grid overrides them:
 
-- `batch_size=1`
-- `num_workers=0`
+- `batch_size=2`
+- `num_workers=2`
 - `init_lr=0.001`
-- `warmup=100`
-- `num_epochs=1` for smoke and sweep bring-up runs
+- `warmup=1000`
+- `num_epochs=1` for smoke runs
+- `num_epochs=20` for experiment sweeps
 
 Reason:
 
@@ -203,10 +204,10 @@ PYTHONPATH=$PWD python -m graphphysics.train \
   --training_parameters_path=training_config/coarse-aneurysm.json \
   --project_name=graphphysics-looped-smoke \
   --num_epochs=1 \
-  --batch_size=1 \
+  --batch_size=2 \
   --init_lr=0.001 \
-  --warmup=100 \
-  --num_workers=0
+  --warmup=1000 \
+  --num_workers=2
 ```
 
 ```bash
@@ -214,10 +215,10 @@ PYTHONPATH=$PWD python -m graphphysics.train \
   --training_parameters_path=training_config/coarse-aneurysm-looped.json \
   --project_name=graphphysics-looped-smoke \
   --num_epochs=1 \
-  --batch_size=1 \
+  --batch_size=2 \
   --init_lr=0.001 \
-  --warmup=100 \
-  --num_workers=0
+  --warmup=1000 \
+  --num_workers=2
 ```
 
 Capture for both:

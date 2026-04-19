@@ -43,11 +43,11 @@
   ],
   "train_flags": {
     "project_name": "graphphysics-looped-scaling",
-    "num_epochs": 1,
-    "batch_size": 1,
+    "num_epochs": 20,
+    "batch_size": 2,
     "init_lr": 0.001,
-    "warmup": 100,
-    "num_workers": 0,
+    "warmup": 1000,
+    "num_workers": 2,
     "no_edge_feature": false
   }
 }

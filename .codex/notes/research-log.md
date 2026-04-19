@@ -93,3 +93,8 @@ Last updated: 2026-02-06
 - Evidence: Created `.codex/playbooks/looped-transformer-autonomous-handoff.md` with branch/commit context (`origin/loop` at `ffd6fca`), required runtime checks, the ordered experiment ladder, exact sweep commands, artifact requirements, and scope boundaries.
 - Decision: Use the new handoff playbook as the default operational brief for delegated looped-transformer validation and experiment execution.
 - Next action: Give the handoff file to the autonomous agent together with a compatible DGL runtime or worktree and have it start with Phase 0 smoke validation.
+- Date: 2026-04-19
+- Context: Updated the looped-transformer experiment protocol defaults.
+- Evidence: Revised `.codex/configs/looped_transformer_{ablation,stability,scaling,vram}.json` to use `batch_size=2`, `num_workers=2`, `warmup=1000`, and `num_epochs=20`; revised `.codex/playbooks/looped-transformer-autonomous-handoff.md` so smoke commands stay at `num_epochs=1` but use the same batch size, worker count, and warmup.
+- Decision: Standardize looped-transformer smoke runs on `1` epoch and all planned experiment sweeps on `20` epochs, with loader/training flags aligned to the existing repo-wide defaults.
+- Next action: Use the updated sweep grids and handoff as the source of truth for autonomous experiment execution.
