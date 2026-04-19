@@ -276,9 +276,9 @@ def main(argv):
         callbacks=[
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
+        limit_train_batches=0.5,
         log_every_n_steps=100,
         gradient_clip_val=1.0,
         accumulate_grad_batches=gradient_batch_size,
