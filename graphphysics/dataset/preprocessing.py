@@ -413,7 +413,7 @@ def build_preprocessing(
                     world_pos_index_start=world_pos_parameters["world_pos_index_start"],
                     world_pos_index_end=world_pos_parameters["world_pos_index_end"],
                     node_type_index=world_pos_parameters["node_type_index"],
-                    radius=world_pos_parameters.get("radius", 0.03),
+                    radius=world_pos_parameters.get("radius", 3),
                 ),
             ]
         )
@@ -432,7 +432,7 @@ def build_preprocessing(
             node_type_index=noise_parameters["node_type_index"],
         )
         # Insert after the first transform
-        preprocessing.insert(1, add_noise_transform)
+        preprocessing.insert(2, add_noise_transform)
 
     # Append extra edge features functions at the end
     if extra_edge_features is not None:

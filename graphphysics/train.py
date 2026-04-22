@@ -11,7 +11,7 @@ from loguru import logger
 from torch_geometric.loader import DataLoader
 
 import wandb
-from graphphysics.external.rode import rode
+from graphphysics.external.spindle import build_features
 from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
@@ -101,7 +101,7 @@ def main(argv):
         param=parameters,
         device=device,
         use_edge_feature=use_edge_feature,
-        extra_node_features=None,
+        extra_node_features=build_features,
     )
 
     # Get training and validation datasets
@@ -117,7 +117,7 @@ def main(argv):
         device=device,
         use_edge_feature=use_edge_feature,
         remove_noise=True,
-        extra_node_features=None,
+        extra_node_features=build_features,
     )
 
     val_dataset = get_dataset(
