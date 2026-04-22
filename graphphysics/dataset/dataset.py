@@ -313,15 +313,16 @@ class BaseDataset(Dataset, ABC):
         Returns:
             Data: The partitioned subgraph.
         """
-        if traj_index not in self.partitions_node_ids_cache:
-            num_partitions = self.partitions_per_trajectory[traj_index]
-            loader, node_ids = create_subgraphs(graph, num_partitions)
-            self.partitions_node_ids_cache[traj_index] = node_ids
+        num_partitions = self.partitions_per_trajectory[traj_index]
+        if num_partitions != 1:
+            if traj_index not in self.partitions_node_ids_cache:
+                loader, node_ids = create_subgraphs(graph, num_partitions)
+                self.partitions_node_ids_cache[traj_index] = node_ids
 
-        partitioned_node_ids = self.partitions_node_ids_cache[traj_index][
-            subgraph_idx
-        ].to(self.device)
-        graph = self._apply_partition(graph, partitioned_node_ids)
+            partitioned_node_ids = self.partitions_node_ids_cache[traj_index][
+                subgraph_idx
+            ].to(self.device)
+            graph = self._apply_partition(graph, partitioned_node_ids)
 
         return graph
 
