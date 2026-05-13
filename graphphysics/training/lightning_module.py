@@ -526,22 +526,37 @@ class LightningModule(L.LightningModule):
             # reset when changing trajectory
             self._reset_prediction_trajectory()
 
-        # predict
+        # predict rollout
         (
-            batch,
-            predicted_outputs,
+            batch_rollout,
+            predicted_outputs_rollout,
             target,
             self.last_pred_prediction,
             self.last_previous_data_pred_prediction,
         ) = self._make_prediction(
             batch, self.last_pred_prediction, self.last_previous_data_pred_prediction
         )
+        batch_rollout.x[:, self.model.output_index_start : self.model.output_index_end] = (predicted_outputs_rollout.detach())
         self._save_batch_to_xdmf(
-            batch,
+            batch_rollout,
             self.prediction_save_path,
             self._get_frame_savename(
                 batch,
                 self.current_pred_trajectory,
+            ),
+            timestep=self.timestep,
+        )
+
+        # predict 1-step
+        batch_1step, predicted_outputs_1step, _, _, _ = self._make_prediction(batch, None, None)
+        batch_1step.x[:, self.model.output_index_start : self.model.output_index_end] = (predicted_outputs_1step.detach())
+        self._save_batch_to_xdmf(
+            batch_1step,
+            self.prediction_save_path,
+            self._get_frame_savename(
+                batch,
+                self.current_pred_trajectory,
+                one_step=True
             ),
             timestep=self.timestep,
         )
@@ -573,7 +588,7 @@ class LightningModule(L.LightningModule):
         self.wandb_run_id = checkpoint.get("wandb_run_id", None)
 
     def _get_frame_savename(
-        self, batch: Batch, traj_idx: int, prefix: str = "graph"
+        self, batch: Batch, traj_idx: int, prefix: str = "graph", one_step: bool = False
     ) -> str:
         """
         Get the name of the trajectory to save (id if provided in attributes, index otherwise).
@@ -585,6 +600,9 @@ class LightningModule(L.LightningModule):
             str: The name of the trajectory to save (no extensions).
         """
         if hasattr(batch, "id") and batch.id[0] is not None:
-            return f"{prefix}_{batch.id[0]}"
+            name = f"{prefix}_{batch.id[0]}"
         else:
-            return f"{prefix}_{traj_idx}"
+            name = f"{prefix}_{traj_idx}"
+        if one_step:
+            name += "_1step"
+        return name

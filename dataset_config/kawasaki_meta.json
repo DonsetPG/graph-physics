@@ -36,13 +36,43 @@
           1
         ],
         "dtype": "float32"
+      },
+      "centerline_levelset": {
+        "type": "static",
+        "shape": [
+          19,
+          -1,
+          1
+        ],
+        "dtype": "float32"
+      },
+      "inscribed_radius": {
+        "type": "static",
+        "shape": [
+          19,
+          -1,
+          1
+        ],
+        "dtype": "float32"
+      },
+      "inlet_levelset": {
+        "type": "static",
+        "shape": [
+          19,
+          -1,
+          1
+        ],
+        "dtype": "float32"
       }
     },
     "field_names": [
       "cells",
       "mesh_pos",
       "Vitesse",
-      "node_type"
+      "node_type",
+      "centerline_levelset",
+      "inscribed_radius",
+      "inlet_levelset"
     ],
     "trajectory_length": 19
   }
