@@ -12,6 +12,15 @@ from torch_geometric.utils import to_undirected
 
 from graphphysics.utils.nodetype import NodeType
 
+WORLD_OBSTACLE_NODE_TYPES = (NodeType.OBSTACLE, NodeType.HANDLE)
+
+
+def _is_world_obstacle_node(node_type: torch.Tensor) -> torch.Tensor:
+    mask = torch.zeros_like(node_type, dtype=torch.bool)
+    for obstacle_type in WORLD_OBSTACLE_NODE_TYPES:
+        mask = torch.logical_or(mask, node_type == obstacle_type)
+    return mask
+
 
 def add_edge_features() -> List[Callable[[Data], Data]]:
     """
@@ -74,15 +83,19 @@ def add_obstacles_next_pos(
     # Compute obstacle displacement
     obstacle_displacement = target_world_pos - world_pos
 
-    # Get node types
-    # -3 because the index we gave will be the proper index after we added the
-    # dimensionals obstacle next pos
-    node_type = graph.x[:, node_type_index - 3]
+    # node_type_index is configured for the feature layout after inserting the
+    # obstacle displacement vector, so shift it back for the current layout.
+    world_pos_dim = world_pos_index_end - world_pos_index_start
+    node_type = graph.x[:, node_type_index - world_pos_dim]
 
-    # Create mask for nodes that are not obstacles
-    only_obstacle_displacement = obstacle_displacement[node_type == NodeType.OBSTACLE]
-    mean_obstacle_displacement = torch.mean(only_obstacle_displacement, dim=0)
-    obstacle_displacement[node_type != NodeType.OBSTACLE] = mean_obstacle_displacement
+    # Create mask for nodes driven by the rigid tool motion.
+    obstacle_mask = _is_world_obstacle_node(node_type)
+    if torch.any(obstacle_mask):
+        only_obstacle_displacement = obstacle_displacement[obstacle_mask]
+        mean_obstacle_displacement = torch.mean(only_obstacle_displacement, dim=0)
+        obstacle_displacement[~obstacle_mask] = mean_obstacle_displacement
+    else:
+        obstacle_displacement.zero_()
 
     # Update node features
     graph.x = torch.cat([world_pos, obstacle_displacement, other_features], dim=1)
@@ -119,17 +132,19 @@ def add_world_edges(
     world_pos = graph.x[:, world_pos_index_start:world_pos_index_end]
     added_edges = _close_pairs_ckdtree(world_pos, radius).to(graph.x.device)
 
-    type = graph.x[:, node_type_index]
+    node_type = graph.x[:, node_type_index]
+    source_type = node_type[added_edges[0]]
+    target_type = node_type[added_edges[1]]
 
-    m1 = torch.gather(type, -1, added_edges[0]) == NodeType.OBSTACLE
-    m2 = torch.gather(type, -1, added_edges[1]) == NodeType.NORMAL
-    mask1 = torch.logical_and(m1, m2)
+    source_is_obstacle = _is_world_obstacle_node(source_type)
+    target_is_obstacle = _is_world_obstacle_node(target_type)
+    source_is_normal = source_type == NodeType.NORMAL
+    target_is_normal = target_type == NodeType.NORMAL
 
-    m1 = torch.gather(type, -1, added_edges[0]) == NodeType.NORMAL
-    m2 = torch.gather(type, -1, added_edges[1]) == NodeType.OBSTACLE
-    mask2 = torch.logical_and(m1, m2)
-
-    mask = torch.logical_or(mask1, mask2)
+    mask = torch.logical_or(
+        torch.logical_and(source_is_obstacle, target_is_normal),
+        torch.logical_and(source_is_normal, target_is_obstacle),
+    )
 
     added_edges = added_edges[:, mask]
 
@@ -391,12 +406,14 @@ def build_preprocessing(
         T.Compose: A composition of graph transformations.
     """
     preprocessing: List[Callable[[Data], Data]] = []
+    initial_preprocessing_count = 0
 
     # Add extra node features functions at the beginning
     if extra_node_features is not None:
         if not isinstance(extra_node_features, list):
             extra_node_features = [extra_node_features]
         preprocessing.extend(extra_node_features)
+    initial_preprocessing_count = len(preprocessing)
 
     if world_pos_parameters is not None:
         preprocessing.extend(
@@ -413,7 +430,7 @@ def build_preprocessing(
                     world_pos_index_start=world_pos_parameters["world_pos_index_start"],
                     world_pos_index_end=world_pos_parameters["world_pos_index_end"],
                     node_type_index=world_pos_parameters["node_type_index"],
-                    radius=world_pos_parameters.get("radius", 0.03),
+                    radius=world_pos_parameters.get("radius", 8),
                 ),
             ]
         )
@@ -431,8 +448,14 @@ def build_preprocessing(
             noise_scale=noise_parameters["noise_scale"],
             node_type_index=noise_parameters["node_type_index"],
         )
-        # Insert after the first transform
-        preprocessing.insert(1, add_noise_transform)
+        # World-position preprocessing inserts obstacle displacement before the
+        # configured node_type_index, so noise must run after that expansion.
+        insert_index = (
+            initial_preprocessing_count + 1
+            if world_pos_parameters is not None
+            else 1
+        )
+        preprocessing.insert(insert_index, add_noise_transform)
 
     # Append extra edge features functions at the end
     if extra_edge_features is not None:

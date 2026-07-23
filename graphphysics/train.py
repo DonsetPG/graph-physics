@@ -12,7 +12,7 @@ from loguru import logger
 from torch_geometric.loader import DataLoader
 
 import wandb
-from graphphysics.external.aneurysm import build_features
+from graphphysics.external.spindle import build_features
 from graphphysics.training.callback import LogPyVistaPredictionsCallback
 from graphphysics.training.lightning_module import LightningModule
 from graphphysics.training.parse_parameters import (
@@ -48,12 +48,12 @@ flags.DEFINE_bool(
     "resume_training", False, "Whether to resume an unfinished training or not"
 )
 
-flags.DEFINE_bool("use_previous_data", True, "Whether to use previous data or not")
+flags.DEFINE_bool("use_previous_data", False, "Whether to use previous data or not")
 flags.DEFINE_integer(
-    "previous_data_start", 4, "Index of the start of the previous data in the features"
+    "previous_data_start", 6, "Index of the start of the previous data in the features"
 )
 flags.DEFINE_integer(
-    "previous_data_end", 7, "Index of the end of the previous data in the features"
+    "previous_data_end", 9, "Index of the end of the previous data in the features"
 )
 flags.DEFINE_bool("no_edge_feature", False, "Whether to use edge features")
 flags.DEFINE_string(
@@ -161,7 +161,7 @@ def main(argv):
 
     train_dataloader_kwargs = {
         "dataset": train_dataset,
-        "shuffle": True,
+        "shuffle": False,
         "batch_size": batch_size,
         "num_workers": num_workers,
         "exclude_keys": ["tetra"],
@@ -281,7 +281,7 @@ def main(argv):
         "callbacks": [
             ColabProgressBar(),
             checkpoint_callback,
-            LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
+            #LogPyVistaPredictionsCallback(dataset=val_dataset, indices=[1, 2, 3]),
             lr_monitor,
         ],
         "log_every_n_steps": 100,

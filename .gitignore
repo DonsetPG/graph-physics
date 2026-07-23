@@ -25,3 +25,5 @@ wandb_download/
 AGENTS.md
 .codex/
 venvjax/*
+
+dataset/

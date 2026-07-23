@@ -29,6 +29,7 @@ class BaseDataset(Dataset, ABC):
         new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
+        previous_data_count: int = 1,
         world_pos_parameters: Optional[dict] = None,
         use_partitioning: bool = False,
         num_partitions: Optional[int] = None,
@@ -53,6 +54,8 @@ class BaseDataset(Dataset, ABC):
         self.targets = targets
 
         self.trajectory_length: int = self.meta["trajectory_length"]
+        self.trajectory_lengths: Dict[int, int] = {}
+        self._has_indexed_trajectories = False
         self.num_trajectories: Optional[int] = None
         self.khop_edge_index_cache: Dict[int, torch.Tensor] = (
             {}
@@ -67,7 +70,11 @@ class BaseDataset(Dataset, ABC):
         self.new_edges_ratio = new_edges_ratio
         self.add_edge_features = add_edge_features
         self.use_previous_data = use_previous_data
+        self.previous_data_count = previous_data_count if use_previous_data else 0
         self.use_partitioning = use_partitioning
+
+        if self.previous_data_count < 0:
+            raise ValueError("previous_data_count must be non-negative.")
 
         if use_partitioning:
             if num_partitions is not None and max_nodes_per_partition is not None:
@@ -121,16 +128,20 @@ class BaseDataset(Dataset, ABC):
         # Use the number of partitions of this trajectory to find the right frame and subgraph
         frame_in_traj = local_index // num_partitions
         subgraph_idx = local_index % num_partitions
-        frame = frame_in_traj + int(self.use_previous_data)
+        frame = frame_in_traj + self.previous_data_count
         return traj_index, frame, subgraph_idx
 
-    def _add_traj_to_index_map(self, traj_index: int, num_nodes: int):
+    def _add_traj_to_index_map(
+        self, traj_index: int, num_nodes: int, trajectory_length: Optional[int] = None
+    ):
         """
         Adds a trajectory to the index map, updating the cumulative samples, partitions and dataset length.
 
         Parameters:
             traj_index (int): The index of the trajectory to add.
             num_nodes (int): The number of nodes in the trajectory.
+            trajectory_length (int, optional): Number of frames in this trajectory.
+                Falls back to the metadata trajectory length for fixed-length datasets.
         """
         if self.use_partitioning:
             if self.num_partitions is not None:
@@ -141,7 +152,23 @@ class BaseDataset(Dataset, ABC):
             num_partitions = 1
 
         self.partitions_per_trajectory[traj_index] = num_partitions
-        num_valid_frames = self.trajectory_length - int(self.use_previous_data)
+        traj_length = trajectory_length or self.trajectory_length
+        if traj_length < 2:
+            raise ValueError(
+                f"Trajectory {traj_index} must contain at least 2 frames, got {traj_length}."
+            )
+        self.trajectory_lengths[traj_index] = traj_length
+        if self._has_indexed_trajectories:
+            self.trajectory_length = max(self.trajectory_length, traj_length)
+        else:
+            self.trajectory_length = traj_length
+            self._has_indexed_trajectories = True
+        num_valid_frames = (traj_length - 1) - self.previous_data_count
+        if num_valid_frames <= 0:
+            raise ValueError(
+                f"Trajectory {traj_index} does not have enough frames for "
+                f"previous_data_count={self.previous_data_count}."
+            )
 
         total_samples_in_traj = num_valid_frames * num_partitions
         self._len_dataset += total_samples_in_traj

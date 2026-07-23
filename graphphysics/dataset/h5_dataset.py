@@ -32,6 +32,7 @@ class H5Dataset(BaseDataset):
         new_edges_ratio: float = 0,
         add_edge_features: bool = True,
         use_previous_data: bool = False,
+        previous_data_count: int = 1,
         world_pos_parameters: Optional[dict] = None,
         cache_size: int = 8,
         use_partitioning: bool = False,
@@ -47,6 +48,7 @@ class H5Dataset(BaseDataset):
             new_edges_ratio=new_edges_ratio,
             add_edge_features=add_edge_features,
             use_previous_data=use_previous_data,
+            previous_data_count=previous_data_count,
             world_pos_parameters=world_pos_parameters,
             use_partitioning=use_partitioning,
             num_partitions=num_partitions,
@@ -82,7 +84,14 @@ class H5Dataset(BaseDataset):
         handle = self._get_file_handle()
         for traj_index, traj_name in enumerate(self.datasets_index):
             num_nodes = handle[traj_name]["mesh_pos"].shape[-2]
-            self._add_traj_to_index_map(traj_index, num_nodes)
+            trajectory_length = self._infer_trajectory_length(handle[traj_name])
+            self._add_traj_to_index_map(traj_index, num_nodes, trajectory_length)
+
+    def _infer_trajectory_length(self, trajectory_group) -> int:
+        for target in self.targets:
+            if target in trajectory_group:
+                return trajectory_group[target].shape[0]
+        return trajectory_group["mesh_pos"].shape[0]
 
     def _close_file_handles(self):
         for handle in self._file_handles.values():
@@ -223,8 +232,12 @@ class H5Dataset(BaseDataset):
         )
 
         if self.use_previous_data:
-            previous_features = self._build_node_features(traj, frame - 1)
-            graph.previous_data = previous_features
+            previous_features_sequence = [
+                self._build_node_features(traj, frame - offset)
+                for offset in range(1, self.previous_data_count + 1)
+            ]
+            graph.previous_data = previous_features_sequence[0]
+            graph.previous_data_sequence = previous_features_sequence
 
         graph.traj_index = traj_index
 
